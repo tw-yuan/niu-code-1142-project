@@ -17,13 +17,27 @@ export interface TaskData {
 export interface StructuredOutput {
   title: string;
   assignment_summary: string;
+  explanation?: string;
   requirements_breakdown: string[];
   answer_outline: string[];
   generated_draft: string;
+  deliverables?: Deliverable[];
   references: Reference[];
   limitations: string[];
-  academic_integrity_notice: string;
-  human_review_checklist: string[];
+  academic_integrity_notice?: string;
+  human_review_checklist?: string[];
+}
+
+export interface Deliverable {
+  id: string;
+  file_id?: string;
+  title: string;
+  format: 'txt' | 'docx' | 'pdf' | 'xlsx' | string;
+  filename: string;
+  purpose: string;
+  content: string | Record<string, unknown> | unknown[];
+  status?: string;
+  error_message?: string;
 }
 
 export interface Reference {
@@ -46,6 +60,9 @@ export interface UploadedFileInfo {
 export interface GeneratedFileInfo {
   id: string;
   format: string;
+  title: string | null;
+  purpose: string | null;
+  filename: string | null;
   status: string;
   error_message: string | null;
 }

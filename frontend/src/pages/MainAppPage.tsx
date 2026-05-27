@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, History, LogOut, AlertTriangle } from 'lucide-react';
+import { Send, History, LogOut, AlertTriangle, FileText } from 'lucide-react';
 import { getMe, logout } from '../api/auth';
-import { createTask, uploadFile, getTask, createEventSource } from '../api/tasks';
+import { createTask, uploadFile, startTask, getTask, createEventSource } from '../api/tasks';
 import FileUploader from '../components/FileUploader';
-import OutputFormatSelector from '../components/OutputFormatSelector';
 import ProgressPanel from '../components/ProgressPanel';
 import DetailedProcessPanel from '../components/DetailedProcessPanel';
 import ResultViewer from '../components/ResultViewer';
@@ -13,6 +12,14 @@ import ErrorAlert from '../components/ErrorAlert';
 import LoadingIndicator from '../components/LoadingIndicator';
 import type { TaskData } from '../types/task';
 
+function getErrorDetail(err: unknown, fallback: string) {
+  if (typeof err === 'object' && err !== null && 'response' in err) {
+    const response = (err as { response?: { data?: { detail?: unknown } } }).response;
+    if (typeof response?.data?.detail === 'string') return response.data.detail;
+  }
+  return fallback;
+}
+
 export default function MainAppPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<{ user_id: string; display_name: string; role: string } | null>(null);
@@ -20,8 +27,6 @@ export default function MainAppPage() {
   const [courseMaterials, setCourseMaterials] = useState<File[]>([]);
   const [assignmentFiles, setAssignmentFiles] = useState<File[]>([]);
   const [assignmentText, setAssignmentText] = useState('');
-  const [outputFormats, setOutputFormats] = useState<string[]>(['txt', 'docx', 'pdf']);
-  const [integrityChecked, setIntegrityChecked] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -43,26 +48,18 @@ export default function MainAppPage() {
 
   const hasText = assignmentText.trim().length > 0;
   const hasFiles = assignmentFiles.length > 0;
-  const canSubmit = (hasText || hasFiles) && integrityChecked && outputFormats.length > 0;
+  const canSubmit = hasText || hasFiles;
 
   const handleSubmit = async () => {
     setError('');
     setWarning('');
 
     if (!hasText && !hasFiles) {
-      setError('請輸入作業敘述或上傳作業檔案（至少擇一）');
+      setError('請上傳作業檔案或輸入作業敘述（至少一項）');
       return;
     }
-    if (hasText && assignmentText.trim().length < 10) {
-      setError('作業敘述需至少 10 個字');
-      return;
-    }
-    if (!integrityChecked) {
-      setError('請先勾選學術誠信確認');
-      return;
-    }
-    if (outputFormats.length === 0) {
-      setError('請至少選擇一種輸出格式');
+    if (!hasFiles && hasText && assignmentText.trim().length < 10) {
+      setError('未上傳作業檔案時，作業敘述需至少 10 個字');
       return;
     }
 
@@ -71,7 +68,7 @@ export default function MainAppPage() {
     setProgressEvents([]);
 
     try {
-      const result = await createTask(assignmentText, outputFormats, hasFiles);
+      const result = await createTask(assignmentText, hasFiles);
       const taskId = result.task_id;
       if (result.warning) setWarning(result.warning);
 
@@ -82,8 +79,8 @@ export default function MainAppPage() {
       for (const { file, category } of allFiles) {
         await uploadFile(taskId, file, category);
       }
+      await startTask(taskId);
 
-      // Start SSE
       eventSourceRef.current?.close();
       const es = createEventSource(taskId);
       eventSourceRef.current = es;
@@ -101,7 +98,9 @@ export default function MainAppPage() {
             es.close();
             getTask(taskId).then(setCurrentTask);
           }
-        } catch {}
+        } catch {
+          return;
+        }
       };
 
       es.onerror = () => {
@@ -110,8 +109,8 @@ export default function MainAppPage() {
           getTask(taskId).then(setCurrentTask);
         }, 2000);
       };
-    } catch (err: any) {
-      setError(err.response?.data?.detail || '任務建立失敗');
+    } catch (err: unknown) {
+      setError(getErrorDetail(err, '任務建立失敗'));
     } finally {
       setSubmitting(false);
     }
@@ -123,7 +122,6 @@ export default function MainAppPage() {
     setCourseMaterials([]);
     setAssignmentFiles([]);
     setAssignmentText('');
-    setIntegrityChecked(false);
     setWarning('');
     setError('');
   };
@@ -223,43 +221,39 @@ export default function MainAppPage() {
               <div className="bg-white rounded-lg border p-6 space-y-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-800 mb-1">作業輸入</h2>
-                  <p className="text-sm text-gray-500">上傳作業檔案並輸入作業敘述</p>
+                  <p className="text-sm text-gray-500">上傳作業檔案、輸入作業敘述，至少提供一項；也可以兩者都提供</p>
                 </div>
 
                 <FileUploader
                   files={assignmentFiles}
                   onFilesChange={setAssignmentFiles}
-                  label="作業檔案上傳（可選）"
+                  label="作業檔案上傳"
                 />
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    作業敘述 <span className="text-red-500">*</span>
+                    作業敘述{!hasFiles && ' *'}
                   </label>
                   <textarea
                     value={assignmentText}
                     onChange={(e) => setAssignmentText(e.target.value)}
-                    placeholder="請輸入作業需求、題目說明或你希望 AI 協助的內容..."
+                    placeholder="請輸入作業需求、題目說明、格式規定、評分重點與希望 AI 協助的內容..."
                     rows={6}
                     className="w-full border rounded-lg px-4 py-3 text-sm resize-y focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none"
                   />
-                  <p className="text-xs text-gray-400 mt-1">{assignmentText.length} 字</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {assignmentText.length} 字
+                    {!hasText && !hasFiles && '（需輸入文字或上傳檔案，至少一項）'}
+                    {hasFiles && '（可補充文字說明，讓 AI 更清楚作業需求）'}
+                  </p>
                 </div>
 
-                <OutputFormatSelector selected={outputFormats} onChange={setOutputFormats} />
-
-                {/* Academic integrity checkbox */}
-                <label className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-4 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={integrityChecked}
-                    onChange={(e) => setIntegrityChecked(e.target.checked)}
-                    className="mt-1"
-                  />
-                  <span className="text-sm text-amber-700">
-                    我理解此輸出為 AI 輔助生成的草稿，需自行檢查、修改並遵守課程規範，不應直接提交作為作業。
-                  </span>
-                </label>
+                <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <FileText className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <p className="text-sm text-blue-700">
+                    AI 會依作業內容決定要產生的檔案，例如 PDF 繳交版、DOCX 編輯版、TXT 說明或 XLSX 表格。
+                  </p>
+                </div>
 
                 <button
                   onClick={handleSubmit}

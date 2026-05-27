@@ -17,3 +17,18 @@ def get_generated_path(task_id: str, fmt: str) -> Path:
     path = GENERATED_FILE_DIR / task_id / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_named_generated_path(task_id: str, filename: str, fmt: str) -> Path:
+    safe_stem = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_"
+        for ch in Path(filename).stem.strip()
+    ).strip("_")
+    if not safe_stem:
+        safe_stem = "output"
+
+    safe_fmt = fmt.lower().lstrip(".")
+    stored_name = f"{safe_stem}-{uuid.uuid4().hex[:8]}.{safe_fmt}"
+    path = GENERATED_FILE_DIR / task_id / stored_name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path

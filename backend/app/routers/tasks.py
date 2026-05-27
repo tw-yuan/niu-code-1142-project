@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 class CreateTaskRequest(BaseModel):
     assignment_text: str = ""
-    output_formats: list[str]
+    output_formats: list[str] = []
     has_assignment_files: bool = False
 
 
@@ -47,44 +47,83 @@ class TaskResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def _deliverable_by_file_id(task: Task, file_id: str) -> dict:
+    structured = task.structured_output_json or {}
+    deliverables = structured.get("deliverables", []) if isinstance(structured, dict) else []
+    if not isinstance(deliverables, list):
+        return {}
+    for item in deliverables:
+        if isinstance(item, dict) and item.get("file_id") == file_id:
+            return item
+    return {}
+
+
 @router.post("", response_model=dict)
 async def create_task(
     req: CreateTaskRequest,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
     has_text = bool(req.assignment_text and req.assignment_text.strip())
     if not has_text and not req.has_assignment_files:
-        raise HTTPException(status_code=400, detail="請輸入作業敘述或上傳作業檔案（至少擇一）")
+        raise HTTPException(status_code=400, detail="請上傳作業檔案或輸入作業敘述（至少一項）")
 
     warning_kw = None
     if has_text:
-        valid, warning_kw = check_assignment_text(req.assignment_text)
+        valid, warning_kw = check_assignment_text(req.assignment_text, req.has_assignment_files)
         if not valid:
             raise HTTPException(status_code=400, detail=warning_kw)
-
-    valid_formats = {"txt", "docx", "pdf", "xlsx"}
-    formats = [f for f in req.output_formats if f in valid_formats]
-    if not formats:
-        formats = ["txt"]
 
     task = Task(
         user_id=session.user_id,
         assignment_text=req.assignment_text,
-        output_formats=formats,
+        output_formats=[],
         status="pending",
     )
     db.add(task)
     await db.commit()
     await db.refresh(task)
 
-    background_tasks.add_task(run_task, task.id)
-
     response = {"task_id": task.id, "status": "pending"}
     if warning_kw:
         response["warning"] = f"偵測到可能不當意圖關鍵字「{warning_kw}」，系統將改為提供學習輔助版本。"
     return response
+
+
+@router.post("/{task_id}/start")
+async def start_task(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.user_id == session.user_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+    if task.status != "pending":
+        raise HTTPException(status_code=400, detail="任務已啟動，無法重複開始")
+
+    files_result = await db.execute(
+        select(UploadedFileModel).where(
+            UploadedFileModel.task_id == task_id,
+            UploadedFileModel.file_category == "assignment_file",
+        )
+    )
+    assignment_files = list(files_result.scalars().all())
+    has_text = bool(task.assignment_text and task.assignment_text.strip())
+    has_assignment_files = len(assignment_files) > 0
+
+    if not has_text and not has_assignment_files:
+        raise HTTPException(status_code=400, detail="請先上傳作業檔案或輸入作業敘述（至少一項）")
+
+    task.status = "processing"
+    await db.commit()
+
+    background_tasks.add_task(run_task, task.id)
+    return {"task_id": task.id, "status": "processing"}
 
 
 @router.post("/{task_id}/files")
@@ -101,6 +140,8 @@ async def upload_file(
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="任務不存在")
+    if task.status != "pending":
+        raise HTTPException(status_code=400, detail="任務已啟動，無法再上傳檔案")
 
     if file_category not in ("course_material", "assignment_file"):
         raise HTTPException(status_code=400, detail="無效的檔案類別")
@@ -188,6 +229,9 @@ async def get_task(
             {
                 "id": g.id,
                 "format": g.format,
+                "title": _deliverable_by_file_id(task, g.id).get("title"),
+                "purpose": _deliverable_by_file_id(task, g.id).get("purpose"),
+                "filename": _deliverable_by_file_id(task, g.id).get("filename"),
                 "status": g.status,
                 "error_message": g.error_message,
             }
@@ -298,14 +342,18 @@ async def download_file(
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
 
-    title = "output"
-    if task.structured_output_json and task.structured_output_json.get("title"):
-        title = task.structured_output_json["title"][:50]
+    deliverable = _deliverable_by_file_id(task, gen_file.id)
+    filename = deliverable.get("filename")
+    if not filename:
+        title = "output"
+        if task.structured_output_json and task.structured_output_json.get("title"):
+            title = task.structured_output_json["title"][:50]
+        filename = f"{title}.{gen_file.format}"
 
     return FileResponse(
         path=str(file_path),
         media_type=media_types.get(gen_file.format, "application/octet-stream"),
-        filename=f"{title}.{gen_file.format}",
+        filename=filename,
     )
 
 

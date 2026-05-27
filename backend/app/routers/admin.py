@@ -8,7 +8,7 @@ from app.dependencies import require_admin
 from app.models.session import Session
 from app.models.system_setting import SystemSetting
 from app.models.system_setting_history import SystemSettingHistory
-from app.services.ai_service import test_api_connection, get_ai_config
+from app.services.ai_service import DEFAULT_SYSTEM_PROMPT, test_api_connection, get_ai_config
 from app.utils.security import mask_secret
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -21,7 +21,6 @@ DEFAULT_SETTINGS = {
     "max_tokens": {"label": "Max Tokens", "secret": False},
     "system_prompt": {"label": "系統提示詞", "secret": False},
     "max_file_size_mb": {"label": "檔案大小限制 (MB)", "secret": False},
-    "enabled_output_formats": {"label": "啟用的輸出格式", "secret": False},
 }
 
 
@@ -48,7 +47,12 @@ async def get_settings(
         )
         setting = result.scalar_one_or_none()
 
-        value = setting.value if setting else ""
+        if setting:
+            value = setting.value
+        elif key == "system_prompt":
+            value = DEFAULT_SYSTEM_PROMPT
+        else:
+            value = ""
         display_value = mask_secret(value) if meta["secret"] and value else value
 
         items.append(SettingItem(

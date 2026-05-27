@@ -1,7 +1,10 @@
 import api from './client';
 
-export async function createTask(assignmentText: string, outputFormats: string[]) {
-  const res = await api.post('/tasks', { assignment_text: assignmentText, output_formats: outputFormats });
+export async function createTask(assignmentText: string, hasAssignmentFiles: boolean = false) {
+  const res = await api.post('/tasks', {
+    assignment_text: assignmentText,
+    has_assignment_files: hasAssignmentFiles,
+  });
   return res.data;
 }
 
@@ -10,6 +13,11 @@ export async function uploadFile(taskId: string, file: File, category: string) {
   form.append('file', file);
   form.append('file_category', category);
   const res = await api.post(`/tasks/${taskId}/files`, form);
+  return res.data;
+}
+
+export async function startTask(taskId: string) {
+  const res = await api.post(`/tasks/${taskId}/start`);
   return res.data;
 }
 

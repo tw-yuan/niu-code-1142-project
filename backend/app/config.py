@@ -23,15 +23,3 @@ MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 SESSION_EXPIRE_MINUTES = int(os.getenv("SESSION_EXPIRE_MINUTES", "480"))
-
-ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".xlsx", ".csv"}
-ALLOWED_MIME_TYPES = {
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "text/plain",
-    "text/markdown",
-    "text/x-markdown",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/csv",
-    "application/octet-stream",
-}

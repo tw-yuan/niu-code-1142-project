@@ -2,10 +2,147 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-from app.utils.file_utils import get_generated_path
+from app.utils.file_utils import get_generated_path, get_named_generated_path
 
 
 ACADEMIC_NOTICE = "此內容由 AI 輔助生成，僅供參考與學習用途。使用者必須自行檢查、修改並確認內容的正確性，不應直接提交作為作業。所有引用來源需自行驗證。"
+
+
+def _deliverable_text(deliverable: dict) -> str:
+    content = deliverable.get("content", "")
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False, indent=2)
+
+
+def _deliverable_title(deliverable: dict) -> str:
+    return str(deliverable.get("title") or deliverable.get("filename") or "AI 產生檔案")
+
+
+def _deliverable_filename(deliverable: dict, fmt: str) -> str:
+    filename = str(deliverable.get("filename") or _deliverable_title(deliverable))
+    if not filename.lower().endswith(f".{fmt}"):
+        filename = f"{Path(filename).stem}.{fmt}"
+    return filename
+
+
+def export_deliverable(task_id: str, deliverable: dict) -> str:
+    fmt = str(deliverable.get("format", "")).lower().lstrip(".")
+    if fmt == "txt":
+        return export_deliverable_txt(task_id, deliverable)
+    if fmt == "docx":
+        return export_deliverable_docx(task_id, deliverable)
+    if fmt == "pdf":
+        return export_deliverable_pdf(task_id, deliverable)
+    if fmt == "xlsx":
+        return export_deliverable_xlsx(task_id, deliverable)
+    raise ValueError(f"不支援的輸出格式：{fmt}")
+
+
+def export_deliverable_txt(task_id: str, deliverable: dict) -> str:
+    fmt = "txt"
+    path = get_named_generated_path(task_id, _deliverable_filename(deliverable, fmt), fmt)
+    path.write_text(_deliverable_text(deliverable), encoding="utf-8")
+    return str(path)
+
+
+def export_deliverable_docx(task_id: str, deliverable: dict) -> str:
+    from docx import Document
+    from docx.shared import Pt
+
+    fmt = "docx"
+    path = get_named_generated_path(task_id, _deliverable_filename(deliverable, fmt), fmt)
+    doc = Document()
+
+    style = doc.styles["Normal"]
+    style.font.size = Pt(12)
+    style.font.name = "Arial"
+
+    doc.add_heading(_deliverable_title(deliverable), level=0)
+    for paragraph in _deliverable_text(deliverable).split("\n"):
+        if paragraph.strip():
+            doc.add_paragraph(paragraph)
+
+    doc.save(str(path))
+    return str(path)
+
+
+def export_deliverable_pdf(task_id: str, deliverable: dict) -> str:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    fmt = "pdf"
+    path = get_named_generated_path(task_id, _deliverable_filename(deliverable, fmt), fmt)
+
+    font_registered = False
+    for font_path in [
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    ]:
+        if Path(font_path).exists():
+            try:
+                pdfmetrics.registerFont(TTFont("NotoSansCJK", font_path, subfontIndex=0))
+                font_registered = True
+                break
+            except Exception:
+                continue
+
+    font_name = "NotoSansCJK" if font_registered else "Helvetica"
+    doc = SimpleDocTemplate(
+        str(path),
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CJKTitle", fontName=font_name, fontSize=18, leading=24, spaceAfter=12))
+    styles.add(ParagraphStyle(name="CJKBody", fontName=font_name, fontSize=11, leading=16, spaceAfter=6))
+
+    story = [Paragraph(_deliverable_title(deliverable), styles["CJKTitle"]), Spacer(1, 4 * mm)]
+    for paragraph in _deliverable_text(deliverable).split("\n"):
+        if paragraph.strip():
+            story.append(Paragraph(paragraph, styles["CJKBody"]))
+
+    doc.build(story)
+    return str(path)
+
+
+def export_deliverable_xlsx(task_id: str, deliverable: dict) -> str:
+    from openpyxl import Workbook
+
+    fmt = "xlsx"
+    path = get_named_generated_path(task_id, _deliverable_filename(deliverable, fmt), fmt)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Content"
+
+    content = deliverable.get("content", "")
+    if isinstance(content, list):
+        for row in content:
+            if isinstance(row, list):
+                ws.append(row)
+            elif isinstance(row, dict):
+                ws.append(list(row.values()))
+            else:
+                ws.append([str(row)])
+    elif isinstance(content, dict):
+        for key, value in content.items():
+            ws.append([key, json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value])
+    else:
+        for line in str(content).split("\n"):
+            ws.append([line])
+
+    ws.column_dimensions["A"].width = 100
+    wb.save(str(path))
+    return str(path)
 
 
 def export_txt(task_id: str, structured: dict) -> str:

@@ -6,29 +6,29 @@
 AI 課業輔助與作業草稿生成系統
 
 ### 1.2 One-line Description
-一個以 Python FastAPI 為後端、串接 OpenAI-compatible API 的期末專題 Web 系統，讓使用者上傳課程資料與作業需求，由 AI 產生可檢視處理過程、可引用來源、可下載成多種格式的課業輔助草稿。
+一個以 Python FastAPI 為後端、串接 OpenAI-compatible API 的期末專題 Web 系統，讓使用者上傳課程資料與作業需求，由 AI 提供講解並自行決定要產生哪些可下載交付檔案。
 
 ### 1.3 Background / Problem
 學生在處理期末報告、程式作業、數據分析作業、閱讀心得或混合型作業時，通常需要同時整理講義、理解作業要求、規劃回答架構、產生初稿、轉換輸出格式。本專案希望展示一個 AI 輔助型網頁系統，讓使用者能集中上傳課程資料與作業需求，並由 AI 產生結構化草稿、解題輔助、引用來源與可下載文件。
 
-本專案應定位為「課業輔助、草稿生成、學習整理與人工審核工具」，而不是「全自動代寫作業系統」。系統輸出需包含學術誠信聲明、人工確認步驟、引用來源與自我檢查清單。
+本專案定位為小範圍課程實驗 Demo，用來展示檔案上傳、圖片判讀、AI 內容生成、文件輸出與下載流程；系統不自動送交外部平台。
 
 ### 1.4 Business / Product Goals
 - 完成一個可在期末專題中展示的 AI Web App Demo。
 - 展示 Python 後端、前端介面、檔案解析、AI API 串接、即時進度、文件輸出等整合能力。
 - 支援使用者上傳課程資料與作業需求，產生結構化作業草稿或解題輔助內容。
 - 支援 PDF、Word、Excel、純文字等多格式輸出。
-- 提供可檢視的處理流程、來源引用與人工確認機制。
+- 提供可檢視的處理流程、來源引用與 AI 決定的交付檔案。
 
 ### 1.5 Success Metrics
 - 使用者能在通過驗證後成功進入主系統。
-- 使用者能成功上傳支援格式的課程資料與作業檔案。
+- 使用者能成功上傳課程資料與作業檔案，不以副檔名或 MIME type 限制格式。
 - 使用者能手動輸入作業敘述並送出任務。
 - 系統能顯示即時處理進度與詳細處理紀錄。
 - 系統能成功呼叫 OpenAI-compatible API 並回傳結果。
-- 系統能產生至少三種輸出格式：純文字、DOCX、PDF。
+- 系統能依 AI 回傳的 deliverables 產生 PDF、DOCX、TXT 或 XLSX。
 - 系統能在 Demo 情境中穩定完成至少 3 種作業類型測試。
-- 系統輸出包含學術誠信提醒、引用來源與人工確認清單。
+- 系統輸出包含 AI 講解、引用來源、限制說明與下載連結。
 
 ---
 
@@ -52,17 +52,17 @@ AI 課業輔助與作業草稿生成系統
   - 上傳課程資料。
   - 上傳作業檔案。
   - 輸入作業敘述。
-  - 選擇輸出格式。
+  - 查看 AI 決定的輸出檔案。
   - 查看處理進度。
   - 查看詳細過程。
   - 下載或複製結果。
 
 #### Persona 2: Demo Evaluator / Teacher
-- Description: 評分老師或專題展示觀眾，用來檢查系統功能完整性、技術整合能力與倫理設計。
+- Description: 評分老師或專題展示觀眾，用來檢查系統功能完整性與技術整合能力。
 - Goals:
   - 看到系統從輸入到輸出的完整流程。
   - 確認 AI 串接與文件輸出可正常運作。
-  - 確認系統有安全限制與學術誠信設計。
+  - 確認系統不會自動送交外部平台。
 - Pain Points:
   - 若系統只是簡單呼叫 AI，專題深度不足。
   - 若系統看不到處理過程，難以評估技術含量。
@@ -92,7 +92,7 @@ AI 課業輔助與作業草稿生成系統
 | Role | Can Do | Cannot Do | Notes |
 |---|---|---|---|
 | Guest | 查看登入頁、輸入密碼或登入帳號 | 使用主系統、查看任務紀錄、存取檔案 | 未驗證前不可進入系統 |
-| Student User | 上傳檔案、輸入作業敘述、選擇輸出格式、建立 AI 任務、查看自己的任務結果 | 修改系統 API 設定、查看其他使用者任務 | MVP 可用共用密碼；正式版使用 OAuth / 帳號登入 |
+| Student User | 上傳檔案、輸入作業敘述、建立 AI 任務、查看自己的任務結果與下載檔案 | 修改系統 API 設定、查看其他使用者任務 | MVP 可用共用密碼；正式版使用 OAuth / 帳號登入 |
 | Admin User | 管理 API endpoint、模型名稱、系統提示詞、檔案限制、任務紀錄 | 直接查看不屬於管理目的的敏感內容 | 後台操作需更高權限 |
 | Demo Evaluator | 使用測試資料體驗完整流程 | 修改 API Key 或刪除資料 | 可使用測試帳號或測試密碼 |
 
@@ -106,8 +106,8 @@ AI 課業輔助與作業草稿生成系統
 - 密碼驗證或簡化登入頁。
 - 主系統頁面採左右分欄：
   - 左側：課程相關資料上傳區，可選。
-  - 右側：作業檔案上傳區與作業敘述文字輸入區。
-- 支援上傳格式：PDF、DOCX、TXT、MD、XLSX、CSV。
+  - 右側：作業檔案上傳區與作業敘述文字輸入區，至少提供一項，也可同時提供。
+- 上傳檔案不限制格式；PDF、DOCX、TXT、MD、XLSX、CSV、PNG、JPG、WEBP 會嘗試解析，其他格式保留 metadata。
 - 支援輸出格式：PDF、DOCX、XLSX、純文字顯示。
 - 串接 OpenAI-compatible API，預設支援可自訂 base URL、API Key、model name。
 - 顯示即時處理進度。
@@ -115,9 +115,9 @@ AI 課業輔助與作業草稿生成系統
 - 顯示引用來源與資料使用摘要。
 - 完成後顯示 AI 結果、複製按鈕與下載連結。
 - 儲存歷史紀錄，包括任務輸入摘要、輸出結果、檔案下載路徑與建立時間。
-- 管理後台，可設定 API endpoint、模型名稱、系統提示詞、檔案大小限制與啟用輸出格式。
+- 管理後台，可設定 API endpoint、模型名稱、系統提示詞與檔案大小限制。
 - 基本錯誤處理與防呆提示。
-- 學術誠信聲明與人工確認清單。
+- AI 決定 deliverables 並由後端產生下載檔。
 
 ### 3.2 Out of Scope
 第一版明確不做的事項：
@@ -129,7 +129,7 @@ AI 課業輔助與作業草稿生成系統
 - 付款功能。
 - 手機 App。
 - 即時多人協作編輯。
-- 對大型影片、音訊或圖片作業進行完整解析。
+- 對大型影片、音訊或掃描 PDF 進行完整解析。
 - 使用者之間共享作業結果。
 
 ### 3.3 Future Scope
@@ -139,7 +139,7 @@ AI 課業輔助與作業草稿生成系統
 - 使用者分級與管理員邀請機制。
 - 任務歷史搜尋、篩選與標籤。
 - RAG 向量檢索，支援大量課程資料。
-- 上傳圖片或掃描檔 OCR。
+- 掃描檔 OCR。
 - 更多輸出模板，例如報告格式、簡報大綱、研究摘要、程式碼說明。
 - 引用格式選擇，例如 APA、MLA、IEEE。
 - 作業自我評分 rubric。
@@ -184,28 +184,26 @@ As a Student User, I want to upload course materials and assignment requirements
 #### Flow
 1. 使用者進入主系統。
 2. 左側上傳課程資料，可選。
-3. 右側上傳作業檔案，可選。
-4. 使用者在文字框輸入作業敘述，必填。
-5. 使用者選擇輸出格式。
-6. 使用者勾選「我理解此輸出需自行檢查與修改，不應直接提交」。
-7. 使用者按下「開始生成」。
-8. 系統建立任務紀錄（Task）。
-9. 系統將使用者已選擇的檔案上傳至後端，關聯至該 Task。
-10. 系統進入檔案解析、需求分析、內容生成、格式輸出流程。
+3. 右側上傳作業檔案、在文字框輸入作業敘述，至少提供一項，也可同時提供。
+4. 使用者按下「開始生成」。
+5. 系統建立任務紀錄（Task）。
+6. 系統將使用者已選擇的檔案上傳至後端，關聯至該 Task。
+7. 系統進入檔案解析、需求分析、內容生成、格式輸出流程。
 
 #### Edge Cases
-- 使用者未輸入作業敘述。
+- 使用者未提供作業檔案與作業敘述。
+- 使用者同時提供作業檔案與作業敘述。
 - 使用者未上傳任何檔案，但有輸入文字。
-- 檔案格式不支援。
+- 檔案無法解析內容，只能保留 metadata。
 - 檔案大小超過限制。
 - 上傳檔案解析失敗。
 - API Key 錯誤。
 - API timeout。
 
 #### Acceptance Criteria
-- [ ] 使用者至少需要輸入作業敘述才可送出。
+- [ ] 使用者需要提供作業檔案或作業敘述至少一項才可送出。
 - [ ] 系統支援無課程資料但有文字作業敘述的情境。
-- [ ] 系統會拒絕不支援格式並顯示原因。
+- [ ] 系統不因格式拒絕檔案；無法解析的格式會保留檔名、格式與大小。
 - [ ] 任務建立後會顯示進度。
 - [ ] 任務完成後會顯示結果與下載連結。
 
@@ -261,10 +259,8 @@ As a Student User, I want to download or copy the AI-generated result, so that I
 
 #### Flow
 1. 任務完成後，系統顯示 AI 生成結果。
-2. 若使用者選擇純文字，系統顯示可複製文字區塊。
-3. 若使用者選擇 PDF、DOCX 或 XLSX，系統顯示下載按鈕。
-4. 系統在結果上方顯示學術誠信提醒。
-5. 系統在結果下方顯示人工確認清單。
+2. 系統顯示 AI 講解與 AI 決定的交付檔案清單。
+3. 若 AI 回傳 PDF、DOCX、TXT 或 XLSX deliverable，系統顯示對應下載按鈕。
 
 #### Edge Cases
 - 文件產生失敗但文字結果成功。
@@ -274,7 +270,7 @@ As a Student User, I want to download or copy the AI-generated result, so that I
 #### Acceptance Criteria
 - [ ] 使用者能複製純文字結果。
 - [ ] 使用者能下載所選格式文件。
-- [ ] 文件內容需包含標題、作業需求摘要、生成內容、引用來源、人工確認清單。
+- [ ] 文件內容需符合 AI 回傳的 deliverable content。
 - [ ] 如果某格式產生失敗，系統應保留文字結果並提示重新產生文件。
 
 ---
@@ -367,7 +363,7 @@ As an Admin User, I want to configure API and system settings, so that the appli
 
 #### Functional Requirements
 - 支援多檔上傳。
-- 支援格式：PDF、DOCX、TXT、MD、XLSX、CSV。
+- 不限制檔案格式；PDF、DOCX、TXT、MD、XLSX、CSV、PNG、JPG、WEBP 會嘗試解析，其他格式保留 metadata。
 - 顯示每個檔案名稱、大小、狀態。
 - 可移除已選檔案。
 - 檔案為可選，不是必填。
@@ -376,8 +372,9 @@ As an Admin User, I want to configure API and system settings, so that the appli
 #### UI Requirements
 - 左側標題：「課程資料，可選」。
 - 拖放上傳區。
+- 點選上傳區後支援 `Ctrl+V` 貼上剪貼簿檔案或圖片。
 - 檔案清單。
-- 格式與大小限制說明。
+- 上傳格式與大小限制說明。
 
 #### Data Requirements
 - file_id
@@ -392,7 +389,7 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - created_at
 
 #### Business Rules
-- 不支援格式不得送出。
+- 不因格式拒絕送出；未知格式不得執行內容，只保留 metadata。
 - 單檔大小限制預設 10MB，可由 Admin 調整。
 - 檔案解析失敗不一定中止整個任務，但需顯示警告。
 
@@ -401,9 +398,9 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - 解析失敗：顯示「此檔案無法解析，已略過」。
 
 #### Acceptance Criteria
-- [ ] 使用者能上傳支援格式檔案。
+- [ ] 使用者能上傳任意格式檔案。
 - [ ] 系統能顯示上傳檔案清單。
-- [ ] 系統能拒絕不支援格式。
+- [ ] 未知格式會保留 metadata，不會因格式被拒絕。
 - [ ] 任務詳細過程會列出成功解析與失敗解析的檔案。
 
 ---
@@ -411,22 +408,23 @@ As an Admin User, I want to configure API and system settings, so that the appli
 ### Feature 3: Assignment Input Panel
 
 #### Description
-右側區塊提供作業檔案上傳與手動文字輸入，兩者可並用。文字輸入為必填，避免 AI 不知道任務目標。
+右側區塊提供作業檔案上傳與手動文字輸入，兩者至少提供一項。使用者可以只上傳作業題目檔案、只輸入作業敘述，或同時提供檔案與補充文字。
 
 #### User Roles
 - Student User
 
 #### Functional Requirements
 - 支援作業檔案上傳。
-- 支援格式：PDF、DOCX、TXT、MD、XLSX、CSV。
+- 不限制作業檔案格式；可解析的檔案抽取內容，其他格式保留 metadata。
 - 提供作業敘述文字框。
-- 作業敘述為必填。
+- 作業檔案與作業敘述至少提供一項。
+- 若選擇作業敘述，文字需至少 10 個字。
 - 送出前做前端與後端驗證。
 
 #### UI Requirements
 - 右側上方：作業檔案上傳框。
 - 右側中段：作業敘述文字輸入框。
-- 右側下方：輸出格式選擇與生成按鈕。
+- 右側下方：AI 決定輸出檔案提示與生成按鈕。
 - 顯示字數或 token 估計。
 
 #### Data Requirements
@@ -436,25 +434,27 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - created_at
 
 #### Business Rules
-- 作業敘述不可空白。
-- 作業敘述需至少 10 個字。
-- 若作業敘述包含「幫我直接提交」、「繞過偵測」等不當意圖，系統應顯示警告並改為提供學習輔助版本。
+- 作業檔案與作業敘述可以同時提供。
+- 作業檔案與作業敘述不可同時空白。
+- 作業敘述模式下，作業敘述需至少 10 個字。
+- 若作業敘述包含「繞過偵測」等不當意圖，系統應顯示警告並改為一般輸出。
 
 #### Error / Empty States
-- 文字空白：顯示「請輸入作業需求或題目說明」。
+- 兩者皆空：顯示「請上傳作業檔案或輸入作業敘述（至少一項）」。
 - 檔案解析失敗：允許只用文字輸入繼續。
 
 #### Acceptance Criteria
-- [ ] 沒有作業敘述不可送出。
+- [ ] 未提供作業檔案與作業敘述時不可送出。
+- [ ] 同時提供作業檔案與作業敘述時可以送出。
 - [ ] 有作業敘述但無檔案可以送出。
 - [ ] 上傳作業檔案後能被解析並納入任務。
 
 ---
 
-### Feature 4: Output Format Selection
+### Feature 4: AI-decided Deliverable Files
 
 #### Description
-使用者可選擇輸出格式，系統完成後產生對應結果。
+AI 依作業內容決定輸出格式，系統完成後只產生 AI 列出的交付檔案。
 
 #### User Roles
 - Student User
@@ -464,29 +464,28 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - 支援 DOCX 下載。
 - 支援 PDF 下載。
 - 支援 XLSX 下載。
-- 可一次選擇多種格式，或在完成後產生其他格式。
-- Excel 輸出需適合表格型內容，若非表格內容則以多 sheet 方式輸出：Summary、Answer、References、Checklist。
+- 可由 AI 一次決定多份不同用途的交付檔案。
+- 每份 deliverable 都需包含格式、檔名、用途與完整內容。
 
 #### UI Requirements
-- checkbox 或 multi-select。
-- 預設選取：純文字、DOCX、PDF。
-- XLSX 顯示提示：「適合表格或資料分析型作業」。
+- 顯示「AI 會依內容決定輸出檔案」提示。
+- 結果頁顯示每份交付檔案的用途、格式、檔名與下載連結。
 
 #### Data Requirements
-- output_formats
+- deliverables
 - generated_file_paths
-- generation_status_by_format
+- generation_status_by_deliverable
 
 #### Business Rules
-- 純文字結果為基礎輸出，其他格式從純文字或結構化 JSON 轉換。
-- 如果 PDF / DOCX / XLSX 失敗，不影響純文字結果顯示。
+- 只有 AI 回傳的 `deliverables` 會被產生為下載檔。
+- 如果某個 deliverable 產生失敗，不影響畫面講解與其他檔案。
 
 #### Error / Empty States
 - 文件產生失敗：顯示「內容已生成，但文件轉換失敗，可下載其他格式或重新產生」。
 
 #### Acceptance Criteria
-- [ ] 使用者能選擇輸出格式。
-- [ ] 任務完成後能取得對應格式。
+- [ ] 使用者不需選擇輸出格式。
+- [ ] 任務完成後能取得 AI 決定產生的檔案。
 - [ ] 文件產生失敗時有清楚錯誤提示。
 
 ---
@@ -508,11 +507,11 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - 將輸出要求拆成結構化格式：
   - title
   - assignment_summary
-  - generated_answer
+  - explanation
+  - generated_draft
+  - deliverables
   - references
   - limitations
-  - academic_integrity_notice
-  - human_review_checklist
 - 對上傳資料做長度控制與摘要。
 - 若內容過長，需先摘要再生成。
 
@@ -537,7 +536,7 @@ As an Admin User, I want to configure API and system settings, so that the appli
 - API Key 必須由後端環境變數或後台安全設定管理。
 - 不可把 API Key 傳到前端。
 - 模型輸出不得聲稱完全正確。
-- 若使用者要求直接提交或規避偵測，系統需改寫為學習輔助輸出。
+- 若使用者要求規避偵測，系統需拒絕該部分並改為一般輸出。
 
 #### Error / Empty States
 - API timeout。
@@ -549,7 +548,7 @@ As an Admin User, I want to configure API and system settings, so that the appli
 #### Acceptance Criteria
 - [ ] 系統能成功呼叫 OpenAI-compatible API。
 - [ ] 系統能處理 API 錯誤並顯示可理解訊息。
-- [ ] 輸出包含引用來源、限制與人工確認清單。
+- [ ] 輸出包含 AI 講解、deliverables、引用來源與限制。
 
 ---
 
@@ -703,12 +702,12 @@ As an Admin User, I want to configure API and system settings, so that the appli
 |---|---|---|---|
 | Student Login Page | 學生驗證 | 密碼框、登入按鈕、錯誤訊息 | Guest |
 | Admin Login Page | 管理者驗證 | 密碼框、登入按鈕、錯誤訊息 | Guest |
-| Main App Page | 建立 AI 任務 | 左側課程資料上傳、右側作業檔案上傳、文字輸入、格式選擇、生成按鈕 | Student User |
+| Main App Page | 建立 AI 任務 | 左側課程資料上傳、右側作業檔案上傳、文字輸入、AI 決定輸出提示、生成按鈕 | Student User |
 | Progress Panel | 顯示任務進度 | 進度條、階段列表、詳細過程按鈕 | Student User |
 | Detail Process View | 顯示可公開處理紀錄 | 檔案解析摘要、需求拆解、大綱、引用來源、警告 | Student User |
-| Result Page / Result Panel | 顯示輸出結果 | 結果文字、複製按鈕、下載連結、人工確認清單 | Student User |
+| Result Page / Result Panel | 顯示輸出結果 | AI 講解、複製按鈕、交付檔案用途、下載連結 | Student User |
 | History Page | 查看歷史任務 | 任務列表、狀態、查看結果、下載 | Student User / Admin |
-| Admin Settings Page | 管理系統設定 | API 設定、模型設定、提示詞、檔案限制、輸出格式 | Admin User |
+| Admin Settings Page | 管理系統設定 | API 設定、模型設定、提示詞、檔案限制 | Admin User |
 | Error Page | 顯示例外情境 | 錯誤說明、返回按鈕、重試按鈕 | All |
 
 ---
@@ -746,7 +745,7 @@ As an Admin User, I want to configure API and system settings, so that the appli
 | id | uuid | Yes | Task identifier |
 | user_id | uuid | No | Task owner |
 | assignment_text | text | Yes | User-provided assignment description |
-| output_formats | json | Yes | Selected output formats |
+| output_formats | json | Yes | AI decided output formats, derived from deliverables |
 | status | enum | Yes | pending / processing / completed / failed |
 | input_summary | text | No | Summary of parsed input |
 | output_text | text | No | AI generated result |
@@ -865,16 +864,14 @@ As an Admin User, I want to configure API and system settings, so that the appli
 ## 9. AI-related Requirements
 
 ### 9.1 AI Use Case
-AI 負責將使用者提供的作業敘述、作業檔案與課程資料整理成可讀、可修改、可引用來源的作業輔助草稿。AI 不應被描述為保證正確的自動代寫者，而是草稿與學習輔助生成器。
+AI 負責將使用者提供的作業敘述、作業檔案與課程資料整理成畫面講解與可下載交付檔案。這是課程實驗 Demo，不自動送交外部平台。
 
 ### 9.2 AI Inputs
-- 使用者輸入的作業敘述。
-- 上傳的作業檔案解析文字。
+- 使用者輸入的作業敘述、上傳的作業檔案解析文字，至少一項。
 - 上傳的課程資料解析文字。
 - 表格資料摘要。
-- 使用者選擇的輸出格式。
 - 系統提示詞。
-- 學術誠信與輸出限制規則。
+- Demo 輸出規則。
 
 ### 9.3 AI Outputs
 AI 應輸出結構化內容：
@@ -883,9 +880,20 @@ AI 應輸出結構化內容：
 {
   "title": "string",
   "assignment_summary": "string",
+  "explanation": "string",
   "requirements_breakdown": ["string"],
   "answer_outline": ["string"],
   "generated_draft": "string",
+  "deliverables": [
+    {
+      "id": "string",
+      "title": "string",
+      "format": "pdf | docx | txt | xlsx",
+      "filename": "string",
+      "purpose": "string",
+      "content": "string | object | array"
+    }
+  ],
   "references": [
     {
       "source_name": "string",
@@ -893,39 +901,28 @@ AI 應輸出結構化內容：
       "used_for": "string"
     }
   ],
-  "limitations": ["string"],
-  "academic_integrity_notice": "string",
-  "human_review_checklist": ["string"]
+  "limitations": ["string"]
 }
 ```
 
 ### 9.4 Prompting Rules
-- AI 必須使用繁體中文回覆，不提供語言切換。
+- AI 必須使用 `zh-TW` 台灣正體中文回覆，不提供語言切換。
+- AI 的文法、用語、詞彙、標點與語氣需符合台灣常用書面中文，不使用簡體字或中國大陸用語。
+- AI 必須明確判斷本次作業輸入模式是「作業敘述文字」或「作業檔案」。
 - AI 必須區分「根據上傳資料可得知」與「AI 推論或建議」。
-- AI 必須在結果中加入「請自行確認、修改與引用」提醒。
-- AI 不得聲稱輸出可直接提交。
-- AI 不得協助規避抄襲偵測、AI 偵測、學校規範或評分系統。
+- AI 必須先提供 `explanation`，再由 `deliverables` 決定要產生哪些檔案。
+- AI 可以產生接近繳交格式的檔案內容，例如 PDF 繳交版。
+- AI 不得聲稱已送交外部平台、學校系統或老師信箱。
+- AI 不得協助規避偵測、偽造引用或隱藏不存在的資料來源。
 - AI 若缺少足夠資料，應列出缺少資訊，而不是捏造。
 - AI 若引用課程資料，需標註來源檔名與摘要。
-- AI 應優先產生草稿、架構、說明、檢查清單與學習輔助內容。
+- AI 應自行決定 PDF、DOCX、TXT、XLSX 等交付檔案格式與內容。
 
-### 9.5 Guardrails
-- 系統需加入學術誠信提示。
-- 使用者送出前需勾選確認：「我會自行檢查、修改並遵守課程規範」。
-- 若使用者要求「直接幫我完成可提交作業」、「不要被老師發現」、「繞過 AI 偵測」等，系統應拒絕該部分要求，並改為提供學習輔助版本。
-- 系統不得產生虛假引用。
-- 系統不得隱藏 AI 使用事實。
-- 系統不得代替使用者登入學校平台或自動提交作業。
-
-### 9.6 Human Review Requirements
-以下 AI 輸出需要使用者人工審核：
-
-- 所有事實性陳述。
-- 所有引用來源。
-- 所有計算結果。
-- 所有程式碼。
-- 所有表格數據與結論。
-- 所有最終可提交文件。
+### 9.5 Export Boundary
+- AI 模型不直接產生二進位檔案，也不呼叫外部提交工具。
+- AI 需要在 `deliverables` 中決定每個檔案的 `format`、`filename`、`purpose` 與 `content`。
+- 後端 `export_service.py` 只依照 AI 回傳的 `deliverables` 產生 TXT、DOCX、PDF、XLSX。
+- 若 AI 沒有列出某格式的 deliverable，後端不得自行產生該格式下載檔。
 
 ---
 
@@ -975,7 +972,7 @@ AI 應輸出結構化內容：
 | Backend | FastAPI | Python 生態、API 清楚、適合非同步任務與 SSE |
 | Database | SQLite for Demo；PostgreSQL for Production | 期末 Demo 可快速開發，正式版可擴充 |
 | Auth | MVP: password session；Future: Google OAuth / School SSO | 符合期末 Demo 與未來擴充 |
-| File Parsing | PyMuPDF / python-docx / pandas / openpyxl | 支援 PDF、DOCX、TXT、MD、XLSX、CSV |
+| File Parsing | PyMuPDF / python-docx / pandas / openpyxl / vision-capable AI model | 不限制上傳格式；常見文件、表格、圖片會解析，其他格式保留 metadata |
 | Document Export | python-docx / reportlab or WeasyPrint / openpyxl | 產生 DOCX、PDF、XLSX |
 | Hosting | Docker + Nginx Proxy Manager | 透過 Docker 容器化部署，搭配 Nginx Proxy Manager 反向代理至公開網址 |
 | Background Task | FastAPI BackgroundTasks or Celery | 任務時間較長時避免 blocking |
@@ -997,7 +994,7 @@ AI 應輸出結構化內容：
 |---|---|---|---|
 | login_success | 使用者登入成功 | role, timestamp | 了解登入使用情況 |
 | login_failed | 密碼錯誤 | timestamp | 偵測登入問題 |
-| task_created | 使用者建立任務 | file_count, output_formats | 追蹤核心使用量 |
+| task_created | 使用者建立任務 | file_count, generated_formats | 追蹤核心使用量 |
 | file_uploaded | 檔案上傳成功 | file_type, file_size, category | 了解檔案使用情況 |
 | file_parse_failed | 檔案解析失敗 | file_type, error_type | 改善解析穩定度 |
 | ai_generation_started | AI 任務開始 | model_name, input_length | 追蹤 AI 使用 |
@@ -1027,10 +1024,12 @@ AI 應輸出結構化內容：
 ### 14.1 Test Scenarios
 - 未登入使用者嘗試進入主系統。
 - 使用者輸入錯誤密碼。
-- 使用者登入後上傳 PDF、DOCX、TXT、MD、XLSX、CSV。
-- 使用者未輸入作業敘述直接送出。
+- 使用者登入後上傳 PDF、DOCX、TXT、MD、XLSX、CSV、PNG、JPG、WEBP。
+- 使用者未提供作業檔案與作業敘述直接送出。
+- 使用者同時提供作業檔案與作業敘述。
 - 使用者只輸入文字、不上傳檔案。
-- 使用者選擇 PDF / DOCX / XLSX / 純文字輸出。
+- 使用者只上傳作業檔案、不輸入文字。
+- AI 決定產生 PDF / DOCX / XLSX / 純文字輸出。
 - AI API 正常回傳。
 - AI API timeout。
 - 文件輸出失敗但文字結果成功。
@@ -1048,14 +1047,14 @@ AI 應輸出結構化內容：
 - 任務執行中重新整理頁面。
 - 下載連結對應檔案不存在。
 - 非 Admin 呼叫 Admin API。
-- 使用者要求規避偵測或直接提交。
+- 使用者要求規避偵測。
 
 ### 14.3 Regression Checklist
 - [ ] 登入 / 登出正常。
 - [ ] 未登入不可進入主頁。
-- [ ] 上傳支援格式正常。
-- [ ] 不支援格式會被拒絕。
-- [ ] 作業敘述必填。
+- [ ] 任意格式檔案可正常上傳。
+- [ ] 未知格式會保留 metadata，不因格式被拒絕。
+- [ ] 作業輸入必須包含作業檔案或作業敘述至少一項。
 - [ ] AI 生成正常。
 - [ ] 進度顯示正常。
 - [ ] 詳細過程正常。
@@ -1075,7 +1074,7 @@ AI 應輸出結構化內容：
 |---|---|---|---|
 | M1 | 基礎專案架構 | FastAPI、React、路由、基本 UI | 無 |
 | M2 | 登入與權限 | 密碼登入、session、保護路由 | M1 |
-| M3 | 檔案上傳與解析 | 支援 PDF、DOCX、TXT、MD、XLSX、CSV | M1 |
+| M3 | 檔案上傳與解析 | 不限制上傳格式；常見文件、表格、圖片會解析，其他格式保留 metadata | M1 |
 | M4 | AI API 串接 | OpenAI-compatible API、prompt、錯誤處理 | M3 |
 | M5 | 進度與詳細過程 | SSE、ProgressEvent、詳細紀錄 UI | M4 |
 | M6 | 輸出文件 | TXT、DOCX、PDF、XLSX 產生與下載 | M4 |
@@ -1089,10 +1088,10 @@ AI 應輸出結構化內容：
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| 系統被理解成代寫作業工具 | High | Medium | 明確定位為學習輔助工具，加入學術誠信聲明與人工確認 |
+| 系統被理解成會自動提交作業 | High | Medium | 明確標示不會送交外部平台，只產生可下載檔案 |
 | API Key 外洩 | High | Medium | Key 僅後端存取，不傳前端，log 遮罩 |
 | 上傳檔案解析失敗 | Medium | High | 顯示警告，允許略過失敗檔案，用文字輸入繼續 |
-| AI 輸出錯誤 | High | High | 加入限制聲明、引用來源、人工確認清單 |
+| AI 輸出錯誤 | High | High | 加入限制聲明、引用來源與清楚的檔案用途 |
 | Demo 時 API timeout | Medium | Medium | 準備範例輸入、確保錯誤提示清楚，可手動重試 |
 | 文件輸出格式錯亂 | Medium | Medium | 先用固定模板產生，PDF/DOCX/XLSX 分別測試 |
 | 範圍過大導致做不完 | High | Medium | MVP 優先完成登入、上傳、AI、進度、輸出；OAuth 與進階 RAG 延後 |
@@ -1130,14 +1129,14 @@ AI 應輸出結構化內容：
 - [ ] 使用者可以通過登入頁進入主系統。
 - [ ] 未登入使用者無法直接存取主系統、歷史紀錄與後台。
 - [ ] 主頁包含左側課程資料上傳區與右側作業輸入區。
-- [ ] 支援 PDF、DOCX、TXT、MD、XLSX、CSV 上傳。
-- [ ] 作業敘述為必填。
-- [ ] 使用者可以選擇 PDF、DOCX、XLSX、純文字輸出。
+- [ ] 支援任意格式檔案上傳；常見文件、表格、圖片會解析，其他格式保留 metadata。
+- [ ] 作業輸入必須包含作業檔案或作業敘述至少一項。
+- [ ] AI 可以決定產生 PDF、DOCX、XLSX、純文字輸出。
 - [ ] 系統可以成功串接 OpenAI-compatible API。
 - [ ] 任務執行時能顯示即時進度。
 - [ ] 使用者可以查看詳細處理過程。
 - [ ] 系統完成後能顯示結果與下載連結。
-- [ ] 結果包含引用來源、限制說明、學術誠信提醒與人工確認清單。
+- [ ] 結果包含 AI 講解、引用來源、限制說明與交付檔案下載連結。
 - [ ] 任務會保存到歷史紀錄。
 - [ ] Admin 可以管理 API 與系統設定。
 - [ ] API Key 不會出現在前端或下載文件中。

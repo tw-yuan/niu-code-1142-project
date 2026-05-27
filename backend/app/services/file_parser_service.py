@@ -1,5 +1,4 @@
 import io
-import traceback
 from pathlib import Path
 
 import chardet
@@ -18,8 +17,10 @@ def parse_file(file_path: str, file_type: str) -> tuple[str | None, dict | None,
             return _parse_xlsx(file_path)
         elif ext == "csv":
             return _parse_csv(file_path)
+        elif ext in ("png", "jpg", "jpeg", "webp"):
+            return _parse_image(file_path, ext)
         else:
-            return None, None, f"不支援的檔案格式：{ext}"
+            return _parse_unknown(file_path, ext)
     except Exception as e:
         return None, None, f"解析失敗：{str(e)}"
 
@@ -91,3 +92,19 @@ def _parse_csv(file_path: str) -> tuple[str | None, dict | None, str]:
     table_data = {"data": df.head(100).to_dict(orient="records")}
     summary = f"CSV 檔案：{len(df)} 列，欄位：{', '.join(str(c) for c in df.columns)}"
     return summary, table_data, "success"
+
+
+def _parse_image(file_path: str, ext: str) -> tuple[str | None, dict | None, str]:
+    size = Path(file_path).stat().st_size
+    summary = f"圖片檔案（{ext.upper()}，{size} bytes）已附加至 AI 請求，可由支援 vision 的模型判讀。"
+    return summary, {"image_format": ext, "file_size": size}, "success"
+
+
+def _parse_unknown(file_path: str, ext: str) -> tuple[str | None, dict | None, str]:
+    size = Path(file_path).stat().st_size
+    file_format = ext.upper() if ext else "未知格式"
+    summary = (
+        f"未解析的檔案（{file_format}，{size} bytes）已保留為附件 metadata；"
+        "目前僅能提供檔名、格式與大小給 AI 參考。"
+    )
+    return summary, {"file_format": ext or "unknown", "file_size": size, "parser": "metadata_only"}, "success"
