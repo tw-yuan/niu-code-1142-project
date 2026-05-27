@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    container_name: ai-assistant
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    volumes:
+      - app-data:/app/data
+    ports:
+      - "8000:8000"
+
+volumes:
+  app-data:

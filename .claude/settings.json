@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(npm -v)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(python -c \"from app.main import app; print\\('Backend imports OK'\\)\")",
+      "Bash(python3 -c \"from app.main import app; print\\('Backend imports OK'\\)\")",
+      "Bash(uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/student/login -H 'Content-Type: application/json' -d '{\"display_name\":\"測試學生\",\"password\":\"student123\"}' -c /tmp/cookies.txt)",
+      "Bash(curl -s http://localhost:8000/api/auth/me -b /tmp/cookies.txt)",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/admin/login -H 'Content-Type: application/json' -d '{\"password\":\"admin123\"}' -c /tmp/admin_cookies.txt)",
+      "Bash(curl -s http://localhost:8000/api/admin/settings -b /tmp/admin_cookies.txt)",
+      "Bash(curl -s http://localhost:8000/api/tasks/d0da5253-a836-4940-ab35-189367b91dad -b /tmp/cookies.txt)",
+      "Bash(python3 -m json.tool)"
+    ]
+  }
+}
