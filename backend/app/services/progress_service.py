@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -10,7 +11,13 @@ from sqlalchemy.orm import Session
 from app.models import ProgressEvent
 
 
-_listeners: dict[str, list[asyncio.Queue]] = defaultdict(list)
+@dataclass
+class _Listener:
+    queue: asyncio.Queue
+    loop: asyncio.AbstractEventLoop
+
+
+_listeners: dict[str, list[_Listener]] = defaultdict(list)
 
 
 def write_event(
@@ -42,8 +49,9 @@ def list_events(db: Session, task_id: str) -> list[ProgressEvent]:
 
 
 def subscribe(task_id: str) -> asyncio.Queue:
+    loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
-    _listeners[task_id].append(q)
+    _listeners[task_id].append(_Listener(queue=q, loop=loop))
     return q
 
 
@@ -51,20 +59,28 @@ def unsubscribe(task_id: str, q: asyncio.Queue) -> None:
     lst = _listeners.get(task_id)
     if not lst:
         return
-    try:
-        lst.remove(q)
-    except ValueError:
-        pass
+    lst[:] = [li for li in lst if li.queue is not q]
     if not lst:
         _listeners.pop(task_id, None)
 
 
 def _broadcast(task_id: str, payload: dict[str, Any]) -> None:
-    for q in list(_listeners.get(task_id, [])):
+    for listener in list(_listeners.get(task_id, [])):
         try:
-            q.put_nowait(payload)
-        except asyncio.QueueFull:
-            pass
+            listener.loop.call_soon_threadsafe(_safe_put, listener.queue, payload)
+        except RuntimeError:
+            # Event loop closed — drop the listener
+            try:
+                _listeners.get(task_id, []).remove(listener)
+            except ValueError:
+                pass
+
+
+def _safe_put(queue: asyncio.Queue, payload: dict[str, Any]) -> None:
+    try:
+        queue.put_nowait(payload)
+    except asyncio.QueueFull:
+        pass
 
 
 def _serialize(event: ProgressEvent) -> dict[str, Any]:

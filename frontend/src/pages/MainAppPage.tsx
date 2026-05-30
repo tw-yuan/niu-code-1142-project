@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import AppHeader from '../components/AppHeader'
 import FilePickerCard from '../components/FilePickerCard'
 import { useSession } from '../auth/SessionContext'
-import { createTask, uploadFiles } from '../api/tasks'
+import { createTask, runTask, uploadFiles } from '../api/tasks'
 
 export default function MainAppPage() {
   const { session } = useSession()
@@ -39,6 +39,7 @@ export default function MainAppPage() {
       if (assignmentFiles.length > 0) {
         await uploadFiles(task.id, assignmentFiles, 'assignment_file')
       }
+      await runTask(task.id)
       navigate(`/tasks/${task.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : '建立任務失敗')

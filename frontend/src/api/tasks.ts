@@ -16,6 +16,59 @@ export type FileInfo = {
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
+export type ReferenceInfo = {
+  id: string
+  source_name: string
+  quote_or_summary: string | null
+  used_for: string | null
+  created_at: string
+}
+
+export type LimitationInfo = {
+  id: string
+  text: string
+  created_at: string
+}
+
+export type GeneratedFileInfo = {
+  id: string
+  tool_call_id: string | null
+  format: 'pdf' | 'docx' | 'xlsx' | 'txt' | 'md'
+  filename: string
+  purpose: string | null
+  size_bytes: number
+  status: string
+  created_at: string
+}
+
+export type AgentToolCallInfo = {
+  id: string
+  iteration: number
+  tool_name: string
+  status: 'success' | 'error' | 'ignored'
+  arguments_json: unknown
+  result_json: unknown
+  error_message: string | null
+  duration_ms: number | null
+  created_at: string
+}
+
+export type ProgressEventInfo = {
+  id: string
+  event_type: string
+  message: string
+  detail: unknown
+  created_at: string
+}
+
+export type AgentTraceInfo = {
+  tool_calls: AgentToolCallInfo[]
+  progress_events: ProgressEventInfo[]
+  references: ReferenceInfo[]
+  limitations: LimitationInfo[]
+  generated_files: GeneratedFileInfo[]
+}
+
 export type TaskInfo = {
   id: string
   status: TaskStatus
@@ -29,6 +82,9 @@ export type TaskInfo = {
   created_at: string
   updated_at: string
   files: FileInfo[]
+  references: ReferenceInfo[]
+  limitations: LimitationInfo[]
+  generated_files: GeneratedFileInfo[]
 }
 
 export type TaskListItem = {
@@ -49,8 +105,20 @@ export function getTask(taskId: string) {
   return api.get<TaskInfo>(`/api/tasks/${taskId}`)
 }
 
+export function runTask(taskId: string) {
+  return api.post<TaskInfo>(`/api/tasks/${taskId}/run`)
+}
+
 export function listTasks() {
   return api.get<TaskListItem[]>('/api/tasks')
+}
+
+export function getAgentTrace(taskId: string) {
+  return api.get<AgentTraceInfo>(`/api/tasks/${taskId}/agent-trace`)
+}
+
+export function generatedFileDownloadUrl(taskId: string, fileId: string): string {
+  return `/api/tasks/${taskId}/download/${fileId}`
 }
 
 export async function uploadFiles(

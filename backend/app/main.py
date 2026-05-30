@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.database import init_db
 from app.routers import auth as auth_router
+from app.routers import downloads as downloads_router
+from app.routers import events as events_router
 from app.routers import tasks as tasks_router
 
 
@@ -46,6 +48,8 @@ async def health() -> dict:
 
 app.include_router(auth_router.router)
 app.include_router(tasks_router.router)
+app.include_router(events_router.router)
+app.include_router(downloads_router.router)
 
 
 _settings = get_settings()
