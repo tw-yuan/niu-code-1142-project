@@ -16,7 +16,9 @@
       "Bash(curl -s -X POST http://localhost:8000/api/auth/admin/login -H 'Content-Type: application/json' -d '{\"password\":\"admin123\"}' -c /tmp/admin_cookies.txt)",
       "Bash(curl -s http://localhost:8000/api/admin/settings -b /tmp/admin_cookies.txt)",
       "Bash(curl -s http://localhost:8000/api/tasks/d0da5253-a836-4940-ab35-189367b91dad -b /tmp/cookies.txt)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(git -C /root/niu-code-1142-project diff --stat HEAD)",
+      "Bash(git -C /root/niu-code-1142-project status)"
     ]
   }
 }
