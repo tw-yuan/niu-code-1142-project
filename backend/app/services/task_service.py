@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -8,7 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Task, UploadedFile
+from app.models import (
+    AgentToolCall,
+    GeneratedFile,
+    Limitation,
+    ProgressEvent,
+    Reference,
+    Task,
+    UploadedFile,
+)
 from app.services.file_parser_service import parse_file, safe_jsonable
 from app.utils.file_utils import (
     detect_file_type,
@@ -54,6 +63,33 @@ def list_user_tasks(db: Session, user_id: str | None, limit: int = 50) -> list[T
         .limit(limit)
     )
     return list(db.execute(stmt).scalars().all())
+
+
+def list_all_tasks(db: Session, limit: int = 200) -> list[Task]:
+    stmt = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    return list(db.execute(stmt).scalars().all())
+
+
+def delete_task(db: Session, task: Task) -> None:
+    """Delete a task and all of its associated rows and on-disk files."""
+    settings = get_settings()
+
+    # Remove DB-tracked rows in dependency order.
+    db.query(GeneratedFile).filter(GeneratedFile.task_id == task.id).delete(synchronize_session=False)
+    db.query(AgentToolCall).filter(AgentToolCall.task_id == task.id).delete(synchronize_session=False)
+    db.query(ProgressEvent).filter(ProgressEvent.task_id == task.id).delete(synchronize_session=False)
+    db.query(Reference).filter(Reference.task_id == task.id).delete(synchronize_session=False)
+    db.query(Limitation).filter(Limitation.task_id == task.id).delete(synchronize_session=False)
+    db.query(UploadedFile).filter(UploadedFile.task_id == task.id).delete(synchronize_session=False)
+
+    db.delete(task)
+    db.flush()
+
+    # Best-effort cleanup of on-disk directories.
+    for base in (settings.upload_dir, settings.generated_file_dir):
+        target = Path(base) / task.id
+        if target.exists() and target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 def get_task_for_user(db: Session, task_id: str, user_id: str | None, role: str) -> Task | None:

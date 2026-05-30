@@ -35,7 +35,7 @@ export default function App() {
         <Route
           path="/history"
           element={
-            <RequireAuth role="student">
+            <RequireAuth>
               <HistoryPage />
             </RequireAuth>
           }

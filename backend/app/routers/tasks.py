@@ -22,6 +22,7 @@ from app.services.task_service import (
     FileTooLargeError,
     InvalidCategoryError,
     create_task,
+    delete_task,
     get_task_for_user,
     list_task_files,
     list_user_tasks,
@@ -288,6 +289,22 @@ class AgentTraceInfo(BaseModel):
     references: list[ReferenceInfo]
     limitations: list[LimitationInfo]
     generated_files: list[GeneratedFileInfo]
+
+
+@router.delete("/{task_id}", status_code=204)
+def delete_my_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthResult = Depends(get_current_session),
+):
+    task = get_task_for_user(db, task_id, auth.user_id, auth.role)
+    if task is None:
+        raise HTTPException(status_code=404, detail="找不到任務")
+    if auth.role != "admin" and task.user_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="無權刪除他人任務")
+    delete_task(db, task)
+    db.commit()
+    return None
 
 
 @router.get("/{task_id}/agent-trace", response_model=AgentTraceInfo)

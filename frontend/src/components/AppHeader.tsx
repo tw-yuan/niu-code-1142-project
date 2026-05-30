@@ -24,7 +24,10 @@ export default function AppHeader() {
             </>
           )}
           {session?.role === 'admin' && (
-            <Link to="/admin/settings" className="text-slate-600 hover:text-slate-900">系統設定</Link>
+            <>
+              <Link to="/admin/settings" className="text-slate-600 hover:text-slate-900">系統設定</Link>
+              <Link to="/history" className="text-slate-600 hover:text-slate-900">所有任務</Link>
+            </>
           )}
           {session && (
             <>
