@@ -1,7 +1,13 @@
+import AppHeader from '../components/AppHeader'
+
 export default function HistoryPage() {
   return (
-    <main className="min-h-screen p-6">
-      <h1 className="text-xl font-bold">歷史紀錄（M1 佔位）</h1>
-    </main>
+    <div className="min-h-screen bg-slate-50">
+      <AppHeader />
+      <main className="max-w-6xl mx-auto p-6">
+        <h1 className="text-2xl font-bold">歷史紀錄</h1>
+        <p className="text-sm text-slate-600 mt-2">M7 會接上實際紀錄。</p>
+      </main>
+    </div>
   )
 }
