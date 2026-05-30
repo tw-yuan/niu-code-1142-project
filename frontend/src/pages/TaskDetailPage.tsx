@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import AppHeader from '../components/AppHeader'
 import ProgressPanel from '../components/ProgressPanel'
 import DetailedProcessPanel from '../components/DetailedProcessPanel'
+import RerunPanel from '../components/RerunPanel'
 import ResultViewer from '../components/ResultViewer'
 import { getAgentTrace, getTask, type AgentTraceInfo, type TaskInfo } from '../api/tasks'
 import { ApiError } from '../api/client'
@@ -106,6 +107,16 @@ export default function TaskDetailPage() {
             />
 
             <ResultViewer task={task} />
+
+            {(task.status === 'completed' || task.status === 'failed') && (
+              <RerunPanel
+                task={task}
+                onStarted={() => {
+                  setTrace(null)
+                  refresh()
+                }}
+              />
+            )}
 
             <DetailedProcessPanel
               trace={trace}

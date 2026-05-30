@@ -105,8 +105,8 @@ export function getTask(taskId: string) {
   return api.get<TaskInfo>(`/api/tasks/${taskId}`)
 }
 
-export function runTask(taskId: string) {
-  return api.post<TaskInfo>(`/api/tasks/${taskId}/run`)
+export function runTask(taskId: string, options?: { model_name?: string }) {
+  return api.post<TaskInfo>(`/api/tasks/${taskId}/run`, options ?? {})
 }
 
 export function listTasks() {

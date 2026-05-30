@@ -26,6 +26,7 @@ from app.services.task_service import (
     get_task_for_user,
     list_task_files,
     list_user_tasks,
+    reset_task_for_rerun,
     save_and_parse_uploads,
 )
 
@@ -240,10 +241,15 @@ def get_task(
     return _task_to_info(task, files, extras)
 
 
+class RunTaskBody(BaseModel):
+    model_name: str | None = Field(default=None, max_length=200)
+
+
 @router.post("/{task_id}/run", response_model=TaskInfo)
 def run_task(
     task_id: str,
     background_tasks: BackgroundTasks,
+    body: RunTaskBody | None = None,
     db: Session = Depends(get_db),
     auth: AuthResult = Depends(get_current_session),
 ) -> TaskInfo:
@@ -254,10 +260,13 @@ def run_task(
         raise HTTPException(status_code=404, detail="找不到任務")
     if task.status == "processing":
         raise HTTPException(status_code=409, detail="任務已在執行中")
-    if task.status == "completed":
-        raise HTTPException(status_code=409, detail="任務已完成，請建立新任務")
 
-    background_tasks.add_task(run_task_blocking, task.id)
+    if task.status in {"completed", "failed"}:
+        reset_task_for_rerun(db, task)
+
+    model_override = (body.model_name.strip() if body and body.model_name else None) or None
+    db.commit()
+    background_tasks.add_task(run_task_blocking, task.id, model_override)
     files = list_task_files(db, task.id)
     extras = _load_task_extras(db, task.id)
     return _task_to_info(task, files, extras)

@@ -30,7 +30,7 @@ class AgentRuntimeError(Exception):
     pass
 
 
-def run_task_blocking(task_id: str) -> None:
+def run_task_blocking(task_id: str, model_override: str | None = None) -> None:
     """Entry point intended to be invoked via FastAPI BackgroundTasks."""
     db: Session = SessionLocal()
     try:
@@ -42,7 +42,7 @@ def run_task_blocking(task_id: str) -> None:
             logger.info("agent_runtime: task %s already in status %s; skipping", task_id, task.status)
             return
         try:
-            _run(db, task)
+            _run(db, task, model_override=model_override)
         except Exception as exc:  # noqa: BLE001
             logger.exception("agent_runtime: unexpected failure for %s", task_id)
             task = db.get(Task, task_id)
@@ -61,9 +61,11 @@ def run_task_blocking(task_id: str) -> None:
         db.close()
 
 
-def _run(db: Session, task: Task) -> None:
+def _run(db: Session, task: Task, model_override: str | None = None) -> None:
     settings = get_settings()
     config = get_runtime_config(db)
+    if model_override:
+        config["model_name"] = model_override
 
     if not settings.openai_compatible_api_key:
         task.status = "failed"

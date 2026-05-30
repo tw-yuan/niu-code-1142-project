@@ -92,6 +92,30 @@ def delete_task(db: Session, task: Task) -> None:
             shutil.rmtree(target, ignore_errors=True)
 
 
+def reset_task_for_rerun(db: Session, task: Task) -> None:
+    """Clear all Agent-produced artifacts so a task can be re-run with the same inputs."""
+    settings = get_settings()
+
+    db.query(GeneratedFile).filter(GeneratedFile.task_id == task.id).delete(synchronize_session=False)
+    db.query(AgentToolCall).filter(AgentToolCall.task_id == task.id).delete(synchronize_session=False)
+    db.query(ProgressEvent).filter(ProgressEvent.task_id == task.id).delete(synchronize_session=False)
+    db.query(Reference).filter(Reference.task_id == task.id).delete(synchronize_session=False)
+    db.query(Limitation).filter(Limitation.task_id == task.id).delete(synchronize_session=False)
+
+    task.status = "pending"
+    task.agent_title = None
+    task.agent_assignment_summary = None
+    task.agent_explanation = None
+    task.iterations_used = 0
+    task.error_message = None
+    db.flush()
+
+    # Drop the on-disk generated dir; uploads stay because they are inputs.
+    target = Path(settings.generated_file_dir) / task.id
+    if target.exists() and target.is_dir():
+        shutil.rmtree(target, ignore_errors=True)
+
+
 def get_task_for_user(db: Session, task_id: str, user_id: str | None, role: str) -> Task | None:
     task = db.get(Task, task_id)
     if task is None:
