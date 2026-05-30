@@ -189,6 +189,7 @@ def _run(db: Session, task: Task, model_override: str | None = None) -> None:
             }
         )
 
+        pending_image_messages: list[dict[str, Any]] = []
         for call in tool_calls:
             tool_name = call.function.name or "(unknown)"
             args_raw = call.function.arguments or "{}"
@@ -276,6 +277,13 @@ def _run(db: Session, task: Task, model_override: str | None = None) -> None:
 
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
+            # Strip private "_inject_*" keys before persisting / sending back to LLM.
+            inject_image_url = None
+            inject_image_filename = None
+            if isinstance(result, dict):
+                inject_image_url = result.pop("_inject_image_data_url", None)
+                inject_image_filename = result.pop("_inject_image_filename", None)
+
             tool_call_row = _persist_tool_call_record(
                 db,
                 task,
@@ -287,6 +295,23 @@ def _run(db: Session, task: Task, model_override: str | None = None) -> None:
                 error_message=err_msg,
                 duration_ms=elapsed_ms,
             )
+
+            if inject_image_url:
+                pending_image_messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"以下是檔案 {inject_image_filename} 的圖片內容（供視覺模型判讀）：",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": inject_image_url},
+                            },
+                        ],
+                    }
+                )
 
             if status_ == "success" and tool_name.startswith("write_"):
                 _attach_generated_file_to_tool_call(
@@ -330,6 +355,11 @@ def _run(db: Session, task: Task, model_override: str | None = None) -> None:
 
             if finished:
                 break
+
+        # After all tool messages for this round, inject any image follow-ups so the
+        # vision model sees them on the next LLM call.
+        for msg_payload in pending_image_messages:
+            messages.append(msg_payload)
 
         if finished:
             db.commit()

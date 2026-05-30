@@ -20,7 +20,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "\n"
     "工作流程：\n"
     "1) 先呼叫 list_inputs 看看本任務有哪些檔案。\n"
-    "2) 對你需要的檔案呼叫 read_input_text 或 read_input_table 讀內容。\n"
+    "2) 對你需要的檔案呼叫 read_input_text 或 read_input_table 讀內容；對圖片（PNG/JPG/WEBP）呼叫 read_input_image（限視覺模型）。\n"
     "3) 規劃要交付什麼，使用 log_progress 階段性回報；可以一邊累積 add_reference / add_limitation。\n"
     "4) 用 write_text_file / write_docx_file / write_pdf_file / write_xlsx_file 寫出最終檔案。\n"
     "   - 純文字草稿 → write_text_file（.txt 或 .md）\n"
@@ -51,6 +51,7 @@ ALL_TOOL_NAMES = (
     "list_inputs",
     "read_input_text",
     "read_input_table",
+    "read_input_image",
     "log_progress",
     "add_reference",
     "add_limitation",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -12,6 +14,13 @@ MAX_READ_CHARS_DEFAULT = 4000
 MAX_READ_CHARS_HARD_CAP = 8000
 MAX_TABLE_ROWS_RETURN = 200
 MAX_TABLE_COLS_RETURN = 30
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB raw — about 6.7 MB once base64-encoded
+IMAGE_MIME = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
 
 
 def tool_list_inputs(ctx: ToolContext, args: dict) -> dict[str, Any]:
@@ -64,6 +73,50 @@ def tool_read_input_text(ctx: ToolContext, args: dict) -> dict[str, Any]:
         "filename": f.original_filename,
         "text": text[:max_chars],
         "truncated": truncated,
+    }
+
+
+def tool_read_input_image(ctx: ToolContext, args: dict) -> dict[str, Any]:
+    file_id = args.get("file_id")
+    if not isinstance(file_id, str) or not file_id:
+        raise ToolError("invalid_argument", "file_id 必填且需為字串")
+
+    f = ctx.db.get(UploadedFile, file_id)
+    if f is None or f.task_id != ctx.task.id:
+        raise ToolError("file_not_found", "找不到此 file_id 或不屬於本任務")
+
+    file_type = (f.file_type or "").lower()
+    if file_type not in IMAGE_MIME:
+        raise ToolError(
+            "unsupported_for_image",
+            f"檔案 {f.original_filename} 不是支援的圖片格式（支援 png/jpg/webp）",
+        )
+
+    path = Path(f.stored_path)
+    if not path.exists():
+        raise ToolError("file_not_found", f"檔案 {f.original_filename} 已不在磁碟上")
+
+    size = path.stat().st_size
+    if size > MAX_IMAGE_BYTES:
+        raise ToolError(
+            "size_limit_exceeded",
+            f"圖片 {f.original_filename} 大小 {size} 超過上限 {MAX_IMAGE_BYTES} bytes（{MAX_IMAGE_BYTES // (1024 * 1024)}MB）",
+        )
+
+    mime = IMAGE_MIME[file_type]
+    raw = path.read_bytes()
+    data_url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+    # The runtime extracts these private fields, then strips them before persisting
+    # the result row and before sending the tool message back to the LLM.
+    return {
+        "loaded": True,
+        "file_id": f.id,
+        "filename": f.original_filename,
+        "mime": mime,
+        "size_bytes": size,
+        "_inject_image_data_url": data_url,
+        "_inject_image_filename": f.original_filename,
     }
 
 

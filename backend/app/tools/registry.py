@@ -14,6 +14,7 @@ from app.tools.annotate import (
 from app.tools.finish import tool_finish
 from app.tools.read_inputs import (
     tool_list_inputs,
+    tool_read_input_image,
     tool_read_input_table,
     tool_read_input_text,
 )
@@ -32,6 +33,7 @@ TOOL_IMPLEMENTATIONS: dict[str, ToolFn] = {
     "list_inputs": tool_list_inputs,
     "read_input_text": tool_read_input_text,
     "read_input_table": tool_read_input_table,
+    "read_input_image": tool_read_input_image,
     "log_progress": tool_log_progress,
     "add_reference": tool_add_reference,
     "add_limitation": tool_add_limitation,
@@ -80,6 +82,24 @@ _ALL_SCHEMAS: list[dict[str, Any]] = [
                         "minimum": 200,
                         "maximum": 8000,
                     },
+                },
+                "required": ["file_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_input_image",
+            "description": (
+                "讀取上傳的圖片檔（PNG / JPG / WEBP）並把圖片內容附加到下一個 user 訊息，"
+                "讓視覺模型可以判讀。只在當前模型支援 vision 時才使用；不支援時模型會無法處理而失敗。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "description": "list_inputs 回傳的 file_id"},
                 },
                 "required": ["file_id"],
                 "additionalProperties": False,
