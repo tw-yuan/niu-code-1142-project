@@ -172,14 +172,15 @@ Agents must refuse to implement:
 
 #### Responsibilities
 - 設計與實作 FastAPI API。
-- 設計資料模型。
+- 設計資料模型（含 AgentToolCall / Reference / Limitation）。
 - 實作權限、驗證與商業邏輯。
 - 處理檔案上傳、解析與儲存。
-- 串接 OpenAI-compatible API。
+- 串接 OpenAI-compatible API 的 **tool calling** 模式。
+- 實作 **Agent runtime**（`agent_runtime.py`）：組訊息、跑 loop、處理重試與上限。
+- 實作 **Tool implementation layer**（`tools/` package）：見 [3.7 Tool Implementation Layer](#37-tool-implementation-layer)。
 - 實作任務狀態與 ProgressEvent。
-- 實作 PDF、DOCX、XLSX、TXT 輸出。
 - 實作歷史紀錄。
-- 實作 Admin 設定。
+- 實作 Admin 設定（含 Agent 迭代上限、tool 啟停）。
 
 #### Inputs
 - `project.md` 的 Data Model
@@ -202,45 +203,52 @@ Agents must refuse to implement:
 - Admin API 必須檢查 Admin role。
 - 上傳檔案需檢查副檔名、MIME type、大小。
 - 檔案下載需檢查權限。
-- AI 輸出需包裝學術誠信提醒。
+- Agent 寫出檔案的下載路徑必須限制在 `data/generated/{task_id}/`，不可有 path traversal。
+- Agent runtime 必須強制 `max_iterations`、tool size limit、tool call 連錯上限。
+- Tool result 在回灌 LLM 前必須截斷，避免 context 爆掉與敏感資料外洩。
+- AI 輸出文件需包裝學術誠信提醒（由 tool 層自動附加）。
 - AI 請求需要 timeout、retry 或錯誤處理。
-- 不得把完整使用者檔案內容寫入不必要 logs。
+- 不得把完整使用者檔案內容、LLM thinking 或完整 prompt 寫入不必要 logs。
 
 ---
 
-### 3.5 AI Prompt Agent
+### 3.5 Assignment Drafting Agent (Tool-calling)
+
+#### Description
+**這是本系統在運行時實際執行的 AI Agent**，不是設計階段的角色。每個任務啟動一個 Agent，透過 OpenAI-compatible API 的 tool calling 介面，多輪呼叫一組受控 tools，完成作業草稿生成。
 
 #### Responsibilities
-- 設計系統提示詞與任務提示詞。
-- 確保 AI 回覆符合結構化輸出格式。
-- 加入學術誠信與人工確認規則。
-- 設計資料摘要與引用來源格式。
-- 確保 AI 不捏造引用。
-- 處理「資料不足」情境。
+- 透過 `read_input_*` 讀取使用者上傳的課程資料與作業檔案。
+- 拆解作業需求並用 `log_progress` 即時回報階段。
+- 透過 `add_reference` 與 `add_limitation` 累積引用與限制。
+- 透過 `write_text_file` / `write_docx_file` / `write_pdf_file` / `write_xlsx_file` 寫出交付檔案。
+- 呼叫 `finish` 提供最終標題、作業摘要與講解，結束 loop。
 
 #### Inputs
-- `project.md` 的 AI-related Requirements
-- parsed course materials
-- parsed assignment files
-- assignment text
-- output format request
+- `project.md` 的 AI-related Requirements 與 Tool-Use Boundary（§9）
+- 任務 metadata（task_id、display_name、模型參數、迭代上限）
+- 系統提示詞（後台設定，含學術誠信、tool use、繁體中文）
+- 由後端注入的 tool catalog（依 Admin 啟停狀態過濾）
+- Tool 執行結果（每輪回灌）
 
 #### Outputs
-- System prompt
-- User prompt template
-- Structured output schema
-- Safety / refusal message
-- Reference formatting rules
+- 一連串 AgentToolCall 紀錄
+- 透過 tools 落地的 GeneratedFile / Reference / Limitation / ProgressEvent
+- 最終 `finish(title, assignment_summary, explanation)`
 
-#### AI Prompt Rules
-- 必須要求 AI 使用繁體中文，除非作業指定其他語言。
-- 必須要求 AI 區分：
-  - 根據上傳資料
-  - AI 推論
-  - 待使用者確認
-- 必須要求 AI 不產生虛假引用。
-- 必須要求 AI 輸出 JSON-compatible structured result。
-- 必須要求 AI 不協助規避偵測、不自動提交、不宣稱可直接交作業。
+#### Agent Behavior Rules
+- 使用 `zh-TW` 台灣正體中文，不使用簡體字或大陸用語。
+- 區分「根據上傳資料」、「Agent 推論 / 建議」、「待使用者確認」三類陳述。
+- 不捏造引用；引用必須對應 `list_inputs` 中存在的檔案。
+- 不協助規避偵測、不自動提交、不宣稱可直接交作業。
+- 缺資料時 `add_limitation`，不要硬編內容。
+- 至少要呼叫一次 `read_input_*`（如果有上傳檔案）再開始寫檔。
+- 必須呼叫 `finish` 結束；不得依賴「停止呼叫工具」當作完成訊號。
+
+#### Prompt Design Notes（給設計提示詞的人）
+- 系統提示詞要明列 tools 清單與何時用、避免一次寫太大檔。
+- 提示詞要附範例：何時用 DOCX 報告、何時用 XLSX 表格作業、何時只用 TXT 草稿。
+- 提示詞要說明「`finish` 是唯一結束方法」與「達到迭代上限會被強制中止」。
 
 ---
 
@@ -275,43 +283,40 @@ Agents must refuse to implement:
 
 ---
 
-### 3.7 Document Export Agent
+### 3.7 Tool Implementation Layer
+
+#### Description
+**這是 Agent 的工具實作層**，不是另一個 LLM Agent。負責把 Drafting Agent 的 tool call 轉成實際的副作用：讀檔、寫進度、寫 DOCX/PDF/XLSX、更新 DB。
 
 #### Responsibilities
-- 將 AI 結果輸出成指定格式。
-- 支援 TXT、DOCX、PDF、XLSX。
-- 使用固定模板確保輸出一致。
-- 處理輸出失敗但保留純文字結果。
+- 實作 §13 列出的每一個 tool。
+- 對所有 tool 參數做 schema 驗證、size limit 檢查、檔名 sanitize。
+- 確保副作用全部寫入沙箱 `data/generated/{task_id}/`。
+- 在每次 tool 執行寫入 AgentToolCall 紀錄，無論成功失敗。
+- 把成功的 write tool 結果寫成 GeneratedFile 並更新 ProgressEvent。
+- 失敗時回傳結構化錯誤訊息給 Agent loop，由 Agent 自行決定要重試。
 
 #### Inputs
-- structured_output_json
-- output_text
-- task metadata
-- selected formats
+- Agent 發出的 tool call（name + JSON arguments）
+- 任務 metadata、上傳檔案解析結果
+- Admin 設定（單檔大小、tool 啟停、檔案數上限）
 
 #### Outputs
-- TXT file
-- DOCX file
-- PDF file
-- XLSX file
+- 落地的 TXT / DOCX / PDF / XLSX
 - GeneratedFile records
+- Reference / Limitation records
+- ProgressEvent records
+- 截斷後的 tool result（回灌給 Agent）
 
-#### Export Rules
-- 所有文件需包含：
-  - 標題
-  - 作業需求摘要
-  - 生成內容
-  - 引用來源
-  - 限制說明
-  - 學術誠信提醒
-  - 人工確認清單
-- XLSX 非表格作業使用多 sheet：
-  - Summary
-  - Answer
-  - References
-  - Checklist
-- 文件產生失敗時不可刪除已生成的文字結果。
-- 下載連結需檢查權限。
+#### Implementation Rules
+- 每份 `write_*_file` 寫出的文件尾端必須統一附加：
+  - 學術誠信提醒區塊
+  - 人工確認清單（由 Agent 透過 add_limitation 累積 + 通用 boilerplate）
+- 由 tool 層自動附加，不依賴 Agent 自行寫入，確保一致性。
+- XLSX 非表格作業預設 sheets：`Summary` / `Answer` / `References` / `Checklist`，Agent 可覆寫。
+- 單一 tool call 失敗不刪除任務已產出的其他檔案。
+- 下載連結需檢查 session 與檔案歸屬。
+- 任何時候都不能執行 Agent 提供的字串作為程式碼（不執行 shell、不 exec、不 eval、不執行 DOCX/PDF 內嵌巨集）。
 
 ---
 
@@ -551,10 +556,17 @@ backend/
     services/
       auth_service.py
       file_parser_service.py
-      ai_service.py
+      agent_runtime.py        # 跑 Agent loop（chat + tool dispatch + 上限）
       progress_service.py
-      export_service.py
       history_service.py
+      system_setting_service.py
+    tools/                    # Agent tool 實作層（§13 列出的每個 tool 一個 module）
+      __init__.py
+      registry.py             # 依 Admin 設定組 tool catalog
+      read_inputs.py          # list_inputs / read_input_text / read_input_table
+      annotate.py             # log_progress / add_reference / add_limitation
+      write_files.py          # write_text_file / write_docx_file / write_pdf_file / write_xlsx_file
+      finish.py
     utils/
       security.py
       validators.py
@@ -731,7 +743,19 @@ AI Agent 的輸出必須：
 [建議下一步]
 ```
 
-### 8.6 Refusal Handling
+### 8.6 Tool Use Rules
+
+當 AI Agent 透過 tool calling 操作系統時：
+
+- 只能呼叫後端在當輪 catalog 中提供的 tools；不得呼叫未列出的 tool name。
+- 不得把 API Key、密碼、其他使用者資料當作 tool 參數。
+- 寫檔前應先 `read_input_*` 至少一次（若有上傳檔案），避免幻想內容。
+- 同一檔名重寫表示「我要修正前一版」，新版會覆蓋舊版，請謹慎使用。
+- 達到迭代上限前必須呼叫 `finish`；若還沒準備好，先 `add_limitation` 說明，再 `finish`，比靜默超時好。
+- Tool 失敗時讀錯誤訊息並調整參數重試；連續同一 tool 失敗 3 次以上應改換策略或 `add_limitation` 後 `finish`。
+- 不得在 tool arguments 中夾帶試圖讓 tool 層執行任意程式碼的字串（例如 shell 命令、SQL）；tool 層會做 sanitize，但 Agent 也要主動避免。
+
+### 8.7 Refusal Handling
 
 當使用者要求不當用途時，AI Agent 必須回覆：
 
@@ -877,3 +901,234 @@ Low / Medium / High
 - 若 PDF 產生失敗，展示 DOCX 與純文字。
 - 若上傳解析失敗，使用 TXT / MD 備用資料。
 - 若網路不穩，使用本機 localhost Demo。
+
+---
+
+## 13. Agent Tool Catalog
+
+本節定義 Assignment Drafting Agent 可呼叫的所有 tool。所有 tool 都在後端 sandbox 內執行，輸入經過 schema 驗證，輸出可能被截斷後回灌 LLM。
+
+### 13.1 Read Tools
+
+#### `list_inputs`
+- **Purpose**: 列出本任務所有上傳檔案。
+- **Arguments**: 無。
+- **Returns**:
+  ```json
+  {
+    "files": [
+      {
+        "file_id": "uuid",
+        "category": "course_material | assignment_file",
+        "filename": "string",
+        "file_type": "pdf | docx | txt | md | xlsx | csv | png | jpg | webp | unknown",
+        "size_bytes": 12345,
+        "parse_status": "success | failed | skipped",
+        "summary": "string (前 300 字摘要)"
+      }
+    ]
+  }
+  ```
+
+#### `read_input_text`
+- **Purpose**: 讀取某個檔案的解析文字內容。
+- **Arguments**:
+  ```json
+  { "file_id": "uuid", "max_chars": 4000 }
+  ```
+- **Returns**:
+  ```json
+  {
+    "file_id": "uuid",
+    "filename": "string",
+    "text": "string (依 max_chars 截斷，預設 4000，上限 8000)",
+    "truncated": true
+  }
+  ```
+- **Errors**: `file_not_found`、`not_parsed`、`unsupported_for_text`。
+
+#### `read_input_table`
+- **Purpose**: 讀取已解析的表格資料。
+- **Arguments**: `{ "file_id": "uuid", "sheet": "string (optional)" }`
+- **Returns**: `{ "sheets": [{ "name": "string", "columns": ["..."], "rows": [[...], ...], "row_count": int, "truncated": bool }] }`
+- **Limits**: 單次最多回傳 200 列 × 30 欄；超出時截斷並回 `truncated=true`。
+
+### 13.2 Annotate Tools
+
+#### `log_progress`
+- **Purpose**: 寫一筆 ProgressEvent 推送給前端。
+- **Arguments**: `{ "stage": "string (e.g. analyzing | drafting | writing_docx)", "message": "string (<= 200 字)" }`
+- **Returns**: `{ "event_id": "uuid" }`
+
+#### `add_reference`
+- **Purpose**: 累積一條引用來源。
+- **Arguments**: `{ "source_name": "string", "quote_or_summary": "string (<= 500 字)", "used_for": "string (<= 200 字)" }`
+- **Returns**: `{ "reference_id": "uuid" }`
+- **Rule**: `source_name` 必須對應 `list_inputs` 中存在的檔名，或標明為「Agent 知識」。
+
+#### `add_limitation`
+- **Purpose**: 累積一條限制 / 缺資料說明。
+- **Arguments**: `{ "text": "string (<= 300 字)" }`
+- **Returns**: `{ "limitation_id": "uuid" }`
+
+### 13.3 Write Tools
+
+所有 write tool 共同規則：
+- `filename` 由後端 sanitize：禁止 `..`、`/`、`\`、絕對路徑，限制 100 字元，副檔名必須符合白名單。
+- 同名再次寫入會覆蓋，並寫一筆新的 AgentToolCall（舊檔案不再保留）。
+- 每個檔案大小上限預設 10MB（由 Admin 設定）。
+- 單任務總檔案數上限預設 8（由 Admin 設定）。
+- Tool 層會在文件尾端自動附加學術誠信提醒區塊。
+
+#### `write_text_file`
+- **Purpose**: 寫出 TXT 或 MD。
+- **Arguments**:
+  ```json
+  {
+    "filename": "string (副檔名 .txt 或 .md)",
+    "purpose": "string (<= 200 字)",
+    "content": "string (<= 30000 字)"
+  }
+  ```
+- **Returns**: `{ "generated_file_id": "uuid", "filename": "...", "size_bytes": int }`
+
+#### `write_docx_file`
+- **Purpose**: 寫出 DOCX。Agent 提供結構化 blocks，tool 層用 python-docx 組裝。
+- **Arguments**:
+  ```json
+  {
+    "filename": "string (.docx)",
+    "purpose": "string",
+    "blocks": [
+      { "type": "heading", "level": 1, "text": "string" },
+      { "type": "paragraph", "text": "string" },
+      { "type": "bullet_list", "items": ["string", "..."] },
+      { "type": "numbered_list", "items": ["string", "..."] },
+      { "type": "table", "columns": ["..."], "rows": [["...", "..."], ...] }
+    ]
+  }
+  ```
+- **Limits**: `blocks` 上限 200；單一 text 上限 2000 字；單一 table 上限 100 列 × 20 欄。
+- **Returns**: `{ "generated_file_id": "uuid", "filename": "...", "size_bytes": int }`
+
+#### `write_pdf_file`
+- **Purpose**: 寫出 PDF。Arguments / blocks 結構同 `write_docx_file`。
+- **Implementation**: tool 層用 ReportLab 或 WeasyPrint。
+- **Returns**: 同上。
+
+#### `write_xlsx_file`
+- **Purpose**: 寫出 XLSX，多 sheet。
+- **Arguments**:
+  ```json
+  {
+    "filename": "string (.xlsx)",
+    "purpose": "string",
+    "sheets": [
+      {
+        "name": "string (<= 30 字)",
+        "columns": ["string", "..."],
+        "rows": [["..."], ["..."]]
+      }
+    ]
+  }
+  ```
+- **Limits**: 單檔最多 10 sheets；每個 sheet 上限 500 列 × 30 欄。
+- **Returns**: 同 `write_docx_file`。
+
+### 13.4 End Tool
+
+#### `finish`
+- **Purpose**: 結束 Agent loop，提供最終總結。
+- **Arguments**:
+  ```json
+  {
+    "title": "string (<= 100 字)",
+    "assignment_summary": "string (<= 500 字)",
+    "explanation": "string (<= 3000 字)"
+  }
+  ```
+- **Returns**: `{ "ok": true }`
+- **Side effects**: 將值寫入 Task 的 `agent_title` / `agent_assignment_summary` / `agent_explanation`，任務狀態設為 `completed`。
+- **Rule**: `finish` 之後的任何 tool call 一律標記 `ignored`，不執行。
+
+### 13.5 Error Schema
+
+所有 tool 失敗時回傳：
+```json
+{
+  "error": {
+    "code": "string (e.g. invalid_argument | file_not_found | size_limit_exceeded | tool_disabled)",
+    "message": "string (人類可讀，給 LLM 看)",
+    "details": { }
+  }
+}
+```
+
+---
+
+## 14. Agent Execution Loop
+
+### 14.1 Loop Skeleton
+
+```text
+messages = [
+  { role: "system",  content: system_prompt },
+  { role: "user",    content: build_user_prompt(task) }
+]
+for iteration in 1..max_iterations:
+  response = llm.chat(
+    model=model_name,
+    messages=messages,
+    tools=enabled_tools,
+    tool_choice="auto"
+  )
+  if response.tool_calls is empty:
+    # Agent 嘗試只用文字回應 → 強制提醒它要呼叫 finish
+    messages.append(reminder_message_to_use_finish)
+    continue
+
+  for call in response.tool_calls:
+    record = create_agent_tool_call(task, iteration, call)
+    result_or_error = dispatch_tool(call)
+    persist_side_effects(result_or_error)
+    finalize_agent_tool_call(record, result_or_error)
+    messages.append({ role: "tool", tool_call_id: call.id, content: truncate(result_or_error) })
+    if call.name == "finish":
+      mark_task_completed(task)
+      return
+
+mark_task_failed(task, reason="max_iterations_reached")
+```
+
+### 14.2 Lifecycle
+
+1. **準備**：解析所有 UploadedFile（若還沒），組 system prompt + user prompt + tool catalog（只放啟用的 tools）。
+2. **執行**：上面的 loop。
+3. **收尾**：若狀態為 `completed`，回傳前端 task 詳情；若為 `failed`（含達上限），仍保留已寫出的 GeneratedFile、Reference、Limitation。
+
+### 14.3 Safety Caps
+
+| Cap | 預設 | 由誰設定 |
+|---|---|---|
+| `max_iterations` | 20 | Admin |
+| 單檔大小 | 10 MB | Admin |
+| 單任務檔案數 | 8 | Admin |
+| 單次 tool result 回灌 | 4000 字（截斷） | 程式碼常數 |
+| Tool call 連續錯誤 | 同一 tool 連錯 5 次 → 強制 `finish` | 程式碼常數 |
+
+### 14.4 Observability
+
+- 每次 LLM call 紀錄 `iteration`、`prompt_tokens`、`completion_tokens`、`elapsed_ms`（不存完整 prompt 內容到 DB，避免敏感資料外洩）。
+- 每個 tool call 寫一筆 AgentToolCall（含截斷後的 arguments / result）。
+- ProgressEvent 由 `log_progress` 與 tool 層自動產生（例如「Agent 寫入 xxx.docx」）。
+- 詳細過程 API 回傳：ProgressEvent + AgentToolCall + Reference + Limitation + GeneratedFile。
+
+### 14.5 Failure Modes
+
+| 情境 | 處理 |
+|---|---|
+| LLM 連線失敗 | 重試 2 次（指數退避），仍失敗則 `failed`，寫 error ProgressEvent |
+| LLM 回傳格式錯誤的 tool call | 寫 AgentToolCall 為 `error`，把錯誤訊息回灌 LLM，繼續下一輪 |
+| Tool 內部例外 | 同上，回 `error` 給 LLM |
+| 達 `max_iterations` 仍未 `finish` | `failed`，保留已寫檔，前端顯示「Agent 未能完成，請重試或縮小範圍」 |
+| LLM 一直回純文字不呼叫工具 | 連續 3 輪純文字 → 加 reminder 提示要用 tools；連 5 輪仍如此 → `failed` |
