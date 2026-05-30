@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import StudentLoginPage from './pages/StudentLoginPage'
 import AdminLoginPage from './pages/AdminLoginPage'
 import MainAppPage from './pages/MainAppPage'
+import TaskDetailPage from './pages/TaskDetailPage'
 import HistoryPage from './pages/HistoryPage'
 import AdminSettingsPage from './pages/AdminSettingsPage'
 import NotFoundPage from './pages/NotFoundPage'
@@ -20,6 +21,14 @@ export default function App() {
           element={
             <RequireAuth role="student">
               <MainAppPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tasks/:taskId"
+          element={
+            <RequireAuth role="student">
+              <TaskDetailPage />
             </RequireAuth>
           }
         />

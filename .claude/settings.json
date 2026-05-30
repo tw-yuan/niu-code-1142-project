@@ -18,7 +18,12 @@
       "Bash(curl -s http://localhost:8000/api/tasks/d0da5253-a836-4940-ab35-189367b91dad -b /tmp/cookies.txt)",
       "Bash(python3 -m json.tool)",
       "Bash(git -C /root/niu-code-1142-project diff --stat HEAD)",
-      "Bash(git -C /root/niu-code-1142-project status)"
+      "Bash(git -C /root/niu-code-1142-project status)",
+      "Bash(mkdir -p /tmp/m3test)",
+      "Bash(rm -f /tmp/m3test/*)",
+      "Bash(echo \"這是課程講義第一章內容。第一節介紹 AI 基礎。第二節介紹大型語言模型。\")",
+      "Bash(printf \"# 作業說明\\\\n\\\\n- 請完成以下三題\\\\n- 字數至少 500 字\\\\n- 需要引用課本第三章\\\\n\")",
+      "Bash(printf \"id,score\\\\n1,95\\\\n2,87\\\\n3,77\\\\n\")"
     ]
   }
 }
