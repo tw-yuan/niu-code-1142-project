@@ -16,7 +16,30 @@ function getInitialMessage(key: string, label: string): string {
   return INITIAL_MESSAGES[key] ?? `我選擇了「${label}」這個學習方向，請根據講義內容開始輔助我學習。`;
 }
 
-// 逐行解析 SSE，使用 buffer 避免 partial chunk 被截斷
+// 從串流文字中分離 <think> 思考內容與實際回應
+function parseThinking(text: string): { thinking: string; response: string; inThink: boolean } {
+  const thinkStart = text.indexOf("<think>");
+  const thinkEnd = text.indexOf("</think>");
+
+  if (thinkStart === -1) return { thinking: "", response: text, inThink: false };
+
+  if (thinkEnd === -1) {
+    // 思考還在進行中
+    return {
+      thinking: text.slice(thinkStart + 7),
+      response: "",
+      inThink: true,
+    };
+  }
+
+  return {
+    thinking: text.slice(thinkStart + 7, thinkEnd),
+    response: text.slice(thinkEnd + 8).trimStart(),
+    inThink: false,
+  };
+}
+
+// 逐行解析 SSE，buffer 處理 partial chunk
 async function* parseSse(body: ReadableStream<Uint8Array>) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -31,6 +54,77 @@ async function* parseSse(body: ReadableStream<Uint8Array>) {
       if (line.startsWith("data: ")) yield line.slice(6);
     }
   }
+}
+
+// 思考過程元件
+function ThinkingBlock({ text, done }: { text: string; done: boolean }) {
+  const [open, setOpen] = useState(true);
+  if (!text) return null;
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+      >
+        <span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>▶</span>
+        {done ? "思考過程" : <span className="animate-pulse">思考中...</span>}
+        {text && <span className="text-gray-300">({text.length} 字)</span>}
+      </button>
+      {open && (
+        <div className="mt-1.5 ml-4 pl-3 border-l-2 border-gray-200 text-xs text-gray-400 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+          {text}
+          {!done && <span className="inline-block w-1.5 h-3 bg-gray-300 animate-pulse ml-0.5 align-middle" />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 串流中的 AI 訊息氣泡（含思考過程）
+function StreamingBubble({ raw }: { raw: string }) {
+  const { thinking, response, inThink } = parseThinking(raw);
+  return (
+    <div className="flex justify-start mb-4">
+      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2 flex-shrink-0 mt-1">
+        📚
+      </div>
+      <div className="max-w-[75%]">
+        <ThinkingBlock text={thinking} done={!inThink} />
+        {response && (
+          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+            {response}
+            <span className="inline-block w-1.5 h-3 bg-gray-400 animate-pulse ml-0.5 align-middle" />
+          </div>
+        )}
+        {inThink && !response && (
+          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-400">
+            ···
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 完成後的 AI 訊息氣泡（含可折疊思考過程）
+function AssistantBubble({ message }: { message: Message }) {
+  const { thinking, response } = parseThinking(message.content);
+  if (!thinking) return <ChatBubble message={message} />;
+  return (
+    <div className="flex justify-start mb-4">
+      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2 flex-shrink-0 mt-1">
+        📚
+      </div>
+      <div className="max-w-[75%]">
+        <ThinkingBlock text={thinking} done={true} />
+        {response && (
+          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+            {response}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function ChatPage() {
@@ -55,11 +149,9 @@ export default function ChatPage() {
       setMessages(s.messages);
       if (s.messages.length === 0 && !autoSentRef.current) {
         autoSentRef.current = true;
-        // 延一個 tick 確保 React 渲染完成後再觸發串流
-        setTimeout(() => {
-          const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
-          streamFromApi(firstMsg, Number(sessionId), true);
-        }, 0);
+        const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
+        // 延一個 tick 讓 React 完成渲染後再開始串流
+        setTimeout(() => streamFromApi(firstMsg, Number(sessionId), true), 50);
       }
     });
   }, [sessionId]);
@@ -86,22 +178,34 @@ export default function ChatPage() {
         credentials: "include",
         body: JSON.stringify({ content: text }),
       });
-      if (!resp.ok || !resp.body) throw new Error("請求失敗");
+
+      if (!resp.ok || !resp.body) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
 
       for await (const payload of parseSse(resp.body)) {
         if (payload === "[DONE]") break;
-        if (payload.startsWith("[ERROR]")) { full += payload.slice(7); break; }
+        if (payload.startsWith("[ERROR]")) {
+          full += payload.slice(7);
+          break;
+        }
         full += payload.replace(/\\n/g, "\n");
         setStreamingText(full);
       }
     } catch (err) {
-      full = `發生錯誤：${err instanceof Error ? err.message : String(err)}`;
+      full = `連線錯誤：${err instanceof Error ? err.message : String(err)}`;
       setStreamingText(full);
     }
 
+    const finalContent = full || "（無回應）";
     setMessages((prev) => [
       ...prev,
-      { id: Date.now() + 1, role: "assistant", content: full, created_at: new Date().toISOString() },
+      {
+        id: Date.now() + 1,
+        role: "assistant",
+        content: finalContent,
+        created_at: new Date().toISOString(),
+      },
     ]);
     setStreamingText("");
     setStreaming(false);
@@ -161,27 +265,33 @@ export default function ChatPage() {
           <div className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && !streaming && !streamingText && (
               <div className="text-center text-gray-400 py-16">
-                <div className="text-3xl mb-3">{session?.direction_emoji || "💬"}</div>
-                <p className="text-sm">載入中...</p>
+                <div className="text-3xl mb-3">{session?.direction_emoji ?? "💬"}</div>
+                <p className="text-sm animate-pulse">載入中...</p>
               </div>
             )}
-            {messages.map((msg) => (
-              <ChatBubble key={msg.id} message={msg} />
-            ))}
-            {streamingText && (
-              <ChatBubble
-                message={{ id: -1, role: "assistant", content: streamingText, created_at: "" }}
-              />
+
+            {messages.map((msg) =>
+              msg.role === "assistant" ? (
+                <AssistantBubble key={msg.id} message={msg} />
+              ) : (
+                <ChatBubble key={msg.id} message={msg} />
+              )
             )}
-            {streaming && !streamingText && (
-              <div className="flex justify-start mb-4">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2 flex-shrink-0">
-                  📚
-                </div>
-                <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-tl-sm text-gray-400 text-sm animate-pulse">
-                  思考中...
-                </div>
-              </div>
+
+            {/* 串流進行中 */}
+            {streaming && (
+              streamingText
+                ? <StreamingBubble raw={streamingText} />
+                : (
+                  <div className="flex justify-start mb-4">
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2 flex-shrink-0">📚</div>
+                    <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-tl-sm text-gray-400 text-sm flex items-center gap-1">
+                      <span className="animate-bounce" style={{ animationDelay: "0ms" }}>·</span>
+                      <span className="animate-bounce" style={{ animationDelay: "150ms" }}>·</span>
+                      <span className="animate-bounce" style={{ animationDelay: "300ms" }}>·</span>
+                    </div>
+                  </div>
+                )
             )}
             <div ref={bottomRef} />
           </div>
