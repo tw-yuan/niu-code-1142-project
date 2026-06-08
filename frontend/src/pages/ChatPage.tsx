@@ -5,7 +5,6 @@ import ChatBubble from "../components/ChatBubble";
 import { getSession } from "../api/sessions";
 import type { Message, SessionDetail } from "../api/sessions";
 
-// 各方向進入時自動送出的第一則訊息
 const INITIAL_MESSAGES: Record<string, string> = {
   summary: "請根據這份講義內容，生成完整的章節摘要，以條列重點的方式呈現。",
   quiz: "請根據這份講義內容出 5 道測驗題（混合選擇題與問答題），等我作答後再逐題批改。",
@@ -13,15 +12,31 @@ const INITIAL_MESSAGES: Record<string, string> = {
   qa: "你好！我已讀取這份講義，有什麼想了解的問題嗎？",
 };
 
-function getInitialMessage(directionKey: string, directionLabel: string): string {
-  return INITIAL_MESSAGES[directionKey] ?? `我選擇了「${directionLabel}」這個學習方向，請根據講義內容開始輔助我學習。`;
+function getInitialMessage(key: string, label: string): string {
+  return INITIAL_MESSAGES[key] ?? `我選擇了「${label}」這個學習方向，請根據講義內容開始輔助我學習。`;
+}
+
+// 逐行解析 SSE，使用 buffer 避免 partial chunk 被截斷
+async function* parseSse(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("data: ")) yield line.slice(6);
+    }
+  }
 }
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  // DocumentPage 導航時帶入 documentId，讓返回按鈕不需等待 session 載入
   const navDocumentId: number | undefined = (location.state as { documentId?: number })?.documentId;
 
   const [session, setSession] = useState<SessionDetail | null>(null);
@@ -38,11 +53,13 @@ export default function ChatPage() {
     getSession(Number(sessionId)).then((s) => {
       setSession(s);
       setMessages(s.messages);
-      // 若是全新 session（無訊息），自動送出引導語
       if (s.messages.length === 0 && !autoSentRef.current) {
         autoSentRef.current = true;
-        const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
-        triggerAutoMessage(firstMsg, Number(sessionId));
+        // 延一個 tick 確保 React 渲染完成後再觸發串流
+        setTimeout(() => {
+          const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
+          streamFromApi(firstMsg, Number(sessionId), true);
+        }, 0);
       }
     });
   }, [sessionId]);
@@ -51,20 +68,17 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
 
-  async function triggerAutoMessage(text: string, sid: number) {
-    const userMsg: Message = {
-      id: Date.now(),
-      role: "user",
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages([userMsg]);
+  async function streamFromApi(text: string, sid: number, isAuto = false) {
+    if (!isAuto) {
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
+      ]);
+    }
     setStreaming(true);
     setStreamingText("");
-    await streamFromApi(text, sid);
-  }
 
-  async function streamFromApi(text: string, sid: number) {
+    let full = "";
     try {
       const resp = await fetch(`/api/sessions/${sid}/messages`, {
         method: "POST",
@@ -72,55 +86,36 @@ export default function ChatPage() {
         credentials: "include",
         body: JSON.stringify({ content: text }),
       });
+      if (!resp.ok || !resp.body) throw new Error("請求失敗");
 
-      if (!resp.ok || !resp.body) throw new Error("Request failed");
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split("\n")) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6);
-          if (payload === "[DONE]") break;
-          if (payload.startsWith("[ERROR]")) { full += payload; break; }
-          full += payload.replace(/\\n/g, "\n");
-          setStreamingText(full);
-        }
+      for await (const payload of parseSse(resp.body)) {
+        if (payload === "[DONE]") break;
+        if (payload.startsWith("[ERROR]")) { full += payload.slice(7); break; }
+        full += payload.replace(/\\n/g, "\n");
+        setStreamingText(full);
       }
-
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now() + 1, role: "assistant", content: full, created_at: new Date().toISOString() },
-      ]);
-      setStreamingText("");
-    } catch {
-      setStreamingText("");
-    } finally {
-      setStreaming(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
+    } catch (err) {
+      full = `發生錯誤：${err instanceof Error ? err.message : String(err)}`;
+      setStreamingText(full);
     }
+
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now() + 1, role: "assistant", content: full, created_at: new Date().toISOString() },
+    ]);
+    setStreamingText("");
+    setStreaming(false);
+    setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   async function sendMessage() {
     if (!input.trim() || streaming || !sessionId) return;
     const text = input.trim();
     setInput("");
-    setMessages((prev) => [
-      ...prev,
-      { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
-    ]);
-    setStreaming(true);
-    setStreamingText("");
     await streamFromApi(text, Number(sessionId));
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    // 修正 Mac IME：組字中（isComposing）不觸發送出
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       sendMessage();
@@ -164,7 +159,7 @@ export default function ChatPage() {
         {/* Chat area */}
         <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="flex-1 overflow-y-auto p-4">
-            {messages.length === 0 && !streaming && (
+            {messages.length === 0 && !streaming && !streamingText && (
               <div className="text-center text-gray-400 py-16">
                 <div className="text-3xl mb-3">{session?.direction_emoji || "💬"}</div>
                 <p className="text-sm">載入中...</p>
@@ -180,8 +175,10 @@ export default function ChatPage() {
             )}
             {streaming && !streamingText && (
               <div className="flex justify-start mb-4">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2">📚</div>
-                <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-tl-sm text-gray-400 text-sm">
+                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm mr-2 flex-shrink-0">
+                  📚
+                </div>
+                <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl rounded-tl-sm text-gray-400 text-sm animate-pulse">
                   思考中...
                 </div>
               </div>
