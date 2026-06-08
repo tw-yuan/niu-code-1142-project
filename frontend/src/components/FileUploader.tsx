@@ -1,0 +1,63 @@
+import { useRef, useState } from "react";
+import { uploadDocument } from "../api/documents";
+import type { Document } from "../api/documents";
+
+interface Props {
+  onUploaded: (doc: Document) => void;
+}
+
+export default function FileUploader({ onUploaded }: Props) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleFile(file: File) {
+    setError("");
+    setUploading(true);
+    try {
+      const doc = await uploadDocument(file);
+      onUploaded(doc);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(msg || "上傳失敗，請再試一次");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }
+
+  return (
+    <div>
+      <div
+        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+          dragging ? "border-indigo-400 bg-indigo-50" : "border-gray-300 hover:border-indigo-300"
+        } ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+      >
+        <div className="text-4xl mb-3">{uploading ? "⏳" : "📄"}</div>
+        <div className="text-gray-600 font-medium">
+          {uploading ? "上傳中..." : "點擊或拖曳講義到這裡"}
+        </div>
+        <div className="text-sm text-gray-400 mt-1">支援 PDF、DOCX、TXT、MD</div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+      />
+      {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
+    </div>
+  );
+}
