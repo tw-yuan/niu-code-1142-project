@@ -36,7 +36,7 @@ export default function DocumentPage() {
         direction_description: dir.description,
         direction_emoji: dir.emoji,
       });
-      navigate(`/sessions/${session.id}`);
+      navigate(`/sessions/${session.id}`, { state: { documentId: Number(docId) } });
     } finally {
       setStarting(null);
     }

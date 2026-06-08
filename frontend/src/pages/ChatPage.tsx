@@ -1,13 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import ChatBubble from "../components/ChatBubble";
 import { getSession } from "../api/sessions";
 import type { Message, SessionDetail } from "../api/sessions";
 
+// 各方向進入時自動送出的第一則訊息
+const INITIAL_MESSAGES: Record<string, string> = {
+  summary: "請根據這份講義內容，生成完整的章節摘要，以條列重點的方式呈現。",
+  quiz: "請根據這份講義內容出 5 道測驗題（混合選擇題與問答題），等我作答後再逐題批改。",
+  explain: "請先介紹這份講義的主要主題與核心概念，讓我建立整體的理解。",
+  qa: "你好！我已讀取這份講義，有什麼想了解的問題嗎？",
+};
+
+function getInitialMessage(directionKey: string, directionLabel: string): string {
+  return INITIAL_MESSAGES[directionKey] ?? `我選擇了「${directionLabel}」這個學習方向，請根據講義內容開始輔助我學習。`;
+}
+
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  // DocumentPage 導航時帶入 documentId，讓返回按鈕不需等待 session 載入
+  const navDocumentId: number | undefined = (location.state as { documentId?: number })?.documentId;
+
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -15,12 +31,19 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     if (!sessionId) return;
     getSession(Number(sessionId)).then((s) => {
       setSession(s);
       setMessages(s.messages);
+      // 若是全新 session（無訊息），自動送出引導語
+      if (s.messages.length === 0 && !autoSentRef.current) {
+        autoSentRef.current = true;
+        const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
+        triggerAutoMessage(firstMsg, Number(sessionId));
+      }
     });
   }, [sessionId]);
 
@@ -28,22 +51,22 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
 
-  async function sendMessage() {
-    if (!input.trim() || streaming || !sessionId) return;
-    const text = input.trim();
-    setInput("");
+  async function triggerAutoMessage(text: string, sid: number) {
     const userMsg: Message = {
       id: Date.now(),
       role: "user",
       content: text,
       created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages([userMsg]);
     setStreaming(true);
     setStreamingText("");
+    await streamFromApi(text, sid);
+  }
 
+  async function streamFromApi(text: string, sid: number) {
     try {
-      const resp = await fetch(`/api/sessions/${sessionId}/messages`, {
+      const resp = await fetch(`/api/sessions/${sid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -60,29 +83,20 @@ export default function ChatPage() {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const payload = line.slice(6);
-            if (payload === "[DONE]") break;
-            if (payload.startsWith("[ERROR]")) {
-              full += payload;
-              break;
-            }
-            const delta = payload.replace(/\\n/g, "\n");
-            full += delta;
-            setStreamingText(full);
-          }
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (payload === "[DONE]") break;
+          if (payload.startsWith("[ERROR]")) { full += payload; break; }
+          full += payload.replace(/\\n/g, "\n");
+          setStreamingText(full);
         }
       }
 
-      const assistantMsg: Message = {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: full,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now() + 1, role: "assistant", content: full, created_at: new Date().toISOString() },
+      ]);
       setStreamingText("");
     } catch {
       setStreamingText("");
@@ -92,12 +106,28 @@ export default function ChatPage() {
     }
   }
 
+  async function sendMessage() {
+    if (!input.trim() || streaming || !sessionId) return;
+    const text = input.trim();
+    setInput("");
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
+    ]);
+    setStreaming(true);
+    setStreamingText("");
+    await streamFromApi(text, Number(sessionId));
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // 修正 Mac IME：組字中（isComposing）不觸發送出
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       sendMessage();
     }
   }
+
+  const documentId = navDocumentId ?? session?.document_id;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -107,8 +137,9 @@ export default function ChatPage() {
         <div className="w-60 flex-shrink-0">
           <div className="bg-white border border-gray-200 rounded-xl p-4 sticky top-20">
             <button
-              onClick={() => session && navigate(`/documents/${session.document_id}`)}
-              className="text-xs text-gray-400 hover:text-indigo-500 mb-3 flex items-center gap-1"
+              onClick={() => documentId && navigate(`/documents/${documentId}`)}
+              disabled={!documentId}
+              className="text-xs text-gray-400 hover:text-indigo-500 mb-3 flex items-center gap-1 disabled:opacity-30"
             >
               ← 返回方向選擇
             </button>
@@ -136,10 +167,7 @@ export default function ChatPage() {
             {messages.length === 0 && !streaming && (
               <div className="text-center text-gray-400 py-16">
                 <div className="text-3xl mb-3">{session?.direction_emoji || "💬"}</div>
-                <p className="text-sm">
-                  你正在使用「{session?.direction_label}」模式<br />
-                  輸入你的問題開始學習吧！
-                </p>
+                <p className="text-sm">載入中...</p>
               </div>
             )}
             {messages.map((msg) => (
