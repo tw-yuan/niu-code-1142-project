@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     openai_compatible_api_key: str = ""
     openai_compatible_model: str = "openai/gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
+    vision_model: str = "openai/gpt-4o-mini"
+    # 每頁文字少於此字數視為掃描版，改用視覺模型
+    pdf_text_threshold: int = 80
     max_file_size_mb: int = 20
     session_expire_minutes: int = 1440
     rag_token_threshold: int = 12000

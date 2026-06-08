@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.document import Document
-from app.utils.file_parsers import parse_file, count_tokens
+from app.utils.file_parsers import parse_file_async, count_tokens
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
@@ -33,7 +33,7 @@ async def upload_document(
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
     save_path.write_bytes(file_bytes)
 
-    parsed_text = parse_file(original_filename, file_bytes)
+    parsed_text = await parse_file_async(original_filename, file_bytes)
     token_count = count_tokens(parsed_text)
 
     doc = Document(
