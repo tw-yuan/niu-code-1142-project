@@ -1,6 +1,10 @@
 #!/bin/bash
 # 開發模式：分別啟動後端與前端
 
+echo "=== 清理舊程序 ==="
+fuser -k 8002/tcp 8001/tcp 5173/tcp 2>/dev/null
+sleep 1
+
 echo "=== 啟動後端 (port 8002) ==="
 cd backend
 .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8002 &
@@ -21,5 +25,5 @@ echo "前端: http://localhost:5173"
 echo ""
 echo "按 Ctrl+C 停止所有服務"
 
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
+trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; wait" EXIT
 wait
