@@ -41,7 +41,9 @@ export async function deleteDocument(id: number): Promise<void> {
   await client.delete(`/documents/${id}`);
 }
 
-export async function getDirections(id: number): Promise<Direction[]> {
-  const { data } = await client.get(`/documents/${id}/directions`);
-  return data.directions;
+export async function getDirections(id: number, refresh = false): Promise<{ directions: Direction[]; cached: boolean }> {
+  const { data } = await client.get(`/documents/${id}/directions`, {
+    params: refresh ? { refresh: true } : undefined,
+  });
+  return data;
 }

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import json
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Annotated
@@ -96,11 +97,20 @@ async def doc_directions(
     doc_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    refresh: Annotated[bool, Query()] = False,
 ):
     doc = await get_document(db, doc_id, user.id)
     if not doc:
         raise HTTPException(status_code=404, detail="文件不存在")
     if not doc.parsed_text:
         raise HTTPException(status_code=400, detail="文件尚未解析完成")
+
+    # 有快取且不強制重新生成 → 直接回傳
+    if doc.directions_cache and not refresh:
+        return {"directions": json.loads(doc.directions_cache), "cached": True}
+
+    # 重新生成並存入快取
     directions = await get_directions(doc.parsed_text)
-    return {"directions": directions}
+    doc.directions_cache = json.dumps(directions, ensure_ascii=False)
+    await db.commit()
+    return {"directions": directions, "cached": False}

@@ -13,6 +13,7 @@ export default function DocumentPage() {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [loadingDoc, setLoadingDoc] = useState(true);
   const [loadingDirs, setLoadingDirs] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [starting, setStarting] = useState<string | null>(null);
 
   useEffect(() => {
@@ -20,10 +21,21 @@ export default function DocumentPage() {
     getDocument(Number(docId))
       .then(setDoc)
       .finally(() => setLoadingDoc(false));
-    getDirections(Number(docId))
-      .then(setDirections)
-      .finally(() => setLoadingDirs(false));
+    loadDirections(false);
   }, [docId]);
+
+  async function loadDirections(refresh: boolean) {
+    if (!docId) return;
+    if (refresh) setRefreshing(true);
+    else setLoadingDirs(true);
+    try {
+      const result = await getDirections(Number(docId), refresh);
+      setDirections(result.directions);
+    } finally {
+      setLoadingDirs(false);
+      setRefreshing(false);
+    }
+  }
 
   async function handleDirectionClick(dir: Direction) {
     if (!docId) return;
@@ -81,7 +93,16 @@ export default function DocumentPage() {
           <p className="text-red-500">找不到此文件</p>
         )}
 
-        <h3 className="font-semibold text-gray-700 mb-3">選擇學習方向</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-700">選擇學習方向</h3>
+          <button
+            onClick={() => loadDirections(true)}
+            disabled={loadingDirs || refreshing}
+            className="text-xs text-gray-400 hover:text-indigo-500 disabled:opacity-40 flex items-center gap-1"
+          >
+            {refreshing ? "生成中..." : "↻ 重新生成推薦"}
+          </button>
+        </div>
 
         {loadingDirs ? (
           <div className="text-gray-400 text-sm">分析講義內容中，請稍候...</div>
