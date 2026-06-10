@@ -54,6 +54,10 @@ EMBEDDING_MODEL=text-embedding-3-small
 VISION_MODEL=openai/gpt-4o-mini           # 解析掃描版 PDF 用
 DEMO_MODE=false                           # true 時不依賴外部 LLM，使用示範回覆
 PDF_VISION_STRATEGY=auto                  # auto / always / never；always 會讓每頁 PDF 都走 vision
+PDF_VISION_BATCH_SIZE=1                   # 視覺解析每次送幾頁；維持 1 可降低 AI API 413 風險
+PDF_IMAGE_ZOOM=1.2                        # PDF 轉圖倍率；越高越清楚但 payload 越大
+PDF_IMAGE_JPEG_QUALITY=70                 # PDF 轉圖 JPEG 品質；越高 payload 越大
+MAX_FILE_SIZE_MB=200                      # 後端檔案大小上限；Docker nginx 目前允許 256 MB request body
 ```
 
 ### 2a. 開發模式
@@ -204,3 +208,5 @@ DELETE /api/admin/sessions/{id}
 - 登入採共用密碼，資料隔離依賴 `user_id` 過濾；RAG 索引會寫入 `user_id/doc_id` metadata。
 - 管理員用同一個登入頁，輸入 `ADMIN_LOGIN_PASSWORD` 後該暱稱會成為 admin，可進入 `/admin` 管理後台。
 - Docker 部署若新增解析套件（例如 PPTX），請重新 build backend image：`docker compose up --build -d`。
+- Docker 前端 nginx 已允許 256 MB request body；若外層還有 Nginx Proxy Manager、Cloudflare、Apache 或其他 reverse proxy，也需要同步調高上傳限制，否則仍可能回 413。
+- 如果上傳請求本身回 413，通常是 nginx / reverse proxy body limit；如果文件已建立但解析失敗且錯誤訊息含 413，通常是 vision/LLM provider payload 太大，可降低 `PDF_IMAGE_ZOOM`、`PDF_IMAGE_JPEG_QUALITY` 或維持 `PDF_VISION_BATCH_SIZE=1`。

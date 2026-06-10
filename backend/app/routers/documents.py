@@ -10,6 +10,7 @@ from app.deps import get_current_user
 from app.models.user import User
 from app.models.document import Document
 from app.services.document_service import (
+    FileTooLargeError,
     upload_document, process_document, list_documents, get_document, delete_document
 )
 from app.services.direction_service import get_directions
@@ -56,6 +57,8 @@ async def upload(
             lesson_topic=lesson_topic,
             learning_goals=learning_goals,
         )
+    except FileTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

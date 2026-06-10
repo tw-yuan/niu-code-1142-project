@@ -32,8 +32,13 @@ export default function FileUploader({ onUploaded }: Props) {
       setProgress(100);
       onUploaded(doc);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(msg || "上傳失敗，請再試一次");
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      const msg = err.response?.data?.detail;
+      if (err.response?.status === 413) {
+        setError(msg || "檔案太大，請壓縮檔案或調高伺服器上傳限制");
+      } else {
+        setError(msg || "上傳失敗，請再試一次");
+      }
     } finally {
       setUploading(false);
       setPhase("idle");

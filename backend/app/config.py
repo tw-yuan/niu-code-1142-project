@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     pdf_text_threshold: int = 80
     # auto: 低文字或含視覺元素的頁面走 vision；always: 每頁都走 vision；never: 只抽文字
     pdf_vision_strategy: str = "auto"
-    max_file_size_mb: int = 20
+    pdf_vision_batch_size: int = 1
+    pdf_image_zoom: float = 1.2
+    pdf_image_jpeg_quality: int = 70
+    max_file_size_mb: int = 200
     session_expire_minutes: int = 1440
     rag_token_threshold: int = 12000
     rag_chunk_size: int = 500

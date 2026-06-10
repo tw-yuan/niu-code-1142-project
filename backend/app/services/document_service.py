@@ -12,6 +12,10 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md", ".jpg", ".jpeg", 
 MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 
+class FileTooLargeError(ValueError):
+    pass
+
+
 def _safe_ext(filename: str) -> str:
     return Path(filename).suffix.lower()
 
@@ -29,7 +33,7 @@ async def upload_document(
     if ext not in ALLOWED_EXTENSIONS:
         raise ValueError(f"不支援的檔案格式：{ext}")
     if len(file_bytes) > MAX_BYTES:
-        raise ValueError(f"檔案超過 {settings.max_file_size_mb} MB 限制")
+        raise FileTooLargeError(f"檔案超過 {settings.max_file_size_mb} MB 限制")
 
     filename = f"{uuid.uuid4().hex}{ext}"
     save_path = settings.uploads_dir / filename

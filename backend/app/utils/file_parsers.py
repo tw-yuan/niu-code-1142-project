@@ -10,11 +10,11 @@ def _pdf_text_per_page(doc) -> list[int]:
     return [len(doc[i].get_text().strip()) for i in range(len(doc))]
 
 
-def _page_to_jpeg_b64(page, zoom: float = 1.5) -> str:
+def _page_to_jpeg_b64(page, zoom: float, quality: int) -> str:
     import fitz
     mat = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-    jpeg_bytes = pix.tobytes("jpeg", jpg_quality=80)
+    jpeg_bytes = pix.tobytes("jpeg", jpg_quality=quality)
     return base64.b64encode(jpeg_bytes).decode()
 
 
@@ -50,7 +50,7 @@ async def parse_pdf_vision(file_bytes: bytes, force_all_pages: bool = False) -> 
     掃描版 PDF（或混合型）：
     - 低文字頁、圖片頁、圖形頁轉 JPEG 送視覺模型
     - 其他純文字頁用 pymupdf4llm
-    每 5 頁一批，避免單次請求過大。
+    預設每次只送 1 頁，避免 OpenRouter 或其他 OpenAI-compatible provider 回 413。
     """
     import fitz
     import pymupdf4llm
@@ -74,11 +74,13 @@ async def parse_pdf_vision(file_bytes: bytes, force_all_pages: bool = False) -> 
         api_key=settings.openai_compatible_api_key or "none",
     )
 
-    BATCH = 5
+    batch_size = max(1, settings.pdf_vision_batch_size)
+    zoom = max(0.8, settings.pdf_image_zoom)
+    quality = min(95, max(40, settings.pdf_image_jpeg_quality))
     results: list[str] = []
 
-    for batch_start in range(0, len(doc), BATCH):
-        batch_end = min(batch_start + BATCH, len(doc))
+    for batch_start in range(0, len(doc), batch_size):
+        batch_end = min(batch_start + batch_size, len(doc))
         image_pages: list[int] = []
         text_pages: list[int] = []
 
@@ -103,7 +105,7 @@ async def parse_pdf_vision(file_bytes: bytes, force_all_pages: bool = False) -> 
         if image_pages:
             content: list[dict] = []
             for i in image_pages:
-                b64 = _page_to_jpeg_b64(doc[i])
+                b64 = _page_to_jpeg_b64(doc[i], zoom=zoom, quality=quality)
                 content.append({
                     "type": "image_url",
                     "image_url": {
