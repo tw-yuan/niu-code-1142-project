@@ -53,6 +53,7 @@ OPENAI_COMPATIBLE_MODEL=openai/gpt-4o-mini
 EMBEDDING_MODEL=text-embedding-3-small
 VISION_MODEL=openai/gpt-4o-mini           # 解析掃描版 PDF 用
 DEMO_MODE=false                           # true 時不依賴外部 LLM，使用示範回覆
+PDF_VISION_STRATEGY=auto                  # auto / always / never；always 會讓每頁 PDF 都走 vision
 ```
 
 ### 2a. 開發模式
@@ -120,7 +121,8 @@ docker compose up --build
 ## 運作重點
 
 **文件解析**：PDF 自動判斷類型——純文字 PDF 以 `pymupdf4llm` 轉 Markdown；
-掃描版（超過半數頁面文字過少）則逐頁轉圖送 `VISION_MODEL` 辨識。
+低文字頁、含圖片或圖形的頁面會逐頁轉圖送 `VISION_MODEL` 辨識。若要最大化保留版面、
+圖表與全圖片 PDF 的資訊，可將 `PDF_VISION_STRATEGY=always`，但成本與解析時間會提高。
 
 **RAG 策略**：依文件長度切換。token 數 < 12,000 直接將全文放入 context；
 ≥ 12,000 才在上傳時切塊（500 token、50 重疊）建索引，問答時用語意搜尋取 top-5 段落。
@@ -201,3 +203,4 @@ DELETE /api/admin/sessions/{id}
 - 本專案目前以 build、lint、compile 與實際操作流程驗證；尚未導入完整自動化測試。
 - 登入採共用密碼，資料隔離依賴 `user_id` 過濾；RAG 索引會寫入 `user_id/doc_id` metadata。
 - 管理員用同一個登入頁，輸入 `ADMIN_LOGIN_PASSWORD` 後該暱稱會成為 admin，可進入 `/admin` 管理後台。
+- Docker 部署若新增解析套件（例如 PPTX），請重新 build backend image：`docker compose up --build -d`。

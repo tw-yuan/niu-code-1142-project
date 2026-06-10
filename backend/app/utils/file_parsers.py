@@ -18,6 +18,25 @@ def _page_to_jpeg_b64(page, zoom: float = 1.5) -> str:
     return base64.b64encode(jpeg_bytes).decode()
 
 
+def _page_has_visual_blocks(page) -> bool:
+    """判斷頁面是否含圖片、向量圖形或繪圖元素。"""
+    try:
+        if page.get_images(full=True):
+            return True
+    except Exception:
+        pass
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+        if any(block.get("type") == 1 for block in blocks):
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(page.get_drawings())
+    except Exception:
+        return False
+
+
 def parse_pdf_text(file_bytes: bytes) -> str:
     """純文字 PDF：用 pymupdf4llm 輸出 Markdown。"""
     import fitz
@@ -26,11 +45,11 @@ def parse_pdf_text(file_bytes: bytes) -> str:
     return pymupdf4llm.to_markdown(doc)
 
 
-async def parse_pdf_vision(file_bytes: bytes) -> str:
+async def parse_pdf_vision(file_bytes: bytes, force_all_pages: bool = False) -> str:
     """
     掃描版 PDF（或混合型）：
-    - 文字充足的頁面用 pymupdf4llm
-    - 文字稀少的頁面轉 JPEG 送視覺模型
+    - 低文字頁、圖片頁、圖形頁轉 JPEG 送視覺模型
+    - 其他純文字頁用 pymupdf4llm
     每 5 頁一批，避免單次請求過大。
     """
     import fitz
@@ -39,7 +58,12 @@ async def parse_pdf_vision(file_bytes: bytes) -> str:
     from app.config import settings
 
     if settings.demo_mode or not settings.openai_compatible_api_key:
-        return "這是一份掃描版 PDF。示範模式未呼叫視覺模型，請改用文字型 PDF 或設定 VISION_MODEL API key 取得完整 OCR。"
+        text = parse_pdf_text(file_bytes).strip()
+        warning = (
+            "注意：這份 PDF 含掃描頁、圖片或圖形，但目前未啟用 vision 解析。"
+            "請設定 OPENAI_COMPATIBLE_API_KEY、使用支援圖片的 VISION_MODEL，並確認 DEMO_MODE=false，才能完整讀取圖片型 PDF、圖表與版面。"
+        )
+        return f"{text}\n\n---\n\n{warning}" if text else warning
 
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     chars_per_page = _pdf_text_per_page(doc)
@@ -59,10 +83,15 @@ async def parse_pdf_vision(file_bytes: bytes) -> str:
         text_pages: list[int] = []
 
         for i in range(batch_start, batch_end):
-            if chars_per_page[i] >= threshold:
-                text_pages.append(i)
-            else:
+            needs_vision = (
+                force_all_pages
+                or chars_per_page[i] < threshold
+                or _page_has_visual_blocks(doc[i])
+            )
+            if needs_vision:
                 image_pages.append(i)
+            else:
+                text_pages.append(i)
 
         # 文字頁 → pymupdf4llm（只處理這批的頁次）
         if text_pages:
@@ -87,7 +116,8 @@ async def parse_pdf_vision(file_bytes: bytes) -> str:
                 "type": "text",
                 "text": (
                     f"以上是 PDF {page_range} 的圖片。"
-                    "請將內容完整轉換為繁體中文 Markdown，保留標題層級、粗體、表格。"
+                    "請將頁面中可見文字、圖表、流程圖、表格、圖片註解與版面關係完整轉換為繁體中文 Markdown。"
+                    "若有圖表或流程圖，請用文字描述其重點與關係。保留標題層級、粗體、表格。"
                     "直接輸出 Markdown，不需額外說明。"
                 ),
             })
@@ -111,6 +141,19 @@ def _is_scanned_pdf(file_bytes: bytes, threshold: int) -> bool:
     return sparse / len(doc) > 0.5
 
 
+def _pdf_needs_visual_parse(file_bytes: bytes, threshold: int) -> bool:
+    """只要 PDF 有掃描頁、圖片頁或圖形頁，就啟用混合視覺解析。"""
+    import fitz
+
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    if len(doc) == 0:
+        return False
+    chars_per_page = _pdf_text_per_page(doc)
+    if sum(1 for c in chars_per_page if c < threshold) / len(doc) > 0.5:
+        return True
+    return any(_page_has_visual_blocks(doc[i]) for i in range(len(doc)))
+
+
 # ── 其他格式 ─────────────────────────────────────────────────────────────────
 
 def parse_docx(file_bytes: bytes) -> str:
@@ -124,17 +167,55 @@ def parse_pptx(file_bytes: bytes) -> str:
 
     prs = Presentation(io.BytesIO(file_bytes))
     slides: list[str] = []
-    for slide_index, slide in enumerate(prs.slides, start=1):
-        parts = [f"## 投影片 {slide_index}"]
-        for shape in slide.shapes:
-            if hasattr(shape, "text") and shape.text.strip():
-                parts.append(shape.text.strip())
+
+    def collect_shape(shape) -> list[str]:
+        parts: list[str] = []
+        if hasattr(shape, "shapes"):
+            for child in shape.shapes:
+                parts.extend(collect_shape(child))
+            return parts
+        try:
+            text = getattr(shape, "text", "")
+            if text and text.strip():
+                parts.append(text.strip())
+        except Exception:
+            pass
+        try:
             if getattr(shape, "has_table", False):
                 rows = []
                 for row in shape.table.rows:
                     rows.append(" | ".join(cell.text.strip() for cell in row.cells))
                 if rows:
                     parts.append("\n".join(rows))
+        except Exception:
+            pass
+        try:
+            if getattr(shape, "has_chart", False):
+                title = ""
+                if shape.chart.has_title and shape.chart.chart_title.text_frame:
+                    title = shape.chart.chart_title.text_frame.text.strip()
+                parts.append(f"[圖表{f'：{title}' if title else ''}]")
+        except Exception:
+            pass
+        try:
+            if getattr(shape, "shape_type", None) and "PICTURE" in str(shape.shape_type):
+                parts.append("[圖片]")
+        except Exception:
+            pass
+        return parts
+
+    for slide_index, slide in enumerate(prs.slides, start=1):
+        parts = [f"## 投影片 {slide_index}"]
+        for shape in slide.shapes:
+            parts.extend(collect_shape(shape))
+        try:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                parts.append(f"### 備註\n{notes}")
+        except Exception:
+            pass
+        if len(parts) == 1:
+            parts.append("[此投影片沒有可直接抽取的文字，可能主要由圖片、圖形或嵌入物件構成。]")
         slides.append("\n\n".join(parts))
     return "\n\n---\n\n".join(slides)
 
@@ -197,7 +278,10 @@ async def parse_file_async(filename: str, file_bytes: bytes) -> str:
     from app.config import settings
     ext = Path(filename).suffix.lower()
     if ext == ".pdf":
-        if _is_scanned_pdf(file_bytes, settings.pdf_text_threshold):
+        strategy = settings.pdf_vision_strategy.lower()
+        if strategy == "always":
+            return await parse_pdf_vision(file_bytes, force_all_pages=True)
+        if strategy != "never" and _pdf_needs_visual_parse(file_bytes, settings.pdf_text_threshold):
             return await parse_pdf_vision(file_bytes)
         return parse_pdf_text(file_bytes)
     if ext == ".docx":

@@ -1,5 +1,10 @@
+from io import BytesIO
+
+from pptx import Presentation
+
 from app.services.chat_service import _demo_response, _quiz_metadata
 from app.services.direction_service import fallback_dynamic_directions
+from app.utils.file_parsers import parse_pptx
 from app.services.rag_service import _source_label
 
 
@@ -35,3 +40,25 @@ def test_source_label_uses_first_meaningful_line():
 
 def test_source_label_falls_back_to_chunk_number():
     assert _source_label("\n\n", 2) == "片段 3"
+
+
+def test_parse_pptx_extracts_text_table_and_empty_slide_marker():
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "資料結構"
+    table_shape = slide.shapes.add_table(2, 2, 0, 1000000, 4000000, 1000000)
+    table = table_shape.table
+    table.cell(0, 0).text = "結構"
+    table.cell(0, 1).text = "特性"
+    table.cell(1, 0).text = "Stack"
+    table.cell(1, 1).text = "LIFO"
+    prs.slides.add_slide(prs.slide_layouts[6])
+
+    buf = BytesIO()
+    prs.save(buf)
+
+    parsed = parse_pptx(buf.getvalue())
+
+    assert "資料結構" in parsed
+    assert "Stack | LIFO" in parsed
+    assert "沒有可直接抽取的文字" in parsed

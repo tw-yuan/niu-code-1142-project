@@ -6,7 +6,7 @@ RUN pip install uv
 
 COPY pyproject.toml .
 RUN uv pip install --system --no-cache fastapi uvicorn[standard] sqlalchemy aiosqlite greenlet \
-    python-multipart PyMuPDF pymupdf4llm python-docx tiktoken openai chromadb \
+    python-multipart PyMuPDF pymupdf4llm python-docx python-pptx tiktoken openai chromadb \
     "python-jose[cryptography]" "passlib[bcrypt]" python-dotenv httpx pydantic-settings
 
 COPY app ./app

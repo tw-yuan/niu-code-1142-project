@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     # 每頁文字少於此字數視為掃描版，改用視覺模型
     pdf_text_threshold: int = 80
+    # auto: 低文字或含視覺元素的頁面走 vision；always: 每頁都走 vision；never: 只抽文字
+    pdf_vision_strategy: str = "auto"
     max_file_size_mb: int = 20
     session_expire_minutes: int = 1440
     rag_token_threshold: int = 12000
