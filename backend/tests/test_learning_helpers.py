@@ -1,10 +1,11 @@
 from io import BytesIO
 
+from docx import Document
 from pptx import Presentation
 
 from app.services.chat_service import _demo_response, _quiz_metadata
 from app.services.direction_service import fallback_dynamic_directions
-from app.utils.file_parsers import parse_pptx
+from app.utils.file_parsers import _docx_is_plain_text, parse_pptx
 from app.services.rag_service import _source_label
 
 
@@ -62,3 +63,20 @@ def test_parse_pptx_extracts_text_table_and_empty_slide_marker():
     assert "資料結構" in parsed
     assert "Stack | LIFO" in parsed
     assert "沒有可直接抽取的文字" in parsed
+
+
+def test_docx_plain_text_detection_rejects_tables():
+    plain = Document()
+    plain.add_paragraph("這是一份純文字講義")
+    plain_buf = BytesIO()
+    plain.save(plain_buf)
+
+    with_table = Document()
+    table = with_table.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "欄位"
+    table.cell(0, 1).text = "內容"
+    table_buf = BytesIO()
+    with_table.save(table_buf)
+
+    assert _docx_is_plain_text(plain_buf.getvalue()) is True
+    assert _docx_is_plain_text(table_buf.getvalue()) is False

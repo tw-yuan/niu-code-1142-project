@@ -124,9 +124,10 @@ docker compose up --build
 
 ## 運作重點
 
-**文件解析**：PDF 自動判斷類型——純文字 PDF 以 `pymupdf4llm` 轉 Markdown；
-低文字頁、含圖片或圖形的頁面會逐頁轉圖送 `VISION_MODEL` 辨識。若要最大化保留版面、
-圖表與全圖片 PDF 的資訊，可將 `PDF_VISION_STRATEGY=always`，但成本與解析時間會提高。
+**文件解析**：只有純文字內容會以文字交給 AI。TXT/MD、純文字 DOCX、純文字 PDF 會抽文字；
+PDF 中的低文字頁、圖片頁、圖形頁會逐頁轉圖送 `VISION_MODEL` 辨識。PPTX 一律用 LibreOffice
+轉成 PDF 再逐頁轉圖；含圖片、表格或非純段落文字的 DOCX 也會先轉 PDF 再走圖片解析。若要讓
+PDF 每頁都走圖片，可將 `PDF_VISION_STRATEGY=always`，但成本與解析時間會提高。
 
 **RAG 策略**：依文件長度切換。token 數 < 12,000 直接將全文放入 context；
 ≥ 12,000 才在上傳時切塊（500 token、50 重疊）建索引，問答時用語意搜尋取 top-5 段落。
@@ -207,6 +208,6 @@ DELETE /api/admin/sessions/{id}
 - 本專案目前以 build、lint、compile 與實際操作流程驗證；尚未導入完整自動化測試。
 - 登入採共用密碼，資料隔離依賴 `user_id` 過濾；RAG 索引會寫入 `user_id/doc_id` metadata。
 - 管理員用同一個登入頁，輸入 `ADMIN_LOGIN_PASSWORD` 後該暱稱會成為 admin，可進入 `/admin` 管理後台。
-- Docker 部署若新增解析套件（例如 PPTX），請重新 build backend image：`docker compose up --build -d`。
+- Docker 部署若新增解析套件（例如 PPTX / Office 轉圖），請重新 build backend image：`docker compose up --build -d`。PPTX 與非純文字 DOCX 的視覺解析依賴 backend image 內的 LibreOffice headless。
 - Docker 前端 nginx 已允許 256 MB request body；若外層還有 Nginx Proxy Manager、Cloudflare、Apache 或其他 reverse proxy，也需要同步調高上傳限制，否則仍可能回 413。
 - 如果上傳請求本身回 413，通常是 nginx / reverse proxy body limit；如果文件已建立但解析失敗且錯誤訊息含 413，通常是 vision/LLM provider payload 太大，可降低 `PDF_IMAGE_ZOOM`、`PDF_IMAGE_JPEG_QUALITY` 或維持 `PDF_VISION_BATCH_SIZE=1`。

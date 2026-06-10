@@ -1,5 +1,9 @@
 import base64
 import io
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -164,6 +168,55 @@ def parse_docx(file_bytes: bytes) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
 
+def _docx_is_plain_text(file_bytes: bytes) -> bool:
+    from docx import Document
+
+    doc = Document(io.BytesIO(file_bytes))
+    if doc.tables:
+        return False
+    if doc.inline_shapes:
+        return False
+    for rel in doc.part.rels.values():
+        if "image" in rel.reltype:
+            return False
+    return any(p.text.strip() for p in doc.paragraphs)
+
+
+def _office_to_pdf(file_bytes: bytes, suffix: str) -> bytes:
+    executable = shutil.which("soffice") or shutil.which("libreoffice")
+    if not executable:
+        raise RuntimeError("伺服器缺少 LibreOffice，無法將 Office 文件轉成圖片解析")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        input_path = tmpdir / f"upload{suffix}"
+        input_path.write_bytes(file_bytes)
+        result = subprocess.run(
+            [
+                executable,
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(tmpdir),
+                str(input_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            check=False,
+            env={**os.environ, "HOME": tmp},
+        )
+        pdf_path = input_path.with_suffix(".pdf")
+        if result.returncode != 0 or not pdf_path.exists():
+            details = (result.stderr or result.stdout or "unknown conversion error").strip()
+            raise RuntimeError(f"Office 文件轉 PDF 失敗：{details[:800]}")
+        return pdf_path.read_bytes()
+
+
 def parse_pptx(file_bytes: bytes) -> str:
     from pptx import Presentation
 
@@ -287,9 +340,11 @@ async def parse_file_async(filename: str, file_bytes: bytes) -> str:
             return await parse_pdf_vision(file_bytes)
         return parse_pdf_text(file_bytes)
     if ext == ".docx":
-        return parse_docx(file_bytes)
+        if _docx_is_plain_text(file_bytes):
+            return parse_docx(file_bytes)
+        return await parse_pdf_vision(_office_to_pdf(file_bytes, ".docx"), force_all_pages=True)
     if ext == ".pptx":
-        return parse_pptx(file_bytes)
+        return await parse_pdf_vision(_office_to_pdf(file_bytes, ".pptx"), force_all_pages=True)
     if ext in {".jpg", ".jpeg", ".png", ".webp"}:
         return await parse_image_vision(filename, file_bytes)
     return parse_text(file_bytes)
