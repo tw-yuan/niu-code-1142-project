@@ -112,8 +112,8 @@ export default function AdminPage() {
       <main className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-800">管理後台</h1>
-            <p className="mt-1 text-sm text-gray-400">管理使用者、講義、學習紀錄與系統狀態</p>
+            <h1 className="text-xl font-semibold text-gray-800">助教工作台</h1>
+            <p className="mt-1 text-sm text-gray-400">追蹤學生學習、講義狀態、測驗互動與系統狀態</p>
           </div>
           <button
             onClick={reload}
@@ -170,19 +170,70 @@ export default function AdminPage() {
 function Overview({ overview }: { overview: AdminOverview | null }) {
   const stats = [
     ["使用者", overview?.users ?? 0],
+    ["活躍學生", overview?.active_students ?? 0],
     ["文件", overview?.documents ?? 0],
+    ["已解析", overview?.ready_documents ?? 0],
     ["學習紀錄", overview?.sessions ?? 0],
     ["訊息", overview?.messages ?? 0],
     ["失敗文件", overview?.failed_documents ?? 0],
+    ["測驗互動", overview?.quiz_attempts ?? 0],
   ];
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-      {stats.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-400">{label}</div>
-          <div className="mt-2 text-2xl font-semibold text-gray-800">{value}</div>
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {stats.map(([label, value]) => (
+          <div key={label} className="rounded-lg border border-gray-200 bg-white p-4">
+            <div className="text-xs text-gray-400">{label}</div>
+            <div className="mt-2 text-2xl font-semibold text-gray-800">{value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 text-sm font-medium text-gray-700">熱門學習方向</div>
+          <div className="grid gap-2">
+            {(overview?.top_directions ?? []).map((item) => (
+              <div key={item.label} className="flex justify-between text-sm">
+                <span className="text-gray-600">{item.label}</span>
+                <span className="text-gray-400">{item.count}</span>
+              </div>
+            ))}
+            {(overview?.top_directions ?? []).length === 0 && <div className="text-sm text-gray-400">尚無資料</div>}
+          </div>
         </div>
-      ))}
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 text-sm font-medium text-gray-700">常用講義</div>
+          <div className="grid gap-2">
+            {(overview?.popular_documents ?? []).map((item) => (
+              <div key={item.filename} className="flex justify-between gap-3 text-sm">
+                <span className="truncate text-gray-600">{item.filename}</span>
+                <span className="shrink-0 text-gray-400">{item.session_count}</span>
+              </div>
+            ))}
+            {(overview?.popular_documents ?? []).length === 0 && <div className="text-sm text-gray-400">尚無資料</div>}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 text-sm font-medium text-gray-700">測驗概況</div>
+          <div className="text-sm text-gray-500">
+            平均分數：{typeof overview?.quiz_average_score === "number" ? `${overview.quiz_average_score} 分` : "尚無分數"}
+          </div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="mb-3 text-sm font-medium text-gray-700">近期學生問題</div>
+        <div className="grid gap-3">
+          {(overview?.recent_questions ?? []).map((item, index) => (
+            <div key={`${item.created_at}-${index}`} className="border-b border-gray-100 pb-3 last:border-0 last:pb-0">
+              <div className="text-sm text-gray-700">{item.content}</div>
+              <div className="mt-1 text-xs text-gray-400">
+                {item.nickname} · {item.document} · {formatDate(item.created_at)}
+              </div>
+            </div>
+          ))}
+          {(overview?.recent_questions ?? []).length === 0 && <div className="text-sm text-gray-400">尚無資料</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -282,12 +333,18 @@ function Sessions({
             className="rounded-lg border border-gray-200 bg-white p-4 text-left hover:border-indigo-300"
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="font-medium text-gray-800">{session.direction_emoji} {session.direction_label}</div>
+              <div className="font-medium text-gray-800">{session.direction_emoji} {session.title || session.direction_label}</div>
               <span className="text-xs text-gray-400">{session.message_count} 則</span>
             </div>
             <div className="mt-1 truncate text-xs text-gray-400">
               {session.owner_nickname ?? "未知使用者"} · {session.document_original_filename ?? "未知文件"}
             </div>
+            {session.quiz_attempts > 0 && (
+              <div className="mt-2 text-xs text-indigo-500">
+                測驗 {session.quiz_attempts} 次
+                {typeof session.quiz_average_score === "number" ? ` · 平均 ${session.quiz_average_score} 分` : ""}
+              </div>
+            )}
             <div className="mt-1 text-xs text-gray-300">{formatDate(session.created_at)}</div>
             <div
               onClick={(e) => {
@@ -307,7 +364,7 @@ function Sessions({
         ) : (
           <div>
             <div className="mb-4 border-b border-gray-100 pb-3">
-              <div className="font-semibold text-gray-800">{selectedSession.direction_label}</div>
+              <div className="font-semibold text-gray-800">{selectedSession.title || selectedSession.direction_label}</div>
               <div className="mt-1 text-xs text-gray-400">
                 {selectedSession.owner_nickname ?? "未知使用者"} · {selectedSession.document_original_filename ?? "未知文件"}
               </div>

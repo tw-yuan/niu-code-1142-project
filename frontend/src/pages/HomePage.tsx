@@ -84,12 +84,17 @@ export default function HomePage() {
                 className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-indigo-300 hover:shadow-sm transition-all group"
               >
                 <div className="text-2xl">
-                  {doc.file_type === "pdf" ? "📕" : doc.file_type === "docx" ? "📘" : "📄"}
+                  {doc.file_type === "pdf" ? "📕" : doc.file_type === "docx" ? "📘" : doc.file_type === "pptx" ? "📊" : "📄"}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-gray-800 truncate group-hover:text-indigo-700">
                     {doc.original_filename}
                   </div>
+                  {(doc.course_name || doc.lesson_topic) && (
+                    <div className="mt-0.5 truncate text-xs text-gray-500">
+                      {[doc.course_name, doc.lesson_topic].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
                   <div className="text-xs text-gray-400 mt-0.5">
                     {formatDate(doc.created_at)} · {formatSize(doc.file_size)} · {doc.token_count.toLocaleString()} tokens
                     {doc.index_status === "indexed" && doc.token_count >= 12000 && (

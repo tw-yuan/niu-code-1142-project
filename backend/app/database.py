@@ -24,6 +24,11 @@ async def _ensure_sqlite_columns(conn) -> None:
     await _add_column_if_missing(conn, "users", "role", "VARCHAR(20) DEFAULT 'student'")
     await _add_column_if_missing(conn, "documents", "parse_status", "VARCHAR(20) DEFAULT 'ready'")
     await _add_column_if_missing(conn, "documents", "error_message", "TEXT")
+    await _add_column_if_missing(conn, "documents", "course_name", "VARCHAR(120)")
+    await _add_column_if_missing(conn, "documents", "lesson_topic", "VARCHAR(160)")
+    await _add_column_if_missing(conn, "documents", "learning_goals", "TEXT")
+    await _add_column_if_missing(conn, "chat_messages", "quiz_metadata", "TEXT")
+    await _add_column_if_missing(conn, "learning_sessions", "title", "VARCHAR(160)")
 
 
 async def _add_column_if_missing(conn, table: str, column: str, definition: str) -> None:

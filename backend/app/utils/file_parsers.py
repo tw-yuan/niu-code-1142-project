@@ -38,6 +38,9 @@ async def parse_pdf_vision(file_bytes: bytes) -> str:
     from openai import AsyncOpenAI
     from app.config import settings
 
+    if settings.demo_mode or not settings.openai_compatible_api_key:
+        return "這是一份掃描版 PDF。示範模式未呼叫視覺模型，請改用文字型 PDF 或設定 VISION_MODEL API key 取得完整 OCR。"
+
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     chars_per_page = _pdf_text_per_page(doc)
     threshold = settings.pdf_text_threshold
@@ -116,6 +119,26 @@ def parse_docx(file_bytes: bytes) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
 
+def parse_pptx(file_bytes: bytes) -> str:
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(file_bytes))
+    slides: list[str] = []
+    for slide_index, slide in enumerate(prs.slides, start=1):
+        parts = [f"## 投影片 {slide_index}"]
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text.strip():
+                parts.append(shape.text.strip())
+            if getattr(shape, "has_table", False):
+                rows = []
+                for row in shape.table.rows:
+                    rows.append(" | ".join(cell.text.strip() for cell in row.cells))
+                if rows:
+                    parts.append("\n".join(rows))
+        slides.append("\n\n".join(parts))
+    return "\n\n---\n\n".join(slides)
+
+
 def parse_text(file_bytes: bytes) -> str:
     for enc in ("utf-8", "big5", "gbk", "latin-1"):
         try:
@@ -128,6 +151,9 @@ def parse_text(file_bytes: bytes) -> str:
 async def parse_image_vision(filename: str, file_bytes: bytes) -> str:
     from openai import AsyncOpenAI
     from app.config import settings
+
+    if settings.demo_mode or not settings.openai_compatible_api_key:
+        return f"這是一張課程圖片或講義截圖（{filename}）。示範模式未呼叫視覺模型，請設定 VISION_MODEL API key 取得完整辨識內容。"
 
     ext = Path(filename).suffix.lower().lstrip(".") or "png"
     mime = "jpeg" if ext in ("jpg", "jpeg") else ext
@@ -176,6 +202,8 @@ async def parse_file_async(filename: str, file_bytes: bytes) -> str:
         return parse_pdf_text(file_bytes)
     if ext == ".docx":
         return parse_docx(file_bytes)
+    if ext == ".pptx":
+        return parse_pptx(file_bytes)
     if ext in {".jpg", ".jpeg", ".png", ".webp"}:
         return await parse_image_vision(filename, file_bytes)
     return parse_text(file_bytes)

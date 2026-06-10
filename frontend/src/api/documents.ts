@@ -5,6 +5,10 @@ export interface Document {
   original_filename: string;
   file_type: string;
   file_size: number;
+  course_name?: string | null;
+  lesson_topic?: string | null;
+  learning_goals?: string | null;
+  parsed_preview?: string | null;
   token_count: number;
   parse_status: "uploaded" | "parsing" | "ready" | "failed";
   index_status: string;
@@ -23,9 +27,17 @@ export interface Direction {
 export async function uploadDocument(
   file: File,
   onProgress?: (progress: number) => void,
+  metadata?: {
+    course_name?: string;
+    lesson_topic?: string;
+    learning_goals?: string;
+  },
 ): Promise<Document> {
   const form = new FormData();
   form.append("file", file);
+  if (metadata?.course_name) form.append("course_name", metadata.course_name);
+  if (metadata?.lesson_topic) form.append("lesson_topic", metadata.lesson_topic);
+  if (metadata?.learning_goals) form.append("learning_goals", metadata.learning_goals);
   const { data } = await client.post("/documents/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: (event) => {

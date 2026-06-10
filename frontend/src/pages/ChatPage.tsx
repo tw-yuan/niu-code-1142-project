@@ -127,10 +127,45 @@ function AssistantBubble({ message }: { message: Message }) {
         {response && (
           <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 leading-relaxed">
             <Markdown content={response} />
+            <MessageEvidence message={message} />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function MessageEvidence({ message }: { message: Message }) {
+  return (
+    <>
+      {message.quiz_metadata && (
+        <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
+          <div className="font-medium">測驗摘要</div>
+          <div className="mt-1 flex flex-wrap gap-2 text-indigo-600">
+            <span>{message.quiz_metadata.status === "graded" ? "已批改" : "已出題"}</span>
+            {message.quiz_metadata.question_count ? <span>{message.quiz_metadata.question_count} 題</span> : null}
+            {typeof message.quiz_metadata.score === "number" ? <span>{message.quiz_metadata.score} 分</span> : null}
+          </div>
+        </div>
+      )}
+      {message.context_chunks_used && message.context_chunks_used.length > 0 && (
+        <details className="mt-3 border-t border-gray-100 pt-2">
+          <summary className="cursor-pointer text-xs text-gray-400 hover:text-indigo-500">
+            引用依據（{message.context_chunks_used.length}）
+          </summary>
+          <div className="mt-2 space-y-2">
+            {message.context_chunks_used.map((source, index) => (
+              <div key={`${source.chunk_index}-${index}`} className="rounded-lg bg-gray-50 p-2 text-xs text-gray-500 whitespace-pre-wrap">
+                <div className="font-medium text-gray-500 mb-1">
+                  {source.source_label || `片段 ${Number(source.chunk_index) + 1}`}
+                </div>
+                {source.snippet || source.text}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </>
   );
 }
 

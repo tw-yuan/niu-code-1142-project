@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Annotated
@@ -22,6 +22,10 @@ class DocumentResponse(BaseModel):
     original_filename: str
     file_type: str
     file_size: int
+    course_name: str | None = None
+    lesson_topic: str | None = None
+    learning_goals: str | None = None
+    parsed_preview: str | None = None
     token_count: int
     parse_status: str
     index_status: str
@@ -37,10 +41,21 @@ async def upload(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    course_name: Annotated[str | None, Form()] = None,
+    lesson_topic: Annotated[str | None, Form()] = None,
+    learning_goals: Annotated[str | None, Form()] = None,
 ):
     file_bytes = await file.read()
     try:
-        doc = await upload_document(db, user.id, file.filename or "upload", file_bytes)
+        doc = await upload_document(
+            db,
+            user.id,
+            file.filename or "upload",
+            file_bytes,
+            course_name=course_name,
+            lesson_topic=lesson_topic,
+            learning_goals=learning_goals,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -122,7 +137,12 @@ async def doc_directions(
 
     # 重新生成並存入快取；動態方向生成失敗（一張都沒有）時不寫入快取，
     # 否則「只有固定方向」的結果會被永久快取，之後就不會再重試
-    directions = await get_directions(doc.parsed_text)
+    directions = await get_directions(
+        doc.parsed_text,
+        course_name=doc.course_name,
+        lesson_topic=doc.lesson_topic,
+        learning_goals=doc.learning_goals,
+    )
     if any(d.get("is_dynamic") for d in directions):
         doc.directions_cache = json.dumps(directions, ensure_ascii=False)
         await db.commit()

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Annotated
 
@@ -51,7 +52,10 @@ class AdminSessionResponse(BaseModel):
     direction_key: str
     direction_label: str
     direction_emoji: str | None
+    title: str | None = None
     message_count: int
+    quiz_attempts: int = 0
+    quiz_average_score: float | None = None
     created_at: datetime
 
 
@@ -75,12 +79,76 @@ async def overview(
     failed_documents = await db.scalar(
         select(func.count()).select_from(Document).where(Document.parse_status == "failed")
     )
+    active_students = await db.scalar(
+        select(func.count(func.distinct(LearningSession.user_id))).select_from(LearningSession)
+    )
+    ready_documents = await db.scalar(
+        select(func.count()).select_from(Document).where(Document.parse_status == "ready")
+    )
+    top_direction_rows = await db.execute(
+        select(LearningSession.direction_label, func.count())
+        .group_by(LearningSession.direction_label)
+        .order_by(func.count().desc())
+        .limit(5)
+    )
+    popular_document_rows = await db.execute(
+        select(Document.original_filename, func.count(LearningSession.id))
+        .join(LearningSession, LearningSession.document_id == Document.id)
+        .group_by(Document.id)
+        .order_by(func.count(LearningSession.id).desc())
+        .limit(5)
+    )
+    recent_question_rows = await db.execute(
+        select(ChatMessage.content, User.nickname, Document.original_filename, ChatMessage.created_at)
+        .join(LearningSession, LearningSession.id == ChatMessage.session_id)
+        .join(User, User.id == LearningSession.user_id)
+        .join(Document, Document.id == LearningSession.document_id)
+        .where(ChatMessage.role == "user")
+        .order_by(ChatMessage.created_at.desc())
+        .limit(8)
+    )
+    quiz_rows = await db.execute(
+        select(ChatMessage.quiz_metadata).where(ChatMessage.quiz_metadata.is_not(None))
+    )
+    quiz_attempts = 0
+    quiz_scores: list[float] = []
+    for (raw_metadata,) in quiz_rows:
+        try:
+            metadata = json.loads(raw_metadata)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if metadata.get("kind") != "quiz":
+            continue
+        quiz_attempts += 1
+        if isinstance(metadata.get("score"), (int, float)):
+            quiz_scores.append(float(metadata["score"]))
     return {
         "users": users or 0,
         "documents": documents or 0,
         "sessions": sessions or 0,
         "messages": messages or 0,
         "failed_documents": failed_documents or 0,
+        "active_students": active_students or 0,
+        "ready_documents": ready_documents or 0,
+        "quiz_attempts": quiz_attempts,
+        "quiz_average_score": round(sum(quiz_scores) / len(quiz_scores), 1) if quiz_scores else None,
+        "top_directions": [
+            {"label": label, "count": count}
+            for label, count in top_direction_rows.all()
+        ],
+        "popular_documents": [
+            {"filename": filename, "session_count": count}
+            for filename, count in popular_document_rows.all()
+        ],
+        "recent_questions": [
+            {
+                "content": content[:160],
+                "nickname": nickname,
+                "document": filename,
+                "created_at": created_at,
+            }
+            for content, nickname, filename, created_at in recent_question_rows.all()
+        ],
     }
 
 
@@ -227,10 +295,11 @@ async def list_sessions_admin(
     for session in sessions:
         user = await db.get(User, session.user_id)
         doc = await db.get(Document, session.document_id)
-        message_count = await db.scalar(
-            select(func.count()).select_from(ChatMessage).where(ChatMessage.session_id == session.id)
+        msg_result = await db.execute(
+            select(ChatMessage).where(ChatMessage.session_id == session.id)
         )
-        out.append(_session_response(session, user, doc, message_count or 0))
+        messages = list(msg_result.scalars().all())
+        out.append(_session_response(session, user, doc, messages))
     return out
 
 
@@ -250,8 +319,8 @@ async def get_session_admin(
         .where(ChatMessage.session_id == session.id)
         .order_by(ChatMessage.created_at)
     )
-    messages = result.scalars().all()
-    base = _session_response(session, user, doc, len(messages))
+    messages = list(result.scalars().all())
+    base = _session_response(session, user, doc, messages)
     return AdminSessionDetailResponse(**base.model_dump(), messages=[message_response(m) for m in messages])
 
 
@@ -269,12 +338,31 @@ async def delete_session_admin(
     return {"message": "ok"}
 
 
+def _quiz_summary(messages: list[ChatMessage]) -> tuple[int, float | None]:
+    attempts = 0
+    scores: list[float] = []
+    for message in messages:
+        if not message.quiz_metadata:
+            continue
+        try:
+            metadata = json.loads(message.quiz_metadata)
+        except json.JSONDecodeError:
+            continue
+        if metadata.get("kind") != "quiz":
+            continue
+        attempts += 1
+        if isinstance(metadata.get("score"), (int, float)):
+            scores.append(float(metadata["score"]))
+    return attempts, round(sum(scores) / len(scores), 1) if scores else None
+
+
 def _session_response(
     session: LearningSession,
     user: User | None,
     doc: Document | None,
-    message_count: int,
+    messages: list[ChatMessage],
 ) -> AdminSessionResponse:
+    quiz_attempts, quiz_average_score = _quiz_summary(messages)
     return AdminSessionResponse(
         id=session.id,
         user_id=session.user_id,
@@ -284,6 +372,9 @@ def _session_response(
         direction_key=session.direction_key,
         direction_label=session.direction_label,
         direction_emoji=session.direction_emoji,
-        message_count=message_count,
+        title=session.title,
+        message_count=len(messages),
+        quiz_attempts=quiz_attempts,
+        quiz_average_score=quiz_average_score,
         created_at=session.created_at,
     )

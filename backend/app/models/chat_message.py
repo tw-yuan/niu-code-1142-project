@@ -12,6 +12,7 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(20))  # user / assistant
     content: Mapped[str] = mapped_column(Text)
     context_chunks_used: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    quiz_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

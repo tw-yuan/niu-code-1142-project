@@ -61,8 +61,73 @@ def get_direction_system_prompt(direction_key: str, dynamic_hint: str | None = N
     return f"{DEFAULT_DYNAMIC_PROMPT}\n\n{INTEGRITY_POLICY}"
 
 
-async def generate_dynamic_directions(doc_text: str) -> list[dict]:
+def fallback_dynamic_directions(doc_text: str, lesson_topic: str | None = None) -> list[dict]:
+    topic = lesson_topic or "這份講義"
+    has_code = any(token in doc_text.lower() for token in ("def ", "class ", "algorithm", "程式", "資料結構"))
+    has_formula = any(token in doc_text for token in ("=", "公式", "定理", "推導", "計算"))
+    directions = [
+        {
+            "key": "key_concepts",
+            "label": "核心概念地圖",
+            "description": f"把「{topic}」整理成概念關係與複習順序",
+            "emoji": "🗺️",
+            "is_dynamic": True,
+        },
+        {
+            "key": "exam_focus",
+            "label": "考前重點",
+            "description": "整理最可能需要熟記、理解與練習的重點",
+            "emoji": "🎯",
+            "is_dynamic": True,
+        },
+    ]
+    if has_code:
+        directions.append({
+            "key": "code_walkthrough",
+            "label": "程式流程解析",
+            "description": "逐步拆解講義中的程式、演算法或資料結構流程",
+            "emoji": "🧩",
+            "is_dynamic": True,
+        })
+    elif has_formula:
+        directions.append({
+            "key": "formula_drills",
+            "label": "公式推導練習",
+            "description": "針對公式、定理與計算步驟做練習",
+            "emoji": "🔢",
+            "is_dynamic": True,
+        })
+    else:
+        directions.append({
+            "key": "practice_plan",
+            "label": "練習計畫",
+            "description": "依照講義內容安排循序練習與自我檢核",
+            "emoji": "✅",
+            "is_dynamic": True,
+        })
+    return directions[:3]
+
+
+async def generate_dynamic_directions(
+    doc_text: str,
+    course_name: str | None = None,
+    lesson_topic: str | None = None,
+    learning_goals: str | None = None,
+) -> list[dict]:
+    if settings.demo_mode or not settings.openai_compatible_api_key:
+        return fallback_dynamic_directions(doc_text, lesson_topic)
+
     preview = doc_text[:3000]
+    course_context = "\n".join(
+        filter(
+            None,
+            [
+                f"課程名稱：{course_name}" if course_name else None,
+                f"本週主題：{lesson_topic}" if lesson_topic else None,
+                f"學習目標：{learning_goals}" if learning_goals else None,
+            ],
+        )
+    )
 
     oai = AsyncOpenAI(
         base_url=settings.openai_compatible_base_url,
@@ -71,12 +136,13 @@ async def generate_dynamic_directions(doc_text: str) -> list[dict]:
 
     prompt = (
         "以下是一份課程講義的部分內容。請分析這份講義的主題和內容，"
-        "生成 4 個最適合這份講義的客製化學習方向。\n\n"
+        "生成 2 到 3 個最適合這份講義的客製化學習方向。\n\n"
         "要求：\n"
         "1. 每個方向必須是具體且與講義內容直接相關的\n"
         "2. 方向應該對學生有實際學習價值\n"
         "3. 請以 JSON 陣列格式回傳，每個物件包含：key（英文識別符）、label（繁體中文簡短名稱）、"
         "description（繁體中文一句話說明）、emoji（1個適合的 emoji）\n\n"
+        f"{course_context}\n\n"
         "講義內容：\n"
         f"{preview}\n\n"
         "請直接回傳 JSON 陣列，不要加其他說明文字。範例格式：\n"
@@ -99,11 +165,16 @@ async def generate_dynamic_directions(doc_text: str) -> list[dict]:
         dynamic = json.loads(raw[start : end + 1])
         for d in dynamic:
             d["is_dynamic"] = True
-        return dynamic[:4]
+        return dynamic[:3]
     except Exception:
-        return []
+        return fallback_dynamic_directions(doc_text, lesson_topic)
 
 
-async def get_directions(doc_text: str) -> list[dict]:
-    dynamic = await generate_dynamic_directions(doc_text)
+async def get_directions(
+    doc_text: str,
+    course_name: str | None = None,
+    lesson_topic: str | None = None,
+    learning_goals: str | None = None,
+) -> list[dict]:
+    dynamic = await generate_dynamic_directions(doc_text, course_name, lesson_topic, learning_goals)
     return FIXED_DIRECTIONS + dynamic

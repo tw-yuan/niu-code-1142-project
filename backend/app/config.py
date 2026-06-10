@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     openai_compatible_model: str = "openai/gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     vision_model: str = "openai/gpt-4o-mini"
+    demo_mode: bool = False
     # 每頁文字少於此字數視為掃描版，改用視覺模型
     pdf_text_threshold: int = 80
     max_file_size_mb: int = 20

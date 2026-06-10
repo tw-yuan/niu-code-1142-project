@@ -45,6 +45,14 @@ def _split_into_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
+def _source_label(chunk: str, index: int) -> str:
+    for line in chunk.splitlines():
+        clean = line.strip(" #\t")
+        if clean:
+            return clean[:80]
+    return f"片段 {index + 1}"
+
+
 def _collection_name(doc_id: int) -> str:
     return f"doc_{doc_id}"
 
@@ -66,7 +74,12 @@ async def index_document(doc_id: int, user_id: int, text: str) -> None:
 
     ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
     metadatas = [
-        {"user_id": user_id, "doc_id": doc_id, "chunk_index": i}
+        {
+            "user_id": user_id,
+            "doc_id": doc_id,
+            "chunk_index": i,
+            "source_label": _source_label(chunks[i], i),
+        }
         for i in range(len(chunks))
     ]
     col.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
@@ -99,6 +112,7 @@ async def search_document(doc_id: int, user_id: int, query: str) -> list[dict]:
         out.append(
             {
                 "chunk_index": metadata.get("chunk_index", i),
+                "source_label": metadata.get("source_label") or _source_label(text, i),
                 "text": text,
                 "snippet": text[:500],
             }
@@ -122,11 +136,29 @@ async def get_context_with_sources(
     query: str,
 ) -> tuple[str, list[dict]]:
     if token_count < settings.rag_token_threshold:
-        source = {"chunk_index": 0, "snippet": full_text[:500], "text": full_text[:2000]}
+        source = {
+            "chunk_index": 0,
+            "source_label": "全文模式",
+            "snippet": full_text[:500],
+            "text": full_text[:2000],
+        }
         return full_text, [source]
+    if settings.demo_mode or not settings.openai_compatible_api_key:
+        source = {
+            "chunk_index": 0,
+            "source_label": "示範模式全文節錄",
+            "snippet": full_text[:500],
+            "text": full_text[:2000],
+        }
+        return full_text[:8000], [source]
     chunks = await search_document(doc_id, user_id, query)
     if not chunks:
-        source = {"chunk_index": 0, "snippet": full_text[:500], "text": full_text[:2000]}
+        source = {
+            "chunk_index": 0,
+            "source_label": "全文備援",
+            "snippet": full_text[:500],
+            "text": full_text[:2000],
+        }
         return full_text[:8000], [source]
     return "\n\n---\n\n".join(c["text"] for c in chunks), chunks
 

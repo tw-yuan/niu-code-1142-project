@@ -8,7 +8,7 @@ from app.database import AsyncSessionLocal
 from app.models.document import Document
 from app.utils.file_parsers import parse_file_async, count_tokens
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
 MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 
@@ -21,6 +21,9 @@ async def upload_document(
     user_id: int,
     original_filename: str,
     file_bytes: bytes,
+    course_name: str | None = None,
+    lesson_topic: str | None = None,
+    learning_goals: str | None = None,
 ) -> Document:
     ext = _safe_ext(original_filename)
     if ext not in ALLOWED_EXTENSIONS:
@@ -39,6 +42,9 @@ async def upload_document(
         original_filename=original_filename,
         file_type=ext.lstrip("."),
         file_size=len(file_bytes),
+        course_name=course_name.strip()[:120] if course_name and course_name.strip() else None,
+        lesson_topic=lesson_topic.strip()[:160] if lesson_topic and lesson_topic.strip() else None,
+        learning_goals=learning_goals.strip()[:2000] if learning_goals and learning_goals.strip() else None,
         parsed_text=None,
         token_count=0,
         parse_status="uploaded",
@@ -76,7 +82,12 @@ async def process_document(doc_id: int) -> None:
             doc.parse_status = "ready"
             await db.commit()
 
-            if token_count >= settings.rag_token_threshold and parsed_text:
+            if (
+                token_count >= settings.rag_token_threshold
+                and parsed_text
+                and not settings.demo_mode
+                and settings.openai_compatible_api_key
+            ):
                 try:
                     doc.index_status = "indexing"
                     await db.commit()

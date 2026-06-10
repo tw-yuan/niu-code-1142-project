@@ -21,13 +21,13 @@
 ```
 登入（暱稱 + 共用密碼）
   ↓
-上傳講義（PDF / DOCX / TXT / MD）
+上傳講義（PDF / DOCX / PPTX / TXT / MD / JPG / PNG / WebP）
   ↓
 系統解析 + 分析內容（loading 動畫）
   ↓
 顯示方向卡片：
   [固定 4 張] 深入問答 / 章節摘要 / 觀念解釋 / 自我測驗
-  [動態 4 張] LLM 根據講義內容生成的客製化方向
+  [動態 2-3 張] LLM 根據講義內容與課程脈絡生成的客製化方向
   ↓
 使用者點選方向
   ↓
@@ -98,7 +98,7 @@ notebooklm-app/
 │   │   │   ├── direction_service.py # 固定方向 + LLM 動態方向
 │   │   │   └── chat_service.py     # 建構 context + SSE 串流
 │   │   └── utils/
-│   │       ├── file_parsers.py     # PDF/DOCX/TXT/MD 解析
+│   │       ├── file_parsers.py     # PDF/DOCX/PPTX/TXT/MD/圖片 解析
 │   │       └── security.py        # 密碼驗證、session token
 │   ├── data/                       # 上傳檔案 + ChromaDB 資料夾
 │   └── pyproject.toml
@@ -158,9 +158,9 @@ def get_context(document: Document, query: str) -> str:
 - `explain` 🧠 觀念解釋 — 解釋課程中的重要概念
 - `quiz` 📋 自我測驗 — 生成測驗題目並即時批改
 
-**動態方向**（4 張，LLM 生成）：
-- 讀取文件前 2000 tokens + 段落標題
-- 請 LLM 以 JSON 回傳 4 個客製化學習方向
+**動態方向**（2-3 張，LLM 生成）：
+- 讀取文件前 3000 字 + 選填課程名稱 / 本週主題 / 學習目標
+- 請 LLM 以 JSON 回傳 2-3 個客製化學習方向
 - 格式：`{key, label, description, emoji}`
 - 範例：「資料結構演算法練習」、「微積分公式整理」、「化學反應方程式解題」
 
@@ -246,7 +246,7 @@ POST /api/sessions/{id}/messages  # {content} → SSE 串流 LLM 回覆
 | 里程碑 | 內容 |
 |--------|------|
 | M1 | 專案骨架 + 環境設定 + Auth + DB schema |
-| M2 | 文件上傳 + 解析（PDF/DOCX/TXT）+ token 計算 |
+| M2 | 文件上傳 + 解析（PDF/DOCX/PPTX/TXT/MD/圖片）+ token 計算 |
 | M3 | RAG pipeline（ChromaDB + embedding + chunk）|
 | M4 | 方向生成（固定 + LLM 動態）|
 | M5 | Chat 串流（SSE + system prompt + context 組裝）|
@@ -280,6 +280,7 @@ sqlalchemy, aiosqlite
 python-multipart           # 檔案上傳
 PyMuPDF                    # PDF 解析
 python-docx                # DOCX 解析
+python-pptx                # PPTX 解析
 tiktoken                   # token 計算
 openai                     # LLM + embeddings
 chromadb                   # 向量資料庫

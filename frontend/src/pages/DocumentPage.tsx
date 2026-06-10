@@ -133,6 +133,13 @@ export default function DocumentPage() {
                   {doc.token_count.toLocaleString()} tokens
                   <StatusLabel doc={doc} />
                 </p>
+                {(doc.course_name || doc.lesson_topic || doc.learning_goals) && (
+                  <div className="mt-3 grid gap-1 text-xs text-gray-500">
+                    {doc.course_name && <div>課程：{doc.course_name}</div>}
+                    {doc.lesson_topic && <div>主題：{doc.lesson_topic}</div>}
+                    {doc.learning_goals && <div>目標：{doc.learning_goals}</div>}
+                  </div>
+                )}
                 {doc.error_message && (
                   <p className="text-xs text-red-500 mt-2 break-words">{doc.error_message}</p>
                 )}
@@ -147,6 +154,16 @@ export default function DocumentPage() {
               </div>
             </div>
             <DocumentProgress doc={doc} />
+            {doc.parse_status === "ready" && doc.parsed_preview && (
+              <details className="mt-5 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-gray-500 hover:text-indigo-600">
+                  查看解析內容預覽
+                </summary>
+                <div className="mt-3 max-h-56 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-gray-500">
+                  {doc.parsed_preview}
+                </div>
+              </details>
+            )}
           </div>
         ) : (
           <p className="text-red-500">找不到此文件</p>

@@ -13,6 +13,9 @@ class Document(Base):
     original_filename: Mapped[str] = mapped_column(String(256))
     file_type: Mapped[str] = mapped_column(String(20))
     file_size: Mapped[int] = mapped_column(Integer, default=0)
+    course_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lesson_topic: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    learning_goals: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     # uploaded / parsing / ready / failed
@@ -27,3 +30,9 @@ class Document(Base):
 
     user: Mapped["User"] = relationship(back_populates="documents")  # noqa
     learning_sessions: Mapped[list["LearningSession"]] = relationship(back_populates="document", cascade="all, delete-orphan")  # noqa
+
+    @property
+    def parsed_preview(self) -> str | None:
+        if not self.parsed_text:
+            return None
+        return self.parsed_text[:1200]

@@ -3,7 +3,7 @@
 讓學生上傳課程講義後，系統自動解析與分析內容，提供多個「學習方向」卡片，
 點選後即可針對該份講義進行串流式互動問答、摘要、觀念解釋或自我測驗。
 
-- 上傳格式：PDF / DOCX / TXT / MD / JPG / PNG / WebP
+- 上傳格式：PDF / DOCX / PPTX / TXT / MD / JPG / PNG / WebP
 - 介面語言：繁體中文（zh-TW）
 - 多人共用一組密碼登入，以暱稱區隔各自的資料
 
@@ -52,6 +52,7 @@ OPENAI_COMPATIBLE_API_KEY=sk-or-xxxxxxxx  # LLM API 金鑰
 OPENAI_COMPATIBLE_MODEL=openai/gpt-4o-mini
 EMBEDDING_MODEL=text-embedding-3-small
 VISION_MODEL=openai/gpt-4o-mini           # 解析掃描版 PDF 用
+DEMO_MODE=false                           # true 時不依賴外部 LLM，使用示範回覆
 ```
 
 ### 2a. 開發模式
@@ -107,7 +108,7 @@ docker compose up --build
   ↓
 顯示學習方向卡片
   ├─ 固定 4 張：💬 深入問答 / 📝 章節摘要 / 🧠 觀念解釋 / 📋 自我測驗
-  └─ 動態 2-3 張：LLM 依講義內容客製生成
+  └─ 動態 2-3 張：LLM 依講義內容、課程名稱、主題與學習目標客製生成
   ↓
 選擇方向 → 進入串流聊天介面
   ↓
@@ -124,8 +125,9 @@ docker compose up --build
 **RAG 策略**：依文件長度切換。token 數 < 12,000 直接將全文放入 context；
 ≥ 12,000 才在上傳時切塊（500 token、50 重疊）建索引，問答時用語意搜尋取 top-5 段落。
 
-**學習方向**：固定方向各有專屬 system prompt；動態方向由 LLM 讀取講義開頭生成，
-結果快取於文件記錄中（`?refresh=true` 可強制重新生成）。
+**學習方向**：固定方向各有專屬 system prompt；動態方向由 LLM 讀取講義開頭與選填課程脈絡生成，
+結果快取於文件記錄中（`?refresh=true` 可強制重新生成）。若未設定 API key 或啟用 `DEMO_MODE=true`，
+系統會使用示範方向與示範聊天回覆，讓展示主流程可離線完成。
 
 **串流聊天**：透過 SSE 逐 token 推送，回應中的 `<think>...</think>` 思考過程會在前端
 折疊顯示。使用者訊息送出即儲存，AI 回覆於串流結束後儲存。

@@ -14,6 +14,7 @@ class LearningSession(Base):
     direction_label: Mapped[str] = mapped_column(String(100))
     direction_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     direction_emoji: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

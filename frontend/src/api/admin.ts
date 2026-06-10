@@ -7,6 +7,18 @@ export interface AdminOverview {
   sessions: number;
   messages: number;
   failed_documents: number;
+  active_students: number;
+  ready_documents: number;
+  quiz_attempts: number;
+  quiz_average_score: number | null;
+  top_directions: Array<{ label: string; count: number }>;
+  popular_documents: Array<{ filename: string; session_count: number }>;
+  recent_questions: Array<{
+    content: string;
+    nickname: string;
+    document: string;
+    created_at: string;
+  }>;
 }
 
 export interface AdminUser {
@@ -41,7 +53,10 @@ export interface AdminSession {
   direction_key: string;
   direction_label: string;
   direction_emoji: string | null;
+  title: string | null;
   message_count: number;
+  quiz_attempts: number;
+  quiz_average_score: number | null;
   created_at: string;
 }
 
