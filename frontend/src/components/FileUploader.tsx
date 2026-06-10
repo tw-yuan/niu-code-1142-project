@@ -10,19 +10,26 @@ export default function FileUploader({ onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState<"idle" | "uploading" | "handoff">("idle");
   const [error, setError] = useState("");
 
   async function handleFile(file: File) {
     setError("");
+    setProgress(0);
+    setPhase("uploading");
     setUploading(true);
     try {
-      const doc = await uploadDocument(file);
+      const doc = await uploadDocument(file, setProgress);
+      setPhase("handoff");
+      setProgress(100);
       onUploaded(doc);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(msg || "上傳失敗，請再試一次");
     } finally {
       setUploading(false);
+      setPhase("idle");
     }
   }
 
@@ -36,24 +43,38 @@ export default function FileUploader({ onUploaded }: Props) {
   return (
     <div>
       <div
-        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
-          dragging ? "border-indigo-400 bg-indigo-50" : "border-gray-300 hover:border-indigo-300"
-        } ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
+          dragging ? "border-indigo-400 bg-indigo-50 scale-[1.01]" : "border-gray-300 hover:border-indigo-300"
+        } ${uploading ? "pointer-events-none border-indigo-300 bg-indigo-50/50" : ""}`}
         onClick={() => inputRef.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
       >
-        <div className="text-4xl mb-3">{uploading ? "⏳" : "📄"}</div>
+        <div className={`text-4xl mb-3 ${uploading ? "animate-bounce" : ""}`}>{uploading ? "⏳" : "📄"}</div>
         <div className="text-gray-600 font-medium">
-          {uploading ? "上傳中..." : "點擊或拖曳講義到這裡"}
+          {uploading ? (phase === "handoff" ? "上傳完成，準備解析..." : "上傳中...") : "點擊或拖曳講義到這裡"}
         </div>
-        <div className="text-sm text-gray-400 mt-1">支援 PDF、DOCX、TXT、MD</div>
+        <div className="text-sm text-gray-400 mt-1">支援 PDF、DOCX、TXT、MD、JPG、PNG、WebP</div>
+        {uploading && (
+          <div className="mt-5">
+            <div className="h-2 overflow-hidden rounded-full bg-white">
+              <div
+                className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                style={{ width: `${Math.max(progress, 8)}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-xs text-gray-400">
+              <span>{phase === "handoff" ? "交給後端背景處理" : "傳送檔案"}</span>
+              <span>{progress}%</span>
+            </div>
+          </div>
+        )}
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.docx,.txt,.md"
+        accept=".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.webp"
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
       />

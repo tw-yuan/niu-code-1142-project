@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 .env
 *.db
+backend/data/
+backend/.venv/
 data/uploads/
 data/generated/
 node_modules/

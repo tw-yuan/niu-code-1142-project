@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
-import { useSession } from "../auth/SessionContext";
+import { useSession } from "../auth/useSession";
 import { getMe } from "../api/auth";
 
 export default function LoginPage() {

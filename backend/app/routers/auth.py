@@ -8,6 +8,7 @@ from app.services.auth_service import login, logout
 from app.deps import get_current_user, get_current_session
 from app.models.user import User
 from app.models.session import Session
+from app.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -20,6 +21,7 @@ class LoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: int
     nickname: str
+    role: str
 
     model_config = {"from_attributes": True}
 
@@ -38,6 +40,7 @@ async def auth_login(
         value=session.token,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
         max_age=60 * 60 * 24,
     )
     return {"message": "ok", "nickname": body.nickname.strip()}

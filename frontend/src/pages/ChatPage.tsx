@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import ChatBubble from "../components/ChatBubble";
+import Markdown from "../components/Markdown";
 import { getSession } from "../api/sessions";
 import type { Message, SessionDetail } from "../api/sessions";
 
@@ -9,8 +10,14 @@ const INITIAL_MESSAGES: Record<string, string> = {
   summary: "請根據這份講義內容，生成完整的章節摘要，以條列重點的方式呈現。",
   quiz: "請根據這份講義內容出 5 道測驗題（混合選擇題與問答題），等我作答後再逐題批改。",
   explain: "請先介紹這份講義的主要主題與核心概念，讓我建立整體的理解。",
-  qa: "你好！我已讀取這份講義，有什麼想了解的問題嗎？",
+  qa: "請先根據這份講義整理可以深入提問的主題，並列出 3 個建議問題。",
 };
+
+const COMMON_STARTERS = [
+  "先幫我整理這份講義的 5 個重點。",
+  "請用考前複習的方式整理重點與易錯觀念。",
+  "請根據講義出 5 題小測驗，等我回答後再批改。",
+];
 
 function getInitialMessage(key: string, label: string): string {
   return INITIAL_MESSAGES[key] ?? `我選擇了「${label}」這個學習方向，請根據講義內容開始輔助我學習。`;
@@ -91,8 +98,8 @@ function StreamingBubble({ raw }: { raw: string }) {
       <div className="max-w-[75%]">
         <ThinkingBlock text={thinking} done={!inThink} />
         {response && (
-          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-            {response}
+          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 leading-relaxed">
+            <Markdown content={response} />
             <span className="inline-block w-1.5 h-3 bg-gray-400 animate-pulse ml-0.5 align-middle" />
           </div>
         )}
@@ -118,8 +125,8 @@ function AssistantBubble({ message }: { message: Message }) {
       <div className="max-w-[75%]">
         <ThinkingBlock text={thinking} done={true} />
         {response && (
-          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-            {response}
+          <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white border border-gray-200 text-sm text-gray-800 leading-relaxed">
+            <Markdown content={response} />
           </div>
         )}
       </div>
@@ -131,46 +138,54 @@ export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const navDocumentId: number | undefined = (location.state as { documentId?: number })?.documentId;
+  const navState = location.state as { documentId?: number; autoStartPrompt?: string } | null;
+  const navDocumentId: number | undefined = navState?.documentId;
 
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const autoSentRef = useRef(false);
+  const autoStartedRef = useRef(false);
+  const autoStartPromptRef = useRef<string | null>(navState?.autoStartPrompt ?? null);
 
   useEffect(() => {
     if (!sessionId) return;
-    getSession(Number(sessionId)).then((s) => {
-      setSession(s);
-      setMessages(s.messages);
-      if (s.messages.length === 0 && !autoSentRef.current) {
-        autoSentRef.current = true;
-        const firstMsg = getInitialMessage(s.direction_key, s.direction_label);
-        // 延一個 tick 讓 React 完成渲染後再開始串流
-        setTimeout(() => streamFromApi(firstMsg, Number(sessionId), true), 50);
-      }
+    autoStartedRef.current = false;
+    autoStartPromptRef.current = navState?.autoStartPrompt ?? null;
+    queueMicrotask(() => {
+      setLoadingSession(true);
+      setLoadError("");
+      getSession(Number(sessionId))
+        .then((s) => {
+          setSession(s);
+          setMessages(s.messages);
+        })
+        .catch((err) => {
+          setLoadError(err instanceof Error ? err.message : "載入學習紀錄失敗");
+        })
+        .finally(() => setLoadingSession(false));
     });
-  }, [sessionId]);
+  }, [navState?.autoStartPrompt, sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
 
-  async function streamFromApi(text: string, sid: number, isAuto = false) {
-    if (!isAuto) {
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
-      ]);
-    }
+  const streamFromApi = useCallback(async (text: string, sid: number) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now(), role: "user", content: text, created_at: new Date().toISOString() },
+    ]);
     setStreaming(true);
     setStreamingText("");
 
     let full = "";
+    let hadError = false;
     try {
       const resp = await fetch(`/api/sessions/${sid}/messages`, {
         method: "POST",
@@ -186,6 +201,7 @@ export default function ChatPage() {
       for await (const payload of parseSse(resp.body)) {
         if (payload === "[DONE]") break;
         if (payload.startsWith("[ERROR]")) {
+          hadError = true;
           full += payload.slice(7);
           break;
         }
@@ -193,24 +209,37 @@ export default function ChatPage() {
         setStreamingText(full);
       }
     } catch (err) {
+      hadError = true;
       full = `連線錯誤：${err instanceof Error ? err.message : String(err)}`;
       setStreamingText(full);
     }
 
     const finalContent = full || "（無回應）";
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: finalContent,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    if (!hadError) {
+      const refreshed = await getSession(sid);
+      setSession(refreshed);
+      setMessages(refreshed.messages);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: "assistant",
+          content: finalContent,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    }
     setStreamingText("");
     setStreaming(false);
-    setTimeout(() => inputRef.current?.focus(), 100);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (loadingSession || !session || !sessionId || messages.length > 0 || streaming || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    const starter = autoStartPromptRef.current ?? getInitialMessage(session.direction_key, session.direction_label);
+    void streamFromApi(starter, Number(sessionId));
+  }, [loadingSession, messages.length, session, sessionId, streamFromApi, streaming]);
 
   async function sendMessage() {
     if (!input.trim() || streaming || !sessionId) return;
@@ -224,6 +253,22 @@ export default function ChatPage() {
       e.preventDefault();
       sendMessage();
     }
+  }
+
+  function exportSession() {
+    if (!session) return;
+    const title = `${session.document_original_filename ?? "講義"} - ${session.direction_label}`;
+    const body = messages.map((msg) => {
+      const role = msg.role === "user" ? "學生" : "AI";
+      return `## ${role}\n\n${msg.content}`;
+    }).join("\n\n");
+    const blob = new Blob([`# ${title}\n\n${body}\n`], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${session.direction_label}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const documentId = navDocumentId ?? session?.document_id;
@@ -255,6 +300,12 @@ export default function ChatPage() {
                     {session.direction_label}
                   </span>
                 </div>
+                <button
+                  onClick={exportSession}
+                  className="mt-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                >
+                  匯出 Markdown
+                </button>
               </>
             )}
           </div>
@@ -263,10 +314,44 @@ export default function ChatPage() {
         {/* Chat area */}
         <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="flex-1 overflow-y-auto p-4">
-            {messages.length === 0 && !streaming && !streamingText && (
+            {loadingSession && (
+              <div className="text-center text-gray-400 py-16">
+                <div className="mx-auto mb-4 h-8 w-8 rounded-full border-2 border-indigo-100 border-t-indigo-500 animate-spin" />
+                <p className="text-sm">正在載入學習方向...</p>
+              </div>
+            )}
+
+            {loadError && (
+              <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-600">
+                {loadError}
+              </div>
+            )}
+
+            {!loadingSession && !loadError && messages.length === 0 && streaming && !streamingText && (
+              <div className="text-center text-gray-400 py-16">
+                <div className="mx-auto mb-4 h-8 w-8 rounded-full border-2 border-indigo-100 border-t-indigo-500 animate-spin" />
+                <p className="text-sm">已帶入「{session?.direction_label}」，正在開始生成回覆...</p>
+              </div>
+            )}
+
+            {!loadingSession && !loadError && messages.length === 0 && !streaming && !streamingText && (
               <div className="text-center text-gray-400 py-16">
                 <div className="text-3xl mb-3">{session?.direction_emoji ?? "💬"}</div>
-                <p className="text-sm animate-pulse">載入中...</p>
+                <p className="text-sm mb-5">選一個開場問題，或直接輸入你的問題。</p>
+                <div className="mx-auto max-w-xl grid gap-2">
+                  {session && [
+                    getInitialMessage(session.direction_key, session.direction_label),
+                    ...COMMON_STARTERS,
+                  ].map((starter) => (
+                    <button
+                      key={starter}
+                      onClick={() => sessionId && streamFromApi(starter, Number(sessionId))}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-600 hover:border-indigo-300 hover:text-indigo-700"
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

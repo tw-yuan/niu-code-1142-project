@@ -1,4 +1,5 @@
 import json
+import re
 from openai import AsyncOpenAI
 from app.config import settings
 
@@ -46,13 +47,18 @@ DIRECTION_SYSTEM_PROMPTS = {
 
 DEFAULT_DYNAMIC_PROMPT = "你是一位學業助理，請根據提供的講義內容協助學生學習。請以繁體中文回答。"
 
+INTEGRITY_POLICY = (
+    "你必須遵守學術誠信：不要替學生直接完成可繳交作業、考試答案或規避偵測；"
+    "遇到這類要求時，改以提示、解題步驟、檢核清單、概念說明或練習題協助學習。"
+)
+
 
 def get_direction_system_prompt(direction_key: str, dynamic_hint: str | None = None) -> str:
     if direction_key in DIRECTION_SYSTEM_PROMPTS:
-        return DIRECTION_SYSTEM_PROMPTS[direction_key]
+        return f"{DIRECTION_SYSTEM_PROMPTS[direction_key]}\n\n{INTEGRITY_POLICY}"
     if dynamic_hint:
-        return f"你是一位學業助理，專注於「{dynamic_hint}」這個學習方向。請根據提供的講義內容協助學生。請以繁體中文回答。"
-    return DEFAULT_DYNAMIC_PROMPT
+        return f"你是一位學業助理，專注於「{dynamic_hint}」這個學習方向。請根據提供的講義內容協助學生。請以繁體中文回答。\n\n{INTEGRITY_POLICY}"
+    return f"{DEFAULT_DYNAMIC_PROMPT}\n\n{INTEGRITY_POLICY}"
 
 
 async def generate_dynamic_directions(doc_text: str) -> list[dict]:
@@ -65,7 +71,7 @@ async def generate_dynamic_directions(doc_text: str) -> list[dict]:
 
     prompt = (
         "以下是一份課程講義的部分內容。請分析這份講義的主題和內容，"
-        "生成 2 至 3 個最適合這份講義的客製化學習方向。\n\n"
+        "生成 4 個最適合這份講義的客製化學習方向。\n\n"
         "要求：\n"
         "1. 每個方向必須是具體且與講義內容直接相關的\n"
         "2. 方向應該對學生有實際學習價值\n"
@@ -82,17 +88,18 @@ async def generate_dynamic_directions(doc_text: str) -> list[dict]:
             model=settings.openai_compatible_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=500,
+            max_tokens=2000,
         )
         raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        dynamic = json.loads(raw)
+        # 模型可能輸出 <think> 區塊或 ```json 圍欄，直接抓最外層的 JSON 陣列
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        start, end = raw.find("["), raw.rfind("]")
+        if start == -1 or end == -1:
+            return []
+        dynamic = json.loads(raw[start : end + 1])
         for d in dynamic:
             d["is_dynamic"] = True
-        return dynamic[:3]
+        return dynamic[:4]
     except Exception:
         return []
 

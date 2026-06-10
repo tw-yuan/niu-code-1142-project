@@ -15,8 +15,11 @@ class Document(Base):
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     parsed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
+    # uploaded / parsing / ready / failed
+    parse_status: Mapped[str] = mapped_column(String(20), default="uploaded")
     # pending / indexed / failed
     index_status: Mapped[str] = mapped_column(String(20), default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     directions_cache: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

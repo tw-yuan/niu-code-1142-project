@@ -5,8 +5,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
     shared_login_password: str = "student123"
+    admin_login_password: str = "admin123"
+    cookie_secure: bool = False
     openai_compatible_base_url: str = "https://openrouter.ai/api/v1"
     openai_compatible_api_key: str = ""
     openai_compatible_model: str = "openai/gpt-4o-mini"

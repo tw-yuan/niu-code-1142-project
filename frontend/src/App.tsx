@@ -1,11 +1,13 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { SessionProvider } from "./auth/SessionContext";
 import RequireAuth from "./auth/RequireAuth";
+import RequireAdmin from "./auth/RequireAdmin";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import DocumentPage from "./pages/DocumentPage";
 import ChatPage from "./pages/ChatPage";
 import HistoryPage from "./pages/HistoryPage";
+import AdminPage from "./pages/AdminPage";
 
 export default function App() {
   return (
@@ -17,6 +19,7 @@ export default function App() {
           <Route path="/documents/:docId" element={<RequireAuth><DocumentPage /></RequireAuth>} />
           <Route path="/sessions/:sessionId" element={<RequireAuth><ChatPage /></RequireAuth>} />
           <Route path="/history" element={<RequireAuth><HistoryPage /></RequireAuth>} />
+          <Route path="/admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </SessionProvider>

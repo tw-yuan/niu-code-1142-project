@@ -49,7 +49,7 @@ def _collection_name(doc_id: int) -> str:
     return f"doc_{doc_id}"
 
 
-async def index_document(doc_id: int, text: str) -> None:
+async def index_document(doc_id: int, user_id: int, text: str) -> None:
     client = get_chroma_client()
     col = client.get_or_create_collection(name=_collection_name(doc_id))
 
@@ -65,10 +65,14 @@ async def index_document(doc_id: int, text: str) -> None:
     embeddings = [item.embedding for item in response.data]
 
     ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
-    col.upsert(ids=ids, embeddings=embeddings, documents=chunks)
+    metadatas = [
+        {"user_id": user_id, "doc_id": doc_id, "chunk_index": i}
+        for i in range(len(chunks))
+    ]
+    col.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
 
 
-async def search_document(doc_id: int, query: str) -> list[str]:
+async def search_document(doc_id: int, user_id: int, query: str) -> list[dict]:
     client = get_chroma_client()
     try:
         col = client.get_collection(name=_collection_name(doc_id))
@@ -85,8 +89,21 @@ async def search_document(doc_id: int, query: str) -> list[str]:
     results = col.query(
         query_embeddings=[query_embedding],
         n_results=min(settings.rag_top_k, col.count()),
+        where={"user_id": user_id},
     )
-    return results["documents"][0] if results["documents"] else []
+    docs = results["documents"][0] if results["documents"] else []
+    metas = results["metadatas"][0] if results.get("metadatas") else []
+    out = []
+    for i, text in enumerate(docs):
+        metadata = metas[i] if i < len(metas) and metas[i] else {}
+        out.append(
+            {
+                "chunk_index": metadata.get("chunk_index", i),
+                "text": text,
+                "snippet": text[:500],
+            }
+        )
+    return out
 
 
 def delete_document_index(doc_id: int) -> None:
@@ -97,10 +114,23 @@ def delete_document_index(doc_id: int) -> None:
         pass
 
 
-async def get_context(doc_id: int, token_count: int, full_text: str, query: str) -> str:
+async def get_context_with_sources(
+    doc_id: int,
+    user_id: int,
+    token_count: int,
+    full_text: str,
+    query: str,
+) -> tuple[str, list[dict]]:
     if token_count < settings.rag_token_threshold:
-        return full_text
-    chunks = await search_document(doc_id, query)
+        source = {"chunk_index": 0, "snippet": full_text[:500], "text": full_text[:2000]}
+        return full_text, [source]
+    chunks = await search_document(doc_id, user_id, query)
     if not chunks:
-        return full_text[:8000]
-    return "\n\n---\n\n".join(chunks)
+        source = {"chunk_index": 0, "snippet": full_text[:500], "text": full_text[:2000]}
+        return full_text[:8000], [source]
+    return "\n\n---\n\n".join(c["text"] for c in chunks), chunks
+
+
+async def get_context(doc_id: int, user_id: int, token_count: int, full_text: str, query: str) -> str:
+    context, _ = await get_context_with_sources(doc_id, user_id, token_count, full_text, query)
+    return context

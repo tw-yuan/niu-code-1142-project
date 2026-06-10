@@ -4,6 +4,7 @@ export interface Message {
   id: number;
   role: "user" | "assistant";
   content: string;
+  context_chunks_used?: Array<{ chunk_index: number; snippet: string; text?: string }> | null;
   created_at: string;
 }
 

@@ -11,5 +11,5 @@ export async function logout() {
 
 export async function getMe() {
   const { data } = await client.get("/auth/me");
-  return data as { id: number; nickname: string };
+  return data as { id: number; nickname: string; role: "student" | "admin" };
 }

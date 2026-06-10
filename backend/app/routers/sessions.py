@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ class MessageResponse(BaseModel):
     id: int
     role: str
     content: str
+    context_chunks_used: list[dict] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -54,6 +56,22 @@ class SessionDetailResponse(SessionResponse):
     messages: list[MessageResponse] = []
 
 
+def message_response(message: ChatMessage) -> MessageResponse:
+    sources = None
+    if message.context_chunks_used:
+        try:
+            sources = json.loads(message.context_chunks_used)
+        except json.JSONDecodeError:
+            sources = None
+    return MessageResponse(
+        id=message.id,
+        role=message.role,
+        content=message.content,
+        context_chunks_used=sources,
+        created_at=message.created_at,
+    )
+
+
 @router.post("", response_model=SessionResponse)
 async def create_session(
     body: CreateSessionRequest,
@@ -66,6 +84,8 @@ async def create_session(
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文件不存在")
+    if doc.parse_status != "ready":
+        raise HTTPException(status_code=400, detail="文件尚未解析完成")
 
     session = LearningSession(
         user_id=user.id,
@@ -130,10 +150,18 @@ async def get_session_detail(
     doc_result = await db.execute(select(Document).where(Document.id == session.document_id))
     doc = doc_result.scalar_one_or_none()
 
-    r = SessionDetailResponse.model_validate(session)
-    r.document_original_filename = doc.original_filename if doc else None
-    r.messages = [MessageResponse.model_validate(m) for m in messages]
-    return r
+    # 不能直接 model_validate(session)：SessionDetailResponse 的 messages 欄位會
+    # 觸發 ORM lazy load，在 async session 下拋 MissingGreenlet
+    return SessionDetailResponse(
+        id=session.id,
+        document_id=session.document_id,
+        direction_key=session.direction_key,
+        direction_label=session.direction_label,
+        direction_emoji=session.direction_emoji,
+        created_at=session.created_at,
+        document_original_filename=doc.original_filename if doc else None,
+        messages=[message_response(m) for m in messages],
+    )
 
 
 @router.delete("/{session_id}")

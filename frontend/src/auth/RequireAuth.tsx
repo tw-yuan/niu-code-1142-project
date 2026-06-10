@@ -1,5 +1,5 @@
 import { Navigate } from "react-router-dom";
-import { useSession } from "./SessionContext";
+import { useSession } from "./useSession";
 
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useSession();

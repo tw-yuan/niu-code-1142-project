@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useSession } from "../auth/SessionContext";
+import { useSession } from "../auth/useSession";
 
 export default function AppHeader() {
   const { user, logout } = useSession();
@@ -18,6 +18,9 @@ export default function AppHeader() {
       <nav className="flex items-center gap-4 text-sm">
         <Link to="/" className="text-gray-600 hover:text-indigo-600">我的講義</Link>
         <Link to="/history" className="text-gray-600 hover:text-indigo-600">學習歷史</Link>
+        {user?.role === "admin" && (
+          <Link to="/admin" className="text-gray-600 hover:text-indigo-600">管理後台</Link>
+        )}
         {user && (
           <div className="flex items-center gap-3">
             <span className="text-gray-400">Hi, {user.nickname}</span>

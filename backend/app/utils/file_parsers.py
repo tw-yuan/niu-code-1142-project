@@ -125,6 +125,45 @@ def parse_text(file_bytes: bytes) -> str:
     return file_bytes.decode("utf-8", errors="replace")
 
 
+async def parse_image_vision(filename: str, file_bytes: bytes) -> str:
+    from openai import AsyncOpenAI
+    from app.config import settings
+
+    ext = Path(filename).suffix.lower().lstrip(".") or "png"
+    mime = "jpeg" if ext in ("jpg", "jpeg") else ext
+    b64 = base64.b64encode(file_bytes).decode()
+    client = AsyncOpenAI(
+        base_url=settings.openai_compatible_base_url,
+        api_key=settings.openai_compatible_api_key or "none",
+    )
+    resp = await client.chat.completions.create(
+        model=settings.vision_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/{mime};base64,{b64}",
+                            "detail": "high",
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "請將這張課程講義、白板、投影片或筆記圖片完整轉成繁體中文 Markdown。"
+                            "保留標題、條列、表格與重要符號。直接輸出 Markdown，不需額外說明。"
+                        ),
+                    },
+                ],
+            }
+        ],
+        max_tokens=4096,
+    )
+    return resp.choices[0].message.content or ""
+
+
 # ── 統一入口 ─────────────────────────────────────────────────────────────────
 
 async def parse_file_async(filename: str, file_bytes: bytes) -> str:
@@ -137,6 +176,8 @@ async def parse_file_async(filename: str, file_bytes: bytes) -> str:
         return parse_pdf_text(file_bytes)
     if ext == ".docx":
         return parse_docx(file_bytes)
+    if ext in {".jpg", ".jpeg", ".png", ".webp"}:
+        return await parse_image_vision(filename, file_bytes)
     return parse_text(file_bytes)
 
 

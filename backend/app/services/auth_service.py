@@ -4,19 +4,27 @@ from datetime import datetime, timezone
 
 from app.models.user import User
 from app.models.session import Session
-from app.utils.security import verify_shared_password, generate_session_token, session_expiry
+from app.utils.security import (
+    verify_admin_password,
+    verify_shared_password,
+    generate_session_token,
+    session_expiry,
+)
 
 
 async def login(db: AsyncSession, nickname: str, password: str) -> Session | None:
-    if not verify_shared_password(password):
+    is_admin = verify_admin_password(password)
+    if not is_admin and not verify_shared_password(password):
         return None
 
     result = await db.execute(select(User).where(User.nickname == nickname))
     user = result.scalar_one_or_none()
     if not user:
-        user = User(nickname=nickname)
+        user = User(nickname=nickname, role="admin" if is_admin else "student")
         db.add(user)
         await db.flush()
+    elif is_admin and user.role != "admin":
+        user.role = "admin"
 
     token = generate_session_token()
     session = Session(user_id=user.id, token=token, expires_at=session_expiry())

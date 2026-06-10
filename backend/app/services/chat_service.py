@@ -1,3 +1,4 @@
+import json
 from typing import AsyncGenerator
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +7,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.learning_session import LearningSession
 from app.models.chat_message import ChatMessage
-from app.services.rag_service import get_context
+from app.services.rag_service import get_context_with_sources
 from app.services.direction_service import get_direction_system_prompt
 
 
@@ -35,8 +36,9 @@ async def stream_chat_response(
         yield "data: [ERROR] 找不到文件內容\n\n"
         return
 
-    context = await get_context(
+    context, sources = await get_context_with_sources(
         doc_id=doc.id,
+        user_id=doc.user_id,
         token_count=doc.token_count,
         full_text=doc.parsed_text,
         query=user_message,
@@ -46,7 +48,11 @@ async def stream_chat_response(
         learning_session.direction_key,
         learning_session.direction_label if learning_session.direction_key not in ("qa", "summary", "explain", "quiz") else None,
     )
-    system_prompt += f"\n\n以下是講義內容：\n\n{context}"
+    system_prompt += (
+        "\n\n回答時請優先引用講義內容；如果答案超出講義範圍，請明確標示。"
+        "\n\n以下是講義內容：\n\n"
+        f"{context}"
+    )
 
     history = await get_chat_history(db, learning_session.id)
 
@@ -86,12 +92,13 @@ async def stream_chat_response(
         yield f"data: [ERROR] {str(e)}\n\n"
         return
 
-    yield "data: [DONE]\n\n"
-
     assistant_msg = ChatMessage(
         session_id=learning_session.id,
         role="assistant",
         content=full_response,
+        context_chunks_used=json.dumps(sources, ensure_ascii=False),
     )
     db.add(assistant_msg)
     await db.commit()
+
+    yield "data: [DONE]\n\n"

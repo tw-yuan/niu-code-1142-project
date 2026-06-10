@@ -10,6 +10,10 @@ def verify_shared_password(plain: str) -> bool:
     return plain == settings.shared_login_password
 
 
+def verify_admin_password(plain: str) -> bool:
+    return bool(settings.admin_login_password) and plain == settings.admin_login_password
+
+
 def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
