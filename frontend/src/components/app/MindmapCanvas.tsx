@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react"
 import { MindmapNode, MindmapTree } from "../../lib/api"
+import { LoadingButton } from "./LoadingButton"
 
 interface LayoutNode extends MindmapNode {
   x: number
@@ -242,14 +243,16 @@ export function MindmapCanvas({
                 <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">{typeLabel(selected?.type)}</span>
               </div>
               {canExpandSelected && (
-                <button
+                <LoadingButton
                   className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
                   disabled={expandingNodeId === selected?.id}
+                  loading={expandingNodeId === selected?.id}
+                  loadingText="展開中"
+                  icon={<Sparkles size={16} />}
                   onClick={() => selected && onAiExpand?.(selected.id)}
                 >
-                  <Sparkles size={16} />
-                  {expandingNodeId === selected?.id ? "展開中" : "AI 往下展開"}
-                </button>
+                  AI 往下展開
+                </LoadingButton>
               )}
             </div>
             {selected?.source_refs && selected.source_refs.length > 0 && (

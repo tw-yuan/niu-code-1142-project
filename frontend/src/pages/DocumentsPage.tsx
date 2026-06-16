@@ -10,6 +10,7 @@ import {
   DocumentUploadResult,
   refreshToken,
 } from "../lib/api"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { useAuthStore } from "../store/auth"
 import { wsManager } from "../lib/ws"
@@ -20,6 +21,9 @@ export function DocumentsPage() {
   const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({ chapters: [] })
   const [content, setContent] = useState<DocumentContent | null>(null)
   const [contentLoading, setContentLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [consentLoading, setConsentLoading] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState("")
   const [consented, setConsented] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -29,11 +33,16 @@ export function DocumentsPage() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
 
-  async function loadDocuments() {
-    const data = await apiFetch<DocumentItem[]>("/documents")
-    setDocuments(data)
-    const active = id ? data.find((doc) => doc.id === id) : null
-    setSelected(active ?? data[0] ?? null)
+  async function loadDocuments(showSpinner = false) {
+    if (showSpinner) setRefreshing(true)
+    try {
+      const data = await apiFetch<DocumentItem[]>("/documents")
+      setDocuments(data)
+      const active = id ? data.find((doc) => doc.id === id) : null
+      setSelected(active ?? data[0] ?? null)
+    } finally {
+      if (showSpinner) setRefreshing(false)
+    }
   }
 
   useEffect(() => {
@@ -110,22 +119,32 @@ export function DocumentsPage() {
   }
 
   async function acceptConsentAndUpload() {
-    await apiFetch("/legal/consent", {
-      method: "POST",
-      body: JSON.stringify({ consent_type: "copyright_declaration" }),
-    })
-    setConsented(true)
-    if (pendingFiles.length > 0) await uploadFiles(pendingFiles)
+    setConsentLoading(true)
+    try {
+      await apiFetch("/legal/consent", {
+        method: "POST",
+        body: JSON.stringify({ consent_type: "copyright_declaration" }),
+      })
+      setConsented(true)
+      if (pendingFiles.length > 0) await uploadFiles(pendingFiles)
+    } finally {
+      setConsentLoading(false)
+    }
   }
 
   async function deleteDocument(docId: string) {
     if (!window.confirm("確定刪除此文件與向量資料？")) return
-    await apiFetch(`/documents/${docId}`, { method: "DELETE" })
-    if (selected?.id === docId) {
-      setSelected(null)
-      navigate("/documents")
+    setDeletingId(docId)
+    try {
+      await apiFetch(`/documents/${docId}`, { method: "DELETE" })
+      if (selected?.id === docId) {
+        setSelected(null)
+        navigate("/documents")
+      }
+      await loadDocuments()
+    } finally {
+      setDeletingId(null)
     }
-    await loadDocuments()
   }
 
   async function loadContent() {
@@ -146,16 +165,18 @@ export function DocumentsPage() {
           <p className="mt-1 text-sm text-zinc-500">PDF、Markdown、PPTX、DOCX</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <LoadingButton
             className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
-            onClick={() => loadDocuments()}
+            onClick={() => loadDocuments(true)}
+            loading={refreshing}
+            loadingText="更新中"
+            icon={<RefreshCw size={16} />}
           >
-            <RefreshCw size={16} />
             重新整理
-          </button>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-            <Upload size={16} />
-            上傳
+          </LoadingButton>
+          <label className={["inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white", loading ? "cursor-not-allowed bg-zinc-300" : "cursor-pointer bg-indigo-600 hover:bg-indigo-700"].join(" ")}>
+            {loading ? <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Upload size={16} />}
+            {loading ? "上傳中" : "上傳"}
             <input className="hidden" type="file" accept=".pdf,.md,.pptx,.docx" multiple onChange={onFile} />
           </label>
         </div>
@@ -229,10 +250,9 @@ export function DocumentsPage() {
                   <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/flashcards?doc=${selected.id}`}>
                     建立閃卡
                   </Link>
-                  <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" onClick={loadContent}>
-                    <Eye size={16} />
+                  <LoadingButton className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" onClick={loadContent} loading={contentLoading} loadingText="載入中" icon={<Eye size={16} />}>
                     瀏覽內容
-                  </button>
+                  </LoadingButton>
                 </div>
               )}
               {selected.status === "error" && selected.error_msg && (
@@ -271,13 +291,15 @@ export function DocumentsPage() {
                 </div>
               )}
               {selected.user_id === user?.id && (
-                <button
+                <LoadingButton
                   className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
                   onClick={() => deleteDocument(selected.id)}
+                  loading={deletingId === selected.id}
+                  loadingText="刪除中"
+                  icon={<Trash2 size={16} />}
                 >
-                  <Trash2 size={16} />
                   刪除文件
-                </button>
+                </LoadingButton>
               )}
             </div>
           </div>
@@ -294,8 +316,10 @@ export function DocumentsPage() {
               您選擇的 {pendingFiles.length} 個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
             </p>
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onClick={() => setPendingFiles([])}>取消</button>
-              <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white" onClick={acceptConsentAndUpload}>我已了解並同意</button>
+              <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onClick={() => setPendingFiles([])} disabled={consentLoading}>取消</button>
+              <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={acceptConsentAndUpload} loading={consentLoading || loading} loadingText="送出中">
+                我已了解並同意
+              </LoadingButton>
             </div>
           </div>
         </div>

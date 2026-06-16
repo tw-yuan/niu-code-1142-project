@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Info, MessageSquarePlus, Send, StopCircle } from "lucide-react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
@@ -34,6 +35,8 @@ export function ChatPage() {
   const [courseId, setCourseId] = useState<string>("")
   const [mode, setMode] = useState("enhanced")
   const [streaming, setStreaming] = useState(false)
+  const [creatingSession, setCreatingSession] = useState(false)
+  const [sending, setSending] = useState(false)
   const [aborter, setAborter] = useState<AbortController | null>(null)
   const user = useAuthStore((state) => state.user)
   const aiDisabled = user?.quota_status === "exceeded"
@@ -108,39 +111,46 @@ export function ChatPage() {
   }
 
   async function createSession() {
-    const session = await apiFetch<ChatSession>("/chat/sessions", {
-      method: "POST",
-      body: JSON.stringify({ doc_ids: selectedDocs, mode, course_id: courseId || null }),
-    })
-    setSessions((prev) => [session, ...prev])
-    setActiveId(session.id)
-    setMessages([])
-    navigate(`/chat/${session.id}`)
-  }
-
-  async function sendMessage(event: FormEvent) {
-    event.preventDefault()
-    if (!input.trim() || streaming || aiDisabled) return
-    let sessionId = activeId
-    if (!sessionId) {
+    setCreatingSession(true)
+    try {
       const session = await apiFetch<ChatSession>("/chat/sessions", {
         method: "POST",
         body: JSON.stringify({ doc_ids: selectedDocs, mode, course_id: courseId || null }),
       })
       setSessions((prev) => [session, ...prev])
-      sessionId = session.id
       setActiveId(session.id)
+      setMessages([])
       navigate(`/chat/${session.id}`)
+    } finally {
+      setCreatingSession(false)
     }
+  }
+
+  async function sendMessage(event: FormEvent) {
+    event.preventDefault()
+    if (!input.trim() || streaming || sending || aiDisabled) return
+    setSending(true)
+    let sessionId = activeId
     const question = input
-    setInput("")
-    setMessages((prev) => [...prev, { role: "user", content: question }, { role: "assistant", content: "" }])
-    const controller = new AbortController()
-    setAborter(controller)
-    setStreaming(true)
     let assistant = ""
     let citations: Citation[] = []
     try {
+      if (!sessionId) {
+        const session = await apiFetch<ChatSession>("/chat/sessions", {
+          method: "POST",
+          body: JSON.stringify({ doc_ids: selectedDocs, mode, course_id: courseId || null }),
+        })
+        setSessions((prev) => [session, ...prev])
+        sessionId = session.id
+        setActiveId(session.id)
+        navigate(`/chat/${session.id}`)
+      }
+      setInput("")
+      setMessages((prev) => [...prev, { role: "user", content: question }, { role: "assistant", content: "" }])
+      const controller = new AbortController()
+      setAborter(controller)
+      setSending(false)
+      setStreaming(true)
       for await (const event of streamFetch(
         `/chat/sessions/${sessionId}/message`,
         { content: question },
@@ -168,6 +178,7 @@ export function ChatPage() {
         return next
       })
       setStreaming(false)
+      setSending(false)
       setAborter(null)
       loadSessions().catch(() => undefined)
     }
@@ -177,13 +188,15 @@ export function ChatPage() {
     <div className="grid min-h-[calc(100vh-40px)] gap-4 lg:grid-cols-[280px_1fr]">
       <aside className="rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 p-4">
-          <button
+          <LoadingButton
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
             onClick={createSession}
+            loading={creatingSession}
+            loadingText="建立中"
+            icon={<MessageSquarePlus size={16} />}
           >
-            <MessageSquarePlus size={16} />
             新對話
-          </button>
+          </LoadingButton>
         </div>
         <div className="border-b border-zinc-200 p-4">
           <label className="mb-2 block text-xs font-medium text-zinc-500">模式</label>
@@ -343,11 +356,12 @@ export function ChatPage() {
               </button>
             ) : (
               <button
-                disabled={aiDisabled}
+                disabled={aiDisabled || sending}
                 className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                aria-busy={sending}
               >
-                <Send size={16} />
-                送出
+                {sending ? <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Send size={16} />}
+                {sending ? "送出中" : "送出"}
               </button>
             )}
           </div>

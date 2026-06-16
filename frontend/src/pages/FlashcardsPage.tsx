@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { BrainCircuit, Plus, Trash2, Wand2 } from "lucide-react"
 import { useLocation } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
 import { useAuthStore } from "../store/auth"
@@ -16,6 +17,9 @@ export function FlashcardsPage() {
   const [preview, setPreview] = useState("")
   const [error, setError] = useState("")
   const [streaming, setStreaming] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [reviewingCardId, setReviewingCardId] = useState<string | null>(null)
+  const [deletingCardId, setDeletingCardId] = useState<string | null>(null)
   const [reviewMode, setReviewMode] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
   const [reviewed, setReviewed] = useState(0)
@@ -77,29 +81,44 @@ export function FlashcardsPage() {
   async function createManual(event: FormEvent) {
     event.preventDefault()
     if (!front.trim() || !back.trim()) return
-    await apiFetch("/flashcards", {
-      method: "POST",
-      body: JSON.stringify({ front, back, doc_id: docId || null }),
-    })
-    setFront("")
-    setBack("")
-    await load()
+    setCreating(true)
+    try {
+      await apiFetch("/flashcards", {
+        method: "POST",
+        body: JSON.stringify({ front, back, doc_id: docId || null }),
+      })
+      setFront("")
+      setBack("")
+      await load()
+    } finally {
+      setCreating(false)
+    }
   }
 
   async function review(cardId: string, quality: number) {
-    await apiFetch(`/flashcards/${cardId}/review`, {
-      method: "POST",
-      body: JSON.stringify({ quality }),
-    })
-    setReviewed((prev) => prev + 1)
-    if (quality >= 3) setRemembered((prev) => prev + 1)
-    setReviewIndex((prev) => prev + 1)
-    await load()
+    setReviewingCardId(cardId)
+    try {
+      await apiFetch(`/flashcards/${cardId}/review`, {
+        method: "POST",
+        body: JSON.stringify({ quality }),
+      })
+      setReviewed((prev) => prev + 1)
+      if (quality >= 3) setRemembered((prev) => prev + 1)
+      setReviewIndex((prev) => prev + 1)
+      await load()
+    } finally {
+      setReviewingCardId(null)
+    }
   }
 
   async function deleteCard(card: FlashcardItem) {
-    await apiFetch(`/flashcards/${card.id}`, { method: "DELETE" })
-    await load()
+    setDeletingCardId(card.id)
+    try {
+      await apiFetch(`/flashcards/${card.id}`, { method: "DELETE" })
+      await load()
+    } finally {
+      setDeletingCardId(null)
+    }
   }
 
   const activeReviewCard = dueCards[reviewIndex]
@@ -134,9 +153,9 @@ export function FlashcardsPage() {
               <div className="mt-4 whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-6 text-zinc-700">{activeReviewCard.back}</div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {[1, 3, 5].map((quality) => (
-                  <button key={quality} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => review(activeReviewCard.id, quality)}>
+                  <LoadingButton key={quality} className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" onClick={() => review(activeReviewCard.id, quality)} loading={reviewingCardId === activeReviewCard.id} loadingText="送出中">
                     {quality === 1 ? "忘記" : quality === 3 ? "普通" : "熟悉"}
-                  </button>
+                  </LoadingButton>
                 ))}
               </div>
             </div>
@@ -160,23 +179,24 @@ export function FlashcardsPage() {
               </option>
             ))}
           </select>
-          <button
+          <LoadingButton
             className="mb-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
             onClick={generate}
             disabled={!docId || streaming || user?.quota_status === "exceeded"}
+            loading={streaming}
+            loadingText="生成中"
+            icon={<Wand2 size={16} />}
           >
-            <Wand2 size={16} />
-            {streaming ? "生成中" : "從文件生成 10 張"}
-          </button>
+            從文件生成 10 張
+          </LoadingButton>
           <form className="space-y-3" onSubmit={createManual}>
             <label className="block text-xs font-medium text-zinc-500" htmlFor="flashcard-front">正面</label>
             <input id="flashcard-front" className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={front} onChange={(event) => setFront(event.target.value)} />
             <label className="block text-xs font-medium text-zinc-500" htmlFor="flashcard-back">背面</label>
             <textarea id="flashcard-back" className="min-h-24 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={back} onChange={(event) => setBack(event.target.value)} />
-            <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50">
-              <Plus size={16} />
+            <LoadingButton className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" loading={creating} loadingText="新增中" icon={<Plus size={16} />}>
               新增閃卡
-            </button>
+            </LoadingButton>
           </form>
         </section>
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -194,19 +214,20 @@ export function FlashcardsPage() {
                   <button
                     className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600"
                     onClick={() => deleteCard(card)}
+                    disabled={deletingCardId === card.id}
                     title="刪除閃卡"
                     aria-label="刪除閃卡"
                   >
-                    <Trash2 size={16} />
+                    {deletingCardId === card.id ? <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-red-200 border-t-red-600" /> : <Trash2 size={16} />}
                   </button>
                 </div>
                 <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">{card.back}</div>
                 <AIGeneratedBadge variant="inline" text="AI 或使用者建立內容，請自行驗證" />
                 <div className="mt-3 flex flex-wrap gap-2">
                   {[1, 3, 5].map((quality) => (
-                    <button key={quality} className="rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50" onClick={() => review(card.id, quality)}>
+                    <LoadingButton key={quality} className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" onClick={() => review(card.id, quality)} loading={reviewingCardId === card.id} loadingText="送出中">
                       {quality === 1 ? "忘記" : quality === 3 ? "普通" : "熟悉"}
-                    </button>
+                    </LoadingButton>
                   ))}
                 </div>
                 <div className="mt-2 text-xs text-zinc-500">下次：{card.next_review.slice(0, 10)}</div>

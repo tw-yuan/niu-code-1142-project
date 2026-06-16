@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { GitBranch, Wand2 } from "lucide-react"
 import { useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { MindmapCanvas } from "../components/app/MindmapCanvas"
 import { apiFetch, DocumentItem, MindmapResponse, MindmapTree } from "../lib/api"
@@ -92,14 +93,16 @@ export function MindmapPage() {
           <h1 className="text-2xl font-semibold">心智圖</h1>
           <p className="mt-1 text-sm text-zinc-500">{doc?.filename ?? "選定文件"}</p>
         </div>
-        <button
+        <LoadingButton
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
           onClick={generate}
           disabled={streaming || user?.quota_status === "exceeded"}
+          loading={streaming}
+          loadingText="生成中"
+          icon={<Wand2 size={16} />}
         >
-          <Wand2 size={16} />
-          {streaming ? "生成中" : "生成心智圖"}
-        </button>
+          生成心智圖
+        </LoadingButton>
       </div>
       <AIGeneratedBadge />
       {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react"
 import { BookOpen, Copy, LogOut, Plus, Users } from "lucide-react"
 import { Link } from "react-router-dom"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { ApiError, apiFetch, CourseItem, CourseProgress, CourseProgressStudent, DocumentItem } from "../lib/api"
 import { useAuthStore } from "../store/auth"
 
@@ -18,6 +19,7 @@ export function CoursesPage() {
   const [progress, setProgress] = useState<CourseProgressStudent[]>([])
   const [quizSummary, setQuizSummary] = useState<CourseProgress["quiz_summary"]>([])
   const [progressError, setProgressError] = useState("")
+  const [busyAction, setBusyAction] = useState("")
   const user = useAuthStore((state) => state.user)
   const canManage = selected?.role === "instructor"
   const isOwner = Boolean(selected && selected.owner_id === user?.id)
@@ -59,84 +61,129 @@ export function CoursesPage() {
   async function create(event: FormEvent) {
     event.preventDefault()
     if (!title.trim()) return
-    const course = await apiFetch<CourseItem>("/courses", {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    })
-    setTitle("")
-    await load()
-    await openCourse(course.id)
+    setBusyAction("create")
+    try {
+      const course = await apiFetch<CourseItem>("/courses", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      })
+      setTitle("")
+      await load()
+      await openCourse(course.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function join(event: FormEvent) {
     event.preventDefault()
     if (!joinCode.trim()) return
-    const course = await apiFetch<CourseItem>("/courses/join", {
-      method: "POST",
-      body: JSON.stringify({ join_code: joinCode.trim().toUpperCase() }),
-    })
-    setJoinCode("")
-    await load()
-    await openCourse(course.id)
+    setBusyAction("join")
+    try {
+      const course = await apiFetch<CourseItem>("/courses/join", {
+        method: "POST",
+        body: JSON.stringify({ join_code: joinCode.trim().toUpperCase() }),
+      })
+      setJoinCode("")
+      await load()
+      await openCourse(course.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function addDocument() {
     if (!selected || !docId) return
-    await apiFetch(`/courses/${selected.id}/documents`, {
-      method: "POST",
-      body: JSON.stringify({ doc_id: docId }),
-    })
-    await openCourse(selected.id)
+    setBusyAction("add-document")
+    try {
+      await apiFetch(`/courses/${selected.id}/documents`, {
+        method: "POST",
+        body: JSON.stringify({ doc_id: docId }),
+      })
+      await openCourse(selected.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function saveCourse() {
     if (!selected || !canManage || !courseTitle.trim()) return
-    const updated = await apiFetch<CourseItem>(`/courses/${selected.id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        title: courseTitle.trim(),
-        description: courseDescription.trim() || null,
-      }),
-    })
-    await load()
-    await openCourse(updated.id)
+    setBusyAction("save-course")
+    try {
+      const updated = await apiFetch<CourseItem>(`/courses/${selected.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          title: courseTitle.trim(),
+          description: courseDescription.trim() || null,
+        }),
+      })
+      await load()
+      await openCourse(updated.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function resetJoinCode() {
     if (!selected || !isOwner) return
-    const updated = await apiFetch<CourseItem>(`/courses/${selected.id}/join-code/reset`, { method: "POST" })
-    await load()
-    await openCourse(updated.id)
+    setBusyAction("reset-code")
+    try {
+      const updated = await apiFetch<CourseItem>(`/courses/${selected.id}/join-code/reset`, { method: "POST" })
+      await load()
+      await openCourse(updated.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function updateMemberRole(member: CourseMember, role: "student" | "instructor") {
     if (!selected || !canManage || member.role === role) return
-    await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, {
-      method: "PUT",
-      body: JSON.stringify({ role }),
-    })
-    await openCourse(selected.id)
+    setBusyAction(`member-role-${member.user_id}`)
+    try {
+      await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ role }),
+      })
+      await openCourse(selected.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function removeMember(member: CourseMember) {
     if (!selected || !canManage) return
     if (!window.confirm(`確定移除 ${member.username ?? member.user_id}？`)) return
-    await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, { method: "DELETE" })
-    await openCourse(selected.id)
+    setBusyAction(`remove-member-${member.user_id}`)
+    try {
+      await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, { method: "DELETE" })
+      await openCourse(selected.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function removeDocument(id: string) {
     if (!selected) return
-    await apiFetch(`/courses/${selected.id}/documents/${id}`, { method: "DELETE" })
-    await openCourse(selected.id)
+    setBusyAction(`remove-document-${id}`)
+    try {
+      await apiFetch(`/courses/${selected.id}/documents/${id}`, { method: "DELETE" })
+      await openCourse(selected.id)
+    } finally {
+      setBusyAction("")
+    }
   }
 
   async function leaveCourse() {
     if (!selected || isOwner) return
     if (!window.confirm(`確定退出 ${selected.title}？`)) return
-    await apiFetch(`/courses/${selected.id}/leave`, { method: "POST" })
-    setSelected(null)
-    await load()
+    setBusyAction("leave")
+    try {
+      await apiFetch(`/courses/${selected.id}/leave`, { method: "POST" })
+      setSelected(null)
+      await load()
+    } finally {
+      setBusyAction("")
+    }
   }
 
   return (
@@ -150,15 +197,14 @@ export function CoursesPage() {
           <form className="mb-5 space-y-3" onSubmit={create}>
             <label className="block text-xs font-medium text-zinc-500" htmlFor="new-course-title">課程名稱</label>
             <input id="new-course-title" className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} />
-            <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-              <Plus size={16} />
+            <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" loading={busyAction === "create"} loadingText="建立中" icon={<Plus size={16} />}>
               建立課程
-            </button>
+            </LoadingButton>
           </form>
           <form className="mb-5 flex gap-2" onSubmit={join}>
             <label className="sr-only" htmlFor="course-join-code">邀請碼</label>
             <input id="course-join-code" className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder="邀請碼" />
-            <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50">加入</button>
+            <LoadingButton className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" loading={busyAction === "join"} loadingText="加入中">加入</LoadingButton>
           </form>
           <div className="space-y-2">
             {courses.map((course) => (
@@ -178,7 +224,7 @@ export function CoursesPage() {
                     <div className="grid max-w-xl gap-2">
                       <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold" value={courseTitle} onChange={(event) => setCourseTitle(event.target.value)} />
                       <textarea className="min-h-20 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={courseDescription} onChange={(event) => setCourseDescription(event.target.value)} placeholder="課程描述" />
-                      <button className="w-fit rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={saveCourse}>儲存</button>
+                      <LoadingButton className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={saveCourse} loading={busyAction === "save-course"} loadingText="儲存中">儲存</LoadingButton>
                     </div>
                   ) : (
                     <>
@@ -193,9 +239,9 @@ export function CoursesPage() {
                         {selected.join_code}
                       </button>
                       {isOwner && (
-                        <button className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50" onClick={resetJoinCode}>
+                        <LoadingButton className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" onClick={resetJoinCode} loading={busyAction === "reset-code"} loadingText="重置中">
                           重置
-                        </button>
+                        </LoadingButton>
                       )}
                     </div>
                   )}
@@ -205,10 +251,9 @@ export function CoursesPage() {
                   {members.length} 位成員
                 </div>
                 {!isOwner && (
-                  <button className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50" onClick={leaveCourse}>
-                    <LogOut size={16} />
+                  <LoadingButton className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50" onClick={leaveCourse} loading={busyAction === "leave"} loadingText="退出中" icon={<LogOut size={16} />}>
                     退出課程
-                  </button>
+                  </LoadingButton>
                 )}
               </div>
               <div className="mb-5 grid gap-3 lg:grid-cols-2">
@@ -228,7 +273,7 @@ export function CoursesPage() {
                                 <option value="student">student</option>
                                 <option value="instructor">instructor</option>
                               </select>
-                              <button className="text-xs text-red-600" onClick={() => removeMember(member)}>移除</button>
+                              <LoadingButton className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400" onClick={() => removeMember(member)} loading={busyAction === `remove-member-${member.user_id}`} loadingText="移除中">移除</LoadingButton>
                             </div>
                           )}
                         </div>
@@ -268,7 +313,7 @@ export function CoursesPage() {
                       <option key={doc.id} value={doc.id}>{doc.filename}</option>
                     ))}
                   </select>
-                  <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={addDocument}>加入</button>
+                  <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={addDocument} loading={busyAction === "add-document"} loadingText="加入中">加入</LoadingButton>
                 </div>
               )}
               <div className="divide-y divide-zinc-100">
@@ -284,7 +329,7 @@ export function CoursesPage() {
                         <Link className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50" to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}>發布測驗</Link>
                       )}
                       {canManage && (
-                        <button className="text-xs text-red-600" onClick={() => removeDocument(doc.id)}>移除</button>
+                        <LoadingButton className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400" onClick={() => removeDocument(doc.id)} loading={busyAction === `remove-document-${doc.id}`} loadingText="移除中">移除</LoadingButton>
                       )}
                     </div>
                   </div>

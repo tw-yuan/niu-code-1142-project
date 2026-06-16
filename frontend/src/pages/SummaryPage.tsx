@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { FileText, Wand2 } from "lucide-react"
 import { useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { apiFetch, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
@@ -56,14 +57,16 @@ export function SummaryPage() {
             <option value="full">完整摘要</option>
             <option value="bullets">重點條列</option>
           </select>
-          <button
+          <LoadingButton
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
             onClick={generate}
             disabled={streaming || user?.quota_status === "exceeded"}
+            loading={streaming}
+            loadingText="生成中"
+            icon={<Wand2 size={16} />}
           >
-            <Wand2 size={16} />
-            {streaming ? "生成中" : "生成摘要"}
-          </button>
+            生成摘要
+          </LoadingButton>
         </div>
       </div>
       <AIGeneratedBadge />

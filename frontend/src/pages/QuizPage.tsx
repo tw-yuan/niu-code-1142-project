@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { CheckCircle2, ListChecks, Plus, Wand2 } from "lucide-react"
 import { Link, useLocation, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { LoadingButton } from "../components/app/LoadingButton"
 import { apiFetch, CourseItem, DocumentItem, QuizDiagnostic, QuizItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
 import { useAuthStore } from "../store/auth"
@@ -21,6 +22,8 @@ export function QuizPage() {
   const [preview, setPreview] = useState("")
   const [error, setError] = useState("")
   const [streaming, setStreaming] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [wrongbookLoading, setWrongbookLoading] = useState(false)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [score, setScore] = useState<number | null>(null)
   const [diagnostics, setDiagnostics] = useState<QuizDiagnostic[]>([])
@@ -103,21 +106,31 @@ export function QuizPage() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!activeQuiz) return
-    const result = await apiFetch<{ total_score: number; diagnostics: QuizDiagnostic[] }>(`/quiz/${activeQuiz.id}/attempt`, {
-      method: "POST",
-      body: JSON.stringify({ answers }),
-    })
-    setScore(result.total_score)
-    setDiagnostics(result.diagnostics ?? [])
+    setSubmitting(true)
+    try {
+      const result = await apiFetch<{ total_score: number; diagnostics: QuizDiagnostic[] }>(`/quiz/${activeQuiz.id}/attempt`, {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      })
+      setScore(result.total_score)
+      setDiagnostics(result.diagnostics ?? [])
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   async function createWrongbookFlashcards() {
+    setWrongbookLoading(true)
     setWrongbookMessage("")
-    const created = await apiFetch<Array<Record<string, unknown>>>("/flashcards/from-wrongbook", {
-      method: "POST",
-      body: JSON.stringify({ limit: 20 }),
-    })
-    setWrongbookMessage(`已建立 ${created.length} 張錯題閃卡`)
+    try {
+      const created = await apiFetch<Array<Record<string, unknown>>>("/flashcards/from-wrongbook", {
+        method: "POST",
+        body: JSON.stringify({ limit: 20 }),
+      })
+      setWrongbookMessage(`已建立 ${created.length} 張錯題閃卡`)
+    } finally {
+      setWrongbookLoading(false)
+    }
   }
 
   return (
@@ -160,10 +173,9 @@ export function QuizPage() {
               ))}
             </select>
           )}
-          <button className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={generate} disabled={!docId || streaming || user?.quota_status === "exceeded"}>
-            <Wand2 size={16} />
-            {streaming ? "生成中" : "生成測驗"}
-          </button>
+          <LoadingButton className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={generate} disabled={!docId || streaming || user?.quota_status === "exceeded"} loading={streaming} loadingText="生成中" icon={<Wand2 size={16} />}>
+            生成測驗
+          </LoadingButton>
           {error && <div role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           {preview && <pre aria-live="polite" className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}
           <h2 className="mb-3 mt-6 font-semibold">測驗列表</h2>
@@ -181,10 +193,9 @@ export function QuizPage() {
             <div className="space-y-3">
               <h2 className="font-semibold">錯題本</h2>
               <div className="flex flex-wrap items-center gap-2">
-                <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={createWrongbookFlashcards}>
-                  <Plus size={16} />
+                <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={createWrongbookFlashcards} loading={wrongbookLoading} loadingText="建立中" icon={<Plus size={16} />}>
                   錯題轉閃卡
-                </button>
+                </LoadingButton>
                 {wrongbookMessage && <span className="text-sm text-emerald-700">{wrongbookMessage}</span>}
               </div>
               {wrongbook.map((item, index) => (
@@ -221,10 +232,9 @@ export function QuizPage() {
                   {score !== null && <QuestionDiagnostic diagnostic={diagnostics.find((item) => item.question_index === index)} question={question} />}
                 </div>
               ))}
-              <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-                <CheckCircle2 size={16} />
+              <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" loading={submitting} loadingText="提交中" icon={<CheckCircle2 size={16} />}>
                 提交
-              </button>
+              </LoadingButton>
               {score !== null && <span className="ml-3 text-sm font-medium text-indigo-700">分數：{Math.round(score * 100)}%</span>}
             </form>
           ) : (
