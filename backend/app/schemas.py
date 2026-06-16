@@ -302,6 +302,31 @@ class CourseAssignmentSubmit(BaseModel):
     response: str | None = None
 
 
+class CourseAnnouncementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=1)
+    status: Literal["published", "draft"] = "published"
+
+
+class CourseAnnouncementUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    content: str | None = Field(default=None, min_length=1)
+    status: Literal["published", "draft", "archived"] | None = None
+
+
+class CourseHelpRequestCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    content: str | None = None
+    session_id: str | None = None
+    priority: Literal["low", "normal", "high"] = "normal"
+
+
+class CourseHelpRequestUpdate(BaseModel):
+    status: Literal["open", "in_progress", "resolved"] | None = None
+    assigned_to: str | None = None
+    priority: Literal["low", "normal", "high"] | None = None
+
+
 class LegalConsentRequest(BaseModel):
     consent_type: Literal["copyright_declaration"]
 

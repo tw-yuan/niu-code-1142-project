@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   Copy,
   FileText,
+  Megaphone,
+  MessageCircleQuestion,
   ListChecks,
   LogOut,
   MessageSquareText,
@@ -20,7 +22,9 @@ import { LoadingButton } from "../components/app/LoadingButton";
 import {
   ApiError,
   apiFetch,
+  CourseAnnouncementItem,
   CourseAssignmentItem,
+  CourseHelpRequestItem,
   CourseItem,
   CourseProgress,
   CourseProgressStudent,
@@ -52,6 +56,10 @@ export function CoursesPage() {
   >([]);
   const [courseQuizzes, setCourseQuizzes] = useState<QuizItem[]>([]);
   const [assignments, setAssignments] = useState<CourseAssignmentItem[]>([]);
+  const [announcements, setAnnouncements] = useState<CourseAnnouncementItem[]>(
+    [],
+  );
+  const [helpRequests, setHelpRequests] = useState<CourseHelpRequestItem[]>([]);
   const [assignmentTitle, setAssignmentTitle] = useState("");
   const [assignmentDescription, setAssignmentDescription] = useState("");
   const [assignmentKind, setAssignmentKind] =
@@ -59,6 +67,13 @@ export function CoursesPage() {
   const [assignmentDocId, setAssignmentDocId] = useState("");
   const [assignmentQuizId, setAssignmentQuizId] = useState("");
   const [assignmentDueAt, setAssignmentDueAt] = useState("");
+  const [announcementTitle, setAnnouncementTitle] = useState("");
+  const [announcementContent, setAnnouncementContent] = useState("");
+  const [helpTitle, setHelpTitle] = useState("");
+  const [helpContent, setHelpContent] = useState("");
+  const [helpPriority, setHelpPriority] = useState<"low" | "normal" | "high">(
+    "normal",
+  );
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const user = useAuthStore((state) => state.user);
@@ -82,13 +97,19 @@ export function CoursesPage() {
 
   async function openCourse(id: string) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`);
-    const [nextMembers, nextCourseQuizzes, nextAssignments] = await Promise.all(
-      [
-        apiFetch<CourseMember[]>(`/courses/${id}/members`),
-        apiFetch<QuizItem[]>(`/courses/${id}/quizzes`),
-        apiFetch<CourseAssignmentItem[]>(`/courses/${id}/assignments`),
-      ],
-    );
+    const [
+      nextMembers,
+      nextCourseQuizzes,
+      nextAssignments,
+      nextAnnouncements,
+      nextHelpRequests,
+    ] = await Promise.all([
+      apiFetch<CourseMember[]>(`/courses/${id}/members`),
+      apiFetch<QuizItem[]>(`/courses/${id}/quizzes`),
+      apiFetch<CourseAssignmentItem[]>(`/courses/${id}/assignments`),
+      apiFetch<CourseAnnouncementItem[]>(`/courses/${id}/announcements`),
+      apiFetch<CourseHelpRequestItem[]>(`/courses/${id}/help-requests`),
+    ]);
     setProgressError("");
     const nextProgress = await apiFetch<CourseProgress>(
       `/courses/${id}/progress`,
@@ -112,6 +133,8 @@ export function CoursesPage() {
     setMembers(nextMembers);
     setCourseQuizzes(nextCourseQuizzes);
     setAssignments(nextAssignments);
+    setAnnouncements(nextAnnouncements);
+    setHelpRequests(nextHelpRequests);
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
   }
@@ -299,6 +322,106 @@ export function CoursesPage() {
     try {
       await apiFetch(`/courses/${selected.id}/assignments/${assignment.id}`, {
         method: "DELETE",
+      });
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function createAnnouncement(event: FormEvent) {
+    event.preventDefault();
+    if (
+      !selected ||
+      !canManage ||
+      !announcementTitle.trim() ||
+      !announcementContent.trim()
+    )
+      return;
+    setBusyAction("create-announcement");
+    try {
+      await apiFetch<CourseAnnouncementItem>(
+        `/courses/${selected.id}/announcements`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            title: announcementTitle.trim(),
+            content: announcementContent.trim(),
+            status: "published",
+          }),
+        },
+      );
+      setAnnouncementTitle("");
+      setAnnouncementContent("");
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteAnnouncement(announcement: CourseAnnouncementItem) {
+    if (!selected || !canManage) return;
+    setBusyAction(`delete-announcement-${announcement.id}`);
+    try {
+      await apiFetch(
+        `/courses/${selected.id}/announcements/${announcement.id}`,
+        { method: "DELETE" },
+      );
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function markAnnouncementRead(announcement: CourseAnnouncementItem) {
+    if (!selected) return;
+    setBusyAction(`read-announcement-${announcement.id}`);
+    try {
+      await apiFetch(
+        `/courses/${selected.id}/announcements/${announcement.id}/read`,
+        { method: "POST" },
+      );
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function createHelpRequest(event: FormEvent) {
+    event.preventDefault();
+    if (!selected || !helpTitle.trim()) return;
+    setBusyAction("create-help");
+    try {
+      await apiFetch<CourseHelpRequestItem>(
+        `/courses/${selected.id}/help-requests`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            title: helpTitle.trim(),
+            content: helpContent.trim() || null,
+            priority: helpPriority,
+          }),
+        },
+      );
+      setHelpTitle("");
+      setHelpContent("");
+      setHelpPriority("normal");
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function updateHelpRequest(
+    request: CourseHelpRequestItem,
+    status: "open" | "in_progress" | "resolved",
+  ) {
+    if (!selected || !canManage) return;
+    setBusyAction(`help-status-${request.id}`);
+    try {
+      await apiFetch(`/courses/${selected.id}/help-requests/${request.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ status }),
       });
       await openCourse(selected.id);
     } finally {
@@ -587,6 +710,228 @@ export function CoursesPage() {
                   </LoadingButton>
                 </div>
               )}
+              <div className="mb-5 grid gap-3 xl:grid-cols-2">
+                <section className="rounded-lg border border-zinc-200">
+                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                    <Megaphone size={16} className="text-zinc-500" />
+                    課程公告
+                  </div>
+                  {canManage && (
+                    <form
+                      className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
+                      onSubmit={createAnnouncement}
+                    >
+                      <input
+                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={announcementTitle}
+                        onChange={(event) =>
+                          setAnnouncementTitle(event.target.value)
+                        }
+                        placeholder="公告標題"
+                      />
+                      <textarea
+                        className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={announcementContent}
+                        onChange={(event) =>
+                          setAnnouncementContent(event.target.value)
+                        }
+                        placeholder="公告內容"
+                      />
+                      <LoadingButton
+                        className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                        loading={busyAction === "create-announcement"}
+                        loadingText="發布中"
+                        icon={<Plus size={16} />}
+                      >
+                        發布
+                      </LoadingButton>
+                    </form>
+                  )}
+                  <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
+                    {announcements.map((announcement) => (
+                      <div key={announcement.id} className="px-3 py-3 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">
+                                {announcement.title}
+                              </span>
+                              {!announcement.read_at && (
+                                <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                                  未讀
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
+                              {announcement.content}
+                            </div>
+                            <div className="mt-2 text-xs text-zinc-500">
+                              {formatDateTime(announcement.created_at)}
+                              {announcement.created_by_username
+                                ? ` · ${announcement.created_by_username}`
+                                : ""}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-col gap-2">
+                            {!announcement.read_at && !canManage && (
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                onClick={() =>
+                                  markAnnouncementRead(announcement)
+                                }
+                                loading={
+                                  busyAction ===
+                                  `read-announcement-${announcement.id}`
+                                }
+                                loadingText="標記中"
+                              >
+                                已讀
+                              </LoadingButton>
+                            )}
+                            {canManage && (
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                                onClick={() => deleteAnnouncement(announcement)}
+                                loading={
+                                  busyAction ===
+                                  `delete-announcement-${announcement.id}`
+                                }
+                                loadingText="刪除中"
+                                icon={<Trash2 size={13} />}
+                              >
+                                刪除
+                              </LoadingButton>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {announcements.length === 0 && (
+                      <div className="px-3 py-8 text-sm text-zinc-500">
+                        目前沒有公告
+                      </div>
+                    )}
+                  </div>
+                </section>
+                <section className="rounded-lg border border-zinc-200">
+                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                    <MessageCircleQuestion
+                      size={16}
+                      className="text-zinc-500"
+                    />
+                    求助佇列
+                  </div>
+                  {!canManage && (
+                    <form
+                      className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
+                      onSubmit={createHelpRequest}
+                    >
+                      <input
+                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={helpTitle}
+                        onChange={(event) => setHelpTitle(event.target.value)}
+                        placeholder="問題標題"
+                      />
+                      <textarea
+                        className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={helpContent}
+                        onChange={(event) => setHelpContent(event.target.value)}
+                        placeholder="補充說明"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={helpPriority}
+                          onChange={(event) =>
+                            setHelpPriority(
+                              event.target.value as "low" | "normal" | "high",
+                            )
+                          }
+                        >
+                          <option value="low">低</option>
+                          <option value="normal">一般</option>
+                          <option value="high">高</option>
+                        </select>
+                        <LoadingButton
+                          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                          loading={busyAction === "create-help"}
+                          loadingText="送出中"
+                          icon={<Plus size={16} />}
+                        >
+                          送出
+                        </LoadingButton>
+                      </div>
+                    </form>
+                  )}
+                  <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
+                    {helpRequests.map((request) => (
+                      <div key={request.id} className="px-3 py-3 text-sm">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">
+                                {request.title}
+                              </span>
+                              <span className={helpStatusClass(request.status)}>
+                                {helpStatusLabel(request.status)}
+                              </span>
+                              <span className={priorityClass(request.priority)}>
+                                {priorityLabel(request.priority)}
+                              </span>
+                            </div>
+                            {request.content && (
+                              <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
+                                {request.content}
+                              </div>
+                            )}
+                            <div className="mt-2 text-xs text-zinc-500">
+                              {formatDateTime(request.updated_at)}
+                              {request.username ? ` · ${request.username}` : ""}
+                            </div>
+                          </div>
+                          {canManage && (
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              {request.status !== "in_progress" && (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                  onClick={() =>
+                                    updateHelpRequest(request, "in_progress")
+                                  }
+                                  loading={
+                                    busyAction === `help-status-${request.id}`
+                                  }
+                                  loadingText="處理中"
+                                >
+                                  處理
+                                </LoadingButton>
+                              )}
+                              {request.status !== "resolved" && (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:text-zinc-400"
+                                  onClick={() =>
+                                    updateHelpRequest(request, "resolved")
+                                  }
+                                  loading={
+                                    busyAction === `help-status-${request.id}`
+                                  }
+                                  loadingText="完成中"
+                                >
+                                  結案
+                                </LoadingButton>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {helpRequests.length === 0 && (
+                      <div className="px-3 py-8 text-sm text-zinc-500">
+                        目前沒有求助單
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
               <section className="mb-5 rounded-lg border border-zinc-200">
                 <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                   <ListChecks size={16} className="text-zinc-500" />
@@ -1088,6 +1433,32 @@ function assignmentAction(assignment: CourseAssignmentItem) {
     return { href: `/flashcards?doc=${assignment.doc_id}`, label: "練閃卡" };
   }
   return null;
+}
+
+function helpStatusLabel(status: string) {
+  if (status === "in_progress") return "處理中";
+  if (status === "resolved") return "已結案";
+  return "待處理";
+}
+
+function helpStatusClass(status: string) {
+  const base = "rounded-md px-2 py-0.5 text-xs";
+  if (status === "resolved") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "in_progress") return `${base} bg-indigo-50 text-indigo-700`;
+  return `${base} bg-amber-50 text-amber-700`;
+}
+
+function priorityLabel(priority: string) {
+  if (priority === "high") return "高";
+  if (priority === "low") return "低";
+  return "一般";
+}
+
+function priorityClass(priority: string) {
+  const base = "rounded-md px-2 py-0.5 text-xs";
+  if (priority === "high") return `${base} bg-red-50 text-red-600`;
+  if (priority === "low") return `${base} bg-zinc-100 text-zinc-600`;
+  return `${base} bg-zinc-100 text-zinc-700`;
 }
 
 function formatDateTime(value: string) {

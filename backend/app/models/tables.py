@@ -177,6 +177,56 @@ class CourseAssignmentSubmission(Base):
     submitted_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
+class CourseAnnouncement(Base):
+    __tablename__ = "course_announcements"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="published")
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseAnnouncementRead(Base):
+    __tablename__ = "course_announcement_reads"
+
+    announcement_id: Mapped[str] = mapped_column(
+        String, ForeignKey("course_announcements.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    read_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseHelpRequest(Base):
+    __tablename__ = "course_help_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="SET NULL"))
+    assigned_to: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    resolved_at: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
 class LearningArtifact(Base):
     __tablename__ = "learning_artifacts"
 

@@ -2,6 +2,7 @@ import {
   BarChart3,
   BrainCircuit,
   BookOpen,
+  Check,
   FileText,
   Layers3,
   LogOut,
@@ -10,11 +11,11 @@ import {
   NotebookPen,
   Settings,
   Shield,
-} from "lucide-react"
-import { useEffect, useState } from "react"
-import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { wsManager } from "../../lib/ws"
-import { useAuthStore } from "../../store/auth"
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { wsManager } from "../../lib/ws";
+import { useAuthStore } from "../../store/auth";
 
 const navItems = [
   { to: "/dashboard", label: "儀表板", icon: BarChart3 },
@@ -25,21 +26,36 @@ const navItems = [
   { to: "/notes", label: "筆記", icon: NotebookPen },
   { to: "/courses", label: "課程", icon: BookOpen },
   { to: "/settings", label: "設定", icon: Settings },
-]
+];
 
 export function AppLayout() {
-  const { user, logout, loadMe } = useAuthStore()
-  const navigate = useNavigate()
-  const [moreOpen, setMoreOpen] = useState(false)
+  const { user, logout, loadMe } = useAuthStore();
+  const navigate = useNavigate();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (token) wsManager.connect(token)
-    const off = wsManager.on("quota_warning", () => loadMe().catch(() => undefined))
+    const token = localStorage.getItem("access_token");
+    if (token) wsManager.connect(token);
+    const off = wsManager.on("quota_warning", () =>
+      loadMe().catch(() => undefined),
+    );
+    const offAnnouncement = wsManager.on("course_announcement", (message) => {
+      setNotice(`新公告：${String(message.title ?? "")}`);
+    });
+    const offHelp = wsManager.on("course_help_request", (message) => {
+      setNotice(`新求助：${String(message.title ?? "")}`);
+    });
+    const offHelpUpdate = wsManager.on("course_help_update", () => {
+      setNotice("求助狀態已更新");
+    });
     return () => {
-      off()
-    }
-  }, [loadMe])
+      off();
+      offAnnouncement();
+      offHelp();
+      offHelpUpdate();
+    };
+  }, [loadMe]);
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -93,8 +109,8 @@ export function AppLayout() {
           <button
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
             onClick={async () => {
-              await logout()
-              navigate("/login")
+              await logout();
+              navigate("/login");
             }}
           >
             <LogOut size={16} />
@@ -113,8 +129,24 @@ export function AppLayout() {
                   : "border-amber-200 bg-amber-50 text-amber-800",
               ].join(" ")}
             >
-              本月 token 已使用 {user.quota_percent}%（{user.token_used_this_month.toLocaleString()} /{" "}
-              {user.token_quota.toLocaleString()}）。{user.quota_status === "exceeded" ? "AI 功能已暫停，請聯絡管理員調整配額。" : "接近配額上限，請留意用量。"}
+              本月 token 已使用 {user.quota_percent}%（
+              {user.token_used_this_month.toLocaleString()} /{" "}
+              {user.token_quota.toLocaleString()}）。
+              {user.quota_status === "exceeded"
+                ? "AI 功能已暫停，請聯絡管理員調整配額。"
+                : "接近配額上限，請留意用量。"}
+            </div>
+          )}
+          {notice && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+              <span>{notice}</span>
+              <button
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-indigo-100"
+                onClick={() => setNotice("")}
+              >
+                <Check size={14} />
+                已讀
+              </button>
             </div>
           )}
           <Outlet />
@@ -137,7 +169,10 @@ export function AppLayout() {
           </NavLink>
         ))}
         <button
-          className={["flex flex-col items-center gap-1 px-2 py-2 text-[11px]", moreOpen ? "text-indigo-700" : "text-zinc-500"].join(" ")}
+          className={[
+            "flex flex-col items-center gap-1 px-2 py-2 text-[11px]",
+            moreOpen ? "text-indigo-700" : "text-zinc-500",
+          ].join(" ")}
           onClick={() => setMoreOpen((value) => !value)}
           aria-expanded={moreOpen}
           aria-controls="mobile-more-menu"
@@ -147,15 +182,25 @@ export function AppLayout() {
         </button>
       </nav>
       {moreOpen && (
-        <div id="mobile-more-menu" className="fixed inset-x-3 bottom-16 z-30 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg md:hidden">
-          {[...navItems.slice(4), ...(user?.role === "admin" ? [{ to: "/admin", label: "管理", icon: Shield }] : [])].map((item) => (
+        <div
+          id="mobile-more-menu"
+          className="fixed inset-x-3 bottom-16 z-30 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg md:hidden"
+        >
+          {[
+            ...navItems.slice(4),
+            ...(user?.role === "admin"
+              ? [{ to: "/admin", label: "管理", icon: Shield }]
+              : []),
+          ].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 [
                   "flex items-center gap-3 rounded-lg px-3 py-3 text-sm",
-                  isActive ? "bg-indigo-50 text-indigo-700" : "text-zinc-700 hover:bg-zinc-50",
+                  isActive
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-zinc-700 hover:bg-zinc-50",
                 ].join(" ")
               }
               onClick={() => setMoreOpen(false)}
@@ -167,5 +212,5 @@ export function AppLayout() {
         </div>
       )}
     </div>
-  )
+  );
 }

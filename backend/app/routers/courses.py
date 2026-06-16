@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db
 from app.models.tables import User
 from app.schemas import (
+    CourseAnnouncementCreate,
+    CourseAnnouncementUpdate,
     CourseAssignmentCreate,
     CourseAssignmentSubmit,
     CourseAssignmentUpdate,
@@ -12,6 +14,8 @@ from app.schemas import (
     CourseJoinRequest,
     CourseMemberRoleUpdate,
     CourseUpdate,
+    CourseHelpRequestCreate,
+    CourseHelpRequestUpdate,
 )
 from app.services.audit_service import AuditService
 from app.services.courses_service import CoursesService
@@ -62,6 +66,14 @@ async def join_course(
         detail={"join_code": body.join_code.upper()},
     )
     return course
+
+
+@router.get("/dashboard")
+async def course_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).dashboard(current_user.id)
 
 
 @router.get("/{course_id}")
@@ -208,6 +220,140 @@ async def course_quizzes(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).course_quizzes(current_user.id, course_id)
+
+
+@router.get("/{course_id}/announcements")
+async def course_announcements(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).announcements(current_user.id, course_id)
+
+
+@router.post("/{course_id}/announcements")
+async def create_course_announcement(
+    course_id: str,
+    body: CourseAnnouncementCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    announcement = await CoursesService(db).create_announcement(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.announcement_create",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:announcement:{announcement['id']}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return announcement
+
+
+@router.put("/{course_id}/announcements/{announcement_id}")
+async def update_course_announcement(
+    course_id: str,
+    announcement_id: str,
+    body: CourseAnnouncementUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    announcement = await CoursesService(db).update_announcement(
+        current_user.id,
+        course_id,
+        announcement_id,
+        body,
+    )
+    await AuditService(db).log(
+        "course.announcement_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:announcement:{announcement_id}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return announcement
+
+
+@router.delete("/{course_id}/announcements/{announcement_id}")
+async def delete_course_announcement(
+    course_id: str,
+    announcement_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await CoursesService(db).delete_announcement(current_user.id, course_id, announcement_id)
+    await AuditService(db).log(
+        "course.announcement_delete",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:announcement:{announcement_id}",
+        request=request,
+    )
+    return {"ok": True}
+
+
+@router.post("/{course_id}/announcements/{announcement_id}/read")
+async def mark_course_announcement_read(
+    course_id: str,
+    announcement_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).mark_announcement_read(current_user.id, course_id, announcement_id)
+
+
+@router.get("/{course_id}/help-requests")
+async def course_help_requests(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).help_requests(current_user.id, course_id)
+
+
+@router.post("/{course_id}/help-requests")
+async def create_course_help_request(
+    course_id: str,
+    body: CourseHelpRequestCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    help_request = await CoursesService(db).create_help_request(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.help_request_create",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:help_request:{help_request['id']}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return help_request
+
+
+@router.put("/{course_id}/help-requests/{request_id}")
+async def update_course_help_request(
+    course_id: str,
+    request_id: str,
+    body: CourseHelpRequestUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    help_request = await CoursesService(db).update_help_request(
+        current_user.id,
+        course_id,
+        request_id,
+        body,
+    )
+    await AuditService(db).log(
+        "course.help_request_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:help_request:{request_id}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return help_request
 
 
 @router.get("/{course_id}/assignments")

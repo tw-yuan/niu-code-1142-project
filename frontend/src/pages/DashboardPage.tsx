@@ -2,18 +2,30 @@ import {
   BrainCircuit,
   FileText,
   ListTodo,
+  Megaphone,
+  MessageCircleQuestion,
   MessageSquareText,
   TrendingUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api";
+import {
+  apiFetch,
+  CourseDashboard,
+  DocumentItem,
+  FlashcardItem,
+} from "../lib/api";
 
 export function DashboardPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [tasks, setTasks] = useState<Array<Record<string, any>>>([]);
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
+  const [courseDashboard, setCourseDashboard] = useState<CourseDashboard>({
+    announcements: [],
+    help_requests: [],
+    managed_help_count: 0,
+  });
 
   useEffect(() => {
     apiFetch<DocumentItem[]>("/documents")
@@ -25,6 +37,15 @@ export function DashboardPage() {
     apiFetch<FlashcardItem[]>("/flashcards")
       .then(setFlashcards)
       .catch(() => setFlashcards([]));
+    apiFetch<CourseDashboard>("/courses/dashboard")
+      .then(setCourseDashboard)
+      .catch(() =>
+        setCourseDashboard({
+          announcements: [],
+          help_requests: [],
+          managed_help_count: 0,
+        }),
+      );
   }, []);
 
   const ready = documents.filter((doc) => doc.status === "ready").length;
@@ -72,6 +93,62 @@ export function DashboardPage() {
           )}
         </div>
       </section>
+      {(courseDashboard.announcements.length > 0 ||
+        courseDashboard.help_requests.length > 0) && (
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
+              <Megaphone size={18} className="text-zinc-500" />
+              <h2 className="font-semibold">未讀公告</h2>
+            </div>
+            <div className="divide-y divide-zinc-100">
+              {courseDashboard.announcements.map((item) => (
+                <Link
+                  key={item.id}
+                  className="block px-5 py-3 text-sm hover:bg-zinc-50"
+                  to={`/courses`}
+                >
+                  <div className="font-medium">{item.title}</div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">
+                    {item.course_title} · {item.content}
+                  </div>
+                </Link>
+              ))}
+              {courseDashboard.announcements.length === 0 && (
+                <div className="px-5 py-8 text-sm text-zinc-500">
+                  沒有未讀公告
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
+              <MessageCircleQuestion size={18} className="text-zinc-500" />
+              <h2 className="font-semibold">待處理求助</h2>
+            </div>
+            <div className="divide-y divide-zinc-100">
+              {courseDashboard.help_requests.map((item) => (
+                <Link
+                  key={item.id}
+                  className="block px-5 py-3 text-sm hover:bg-zinc-50"
+                  to={`/courses`}
+                >
+                  <div className="font-medium">{item.title}</div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    {item.course_title} · {item.username ?? item.user_id} ·{" "}
+                    {helpStatusLabel(item.status)}
+                  </div>
+                </Link>
+              ))}
+              {courseDashboard.help_requests.length === 0 && (
+                <div className="px-5 py-8 text-sm text-zinc-500">
+                  沒有待處理求助
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
           <h2 className="font-semibold">最近文件</h2>
@@ -140,6 +217,12 @@ function taskHref(task: Record<string, any>) {
     if (docId) return `/quiz/generate?doc=${docId}`;
   }
   return "/documents";
+}
+
+function helpStatusLabel(status: string) {
+  if (status === "in_progress") return "處理中";
+  if (status === "resolved") return "已結案";
+  return "待處理";
 }
 
 function Metric({

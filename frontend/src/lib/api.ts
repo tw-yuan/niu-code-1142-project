@@ -258,6 +258,43 @@ export interface CourseAssignmentItem {
   };
 }
 
+export interface CourseAnnouncementItem {
+  id: string;
+  course_id: string;
+  course_title?: string;
+  created_by: string;
+  created_by_username: string | null;
+  title: string;
+  content: string;
+  status: "published" | "draft" | "archived" | string;
+  read_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseHelpRequestItem {
+  id: string;
+  course_id: string;
+  course_title?: string;
+  user_id: string;
+  username: string | null;
+  session_id: string | null;
+  assigned_to: string | null;
+  title: string;
+  content: string | null;
+  status: "open" | "in_progress" | "resolved" | string;
+  priority: "low" | "normal" | "high" | string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseDashboard {
+  announcements: CourseAnnouncementItem[];
+  help_requests: CourseHelpRequestItem[];
+  managed_help_count: number;
+}
+
 export interface NoteItem {
   id: string;
   doc_id: string | null;
