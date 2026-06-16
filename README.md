@@ -1,48 +1,101 @@
 # LearnAI
 
-多租戶 AI 學習輔助平台。後端使用 FastAPI、Celery、Redis、ChromaDB；前端使用 React、Vite、Tailwind CSS 與 Lucide icon。
+LearnAI 是一套多租戶 AI 學習輔助平台。使用者可以上傳課程文件，系統會透過 Vision LLM 做 OCR、切分文字、建立 ChromaDB 向量索引，之後提供 Streaming RAG 問答、摘要、測驗、心智圖、閃卡、筆記、課程管理與後台管理功能。
 
-## 已建立範圍
+本專案以 Docker Compose 部署，後端主要使用 Python/FastAPI，前端使用 React/Vite/TypeScript。
 
-- JWT auth：註冊、登入、refresh、logout、me
-- 文件上傳：PDF、Markdown、PPTX、DOCX
-- 文件處理 pipeline：轉圖、Vision OCR、chunking、embedding、ChromaDB upsert
-- WebSocket 文件狀態推播
-- RAG 對話 SSE streaming
-- 摘要、測驗、心智圖、閃卡 streaming API 基礎版
-- Admin：使用者列表、統計、LLM config 更新
-- 前端：登入、註冊、儀表板、文件管理、RAG 對話、Admin 基礎頁
+## 文件導覽
+
+- [PROJECT.md](./PROJECT.md)：完整專案說明，包含功能邏輯、技術棧、資料模型、AI 流程、API 模組、部署與維運重點。
+- [SPEC.md](./SPEC.md)：產品規格與原始功能需求。
+- [AGENTS.md](./AGENTS.md)：AI coding agent 開發規範與專案慣例。
+- [BACKLOG.md](./BACKLOG.md)：待辦與改進清單。
+
+## 目前功能
+
+- 帳號系統：註冊、登入、JWT access token、refresh token、個人資料更新、密碼變更、帳號刪除與資料匯出流程。
+- 文件管理：支援 PDF、Markdown、PPTX、DOCX，上傳後以 Celery 背景處理，透過 WebSocket 推播狀態。
+- 文件處理 pipeline：檔案轉圖片、Vision OCR、OCR 快取、文字切分、Embedding、ChromaDB upsert。
+- RAG 對話：支援文件範圍、課程文件範圍、問題改寫、引用來源、SSE streaming 回答。
+- 學習工具：摘要、測驗生成與作答、心智圖、閃卡與間隔複習、錯題本、筆記、學習目標。
+- 課程功能：教師建立課程、加入碼、成員角色、文件共享、公告、作業、課程測驗與學習進度。
+- Admin 後台：使用者、文件、對話、課程、LLM 設定、成本統計、可靠性事件、稽核紀錄、資料刪除管理。
+- 法務與隱私：上傳前著作權同意、使用者資料匯出、刪除排程與強制清除。
+
+## 技術棧
+
+| 區域 | 技術 |
+|------|------|
+| Backend | Python 3.12, FastAPI, SQLAlchemy async, Pydantic Settings |
+| Worker | Celery, Redis |
+| AI / LLM | OpenAI-compatible API, Chat Streaming, Vision OCR, Embeddings |
+| Vector DB | ChromaDB persistent client |
+| Database | SQLite 預設，可透過 `DATABASE_URL` 切換 SQLAlchemy 支援的資料庫 |
+| Frontend | React 18, Vite 5, TypeScript, Tailwind CSS v4, Zustand, Lucide, Recharts |
+| Deploy | Docker Compose, Nginx frontend reverse proxy |
 
 ## 啟動
 
+先建立環境變數檔：
+
 ```bash
 cp .env.example .env
-# 填入 SECRET_KEY 與 LLM_API_KEY
+```
+
+至少需要填入：
+
+```env
+SECRET_KEY=
+LLM_API_KEY=
+```
+
+啟動 production-style compose：
+
+```bash
 docker compose up -d --build
 ```
 
-預設 compose 會啟動 production-safe 的 Nginx 前端。開發 hot reload 請明確套用 dev compose：
+啟動開發 hot reload compose：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-服務對外使用 `http://localhost:8081`。前端預設使用相對路徑 `/api` 與 `/ws`，所以透過網域進入時不會打到瀏覽器端的 localhost。你的 reverse proxy 可指向：
+預設入口：
 
-```text
-niu-1142-project.yuan-tw.net -> 151.246.244.22:8081
-```
+- Web UI: `http://localhost:8081`
+- Backend API health: `http://localhost:8081/api/health`
+- Backend dev port: `http://localhost:8000`，僅在套用 `docker-compose.dev.yml` 時暴露
+- WebSocket: `/ws`
 
-## 建立 Admin
-
-第一個註冊帳號會自動成為 admin。也可以在 container 內執行：
+## 常用指令
 
 ```bash
+# 查看服務狀態
+docker compose ps
+
+# 查看後端與 worker log
+docker compose logs -f backend worker
+
+# 重啟後端
+docker compose restart backend
+
+# 建立或更新 admin 帳號
 docker compose exec backend python scripts/create_admin.py
+
+# 後端測試
+docker compose exec backend pytest
+
+# 前端型別檢查
+docker compose exec frontend npm run lint
 ```
 
-## API
+第一個註冊帳號會自動成為 admin，也可以使用 `scripts/create_admin.py` 在 container 內建立。
 
-- 後端 API：`/api/*` 由前端 Nginx proxy 到 backend
-- WebSocket：`/ws`
-- Health check：`/api/health`
+## 核心規則
+
+- Streaming first：所有主要 LLM 回應透過 SSE streaming 回傳。
+- 多租戶隔離：資料庫、ChromaDB 與本地檔案存取都必須限制在使用者可存取範圍內。
+- LLM 統一入口：Chat、Vision、Embedding 必須透過 `backend/app/services/llm_client.py`。
+- Docker first：本地測試與部署優先使用 Docker Compose，避免在主機上長時間佔用不必要 port。
+
