@@ -1,7 +1,7 @@
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import CourseDocument, CourseMember, Document
+from app.models.tables import Course, CourseDocument, CourseMember, Document
 
 
 class DocumentAccessService:
@@ -12,7 +12,8 @@ class DocumentAccessService:
         shared_docs = (
             select(CourseDocument.doc_id)
             .join(CourseMember, CourseMember.course_id == CourseDocument.course_id)
-            .where(CourseMember.user_id == user_id)
+            .join(Course, Course.id == CourseDocument.course_id)
+            .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
         )
         return or_(Document.user_id == user_id, Document.id.in_(shared_docs))
 
@@ -36,13 +37,14 @@ class DocumentAccessService:
         return list(rows)
 
     async def shared_doc_ids(self, user_id: str, doc_ids: list[str] | None = None) -> list[str]:
-        conditions = [CourseMember.user_id == user_id]
+        conditions = [CourseMember.user_id == user_id, Course.is_active == 1]
         if doc_ids:
             conditions.append(CourseDocument.doc_id.in_(doc_ids))
         rows = (
             await self.db.execute(
                 select(CourseDocument.doc_id)
                 .join(CourseMember, CourseMember.course_id == CourseDocument.course_id)
+                .join(Course, Course.id == CourseDocument.course_id)
                 .where(and_(*conditions))
             )
         ).scalars().all()
