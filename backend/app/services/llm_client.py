@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.tables import AdminConfig, SystemEvent, TokenUsage
-from app.services.cost_service import check_quota
+from app.services.cost_service import check_quota, estimate_usage_cost, load_cost_config
 
 
 class LLMClient:
@@ -49,7 +50,18 @@ class LLMClient:
         )
         content = response.choices[0].message.content or ""
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
-        await self._record_usage(user_id, feature, tokens, provider["model"])
+        input_tokens, output_tokens = self._usage_parts(response)
+        if input_tokens == 0 and output_tokens == 0:
+            output_tokens = tokens
+        await self._record_usage(
+            user_id,
+            feature,
+            tokens,
+            provider["model"],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            provider=provider.get("base_url"),
+        )
         return content
 
     async def stream_chat(
@@ -79,13 +91,22 @@ class LLMClient:
             ),
         )
 
+        input_tokens = self._estimate_messages_tokens(messages)
         token_count = 0
         async for chunk in stream:
             delta = chunk.choices[0].delta.content
             if delta:
                 token_count += self._estimate_tokens(delta)
                 yield delta
-        await self._record_usage(user_id, feature, token_count, provider["model"])
+        await self._record_usage(
+            user_id,
+            feature,
+            input_tokens + token_count,
+            provider["model"],
+            input_tokens=input_tokens,
+            output_tokens=token_count,
+            provider=provider.get("base_url"),
+        )
 
     async def vision(
         self,
@@ -122,7 +143,19 @@ class LLMClient:
         )
         content = response.choices[0].message.content or ""
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
-        await self._record_usage(user_id, "ocr", tokens, provider["model"])
+        input_tokens, output_tokens = self._usage_parts(response)
+        if input_tokens == 0 and output_tokens == 0:
+            output_tokens = tokens
+        await self._record_usage(
+            user_id,
+            "ocr",
+            tokens,
+            provider["model"],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            image_count=1,
+            provider=provider.get("base_url"),
+        )
         return content
 
     async def embed(
@@ -147,7 +180,15 @@ class LLMClient:
         tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
         if tokens is None:
             tokens = sum(self._estimate_tokens(text) for text in texts)
-        await self._record_usage(user_id, "embedding", tokens, provider["model"])
+        await self._record_usage(
+            user_id,
+            "embedding",
+            tokens,
+            provider["model"],
+            input_tokens=tokens,
+            output_tokens=0,
+            provider=provider.get("base_url"),
+        )
         return [item.embedding for item in response.data]
 
     async def _get_config(self, feature: str) -> dict[str, Any]:
@@ -270,10 +311,32 @@ class LLMClient:
         feature: str,
         tokens: int,
         model: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        image_count: int = 0,
+        page_count: int = 0,
+        provider: str | None = None,
     ) -> None:
         if not user_id or self.db is None:
             return
-        self.db.add(TokenUsage(user_id=user_id, feature=feature, tokens_used=tokens, model=model))
+        cost_config = await load_cost_config(self.db)
+        cost, price_snapshot = estimate_usage_cost(input_tokens, output_tokens, model, feature, cost_config)
+        self.db.add(
+            TokenUsage(
+                user_id=user_id,
+                feature=feature,
+                tokens_used=tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                image_count=image_count,
+                page_count=page_count,
+                model=model,
+                provider=provider,
+                request_id=str(uuid.uuid4()),
+                unit_price_snapshot=json.dumps(price_snapshot, ensure_ascii=False),
+                cost_usd=cost,
+            )
+        )
         await self.db.commit()
 
     async def _with_retry(self, factory, retry_fallback_errors: bool = True):
@@ -300,6 +363,29 @@ class LLMClient:
     def _usage_tokens(self, response: Any) -> int | None:
         usage = getattr(response, "usage", None)
         return getattr(usage, "total_tokens", None)
+
+    def _usage_parts(self, response: Any) -> tuple[int, int]:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return 0, 0
+        prompt = getattr(usage, "prompt_tokens", None) or getattr(usage, "input_tokens", None) or 0
+        completion = getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", None) or 0
+        return int(prompt or 0), int(completion or 0)
+
+    def _estimate_messages_tokens(self, messages: list[dict[str, Any]]) -> int:
+        total = 0
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                total += self._estimate_tokens(content)
+            elif isinstance(content, list):
+                total += sum(
+                    self._estimate_tokens(str(item.get("text", ""))) if isinstance(item, dict) else 1
+                    for item in content
+                )
+            else:
+                total += self._estimate_tokens(str(content or ""))
+        return max(1, total)
 
     def _estimate_tokens(self, text: str) -> int:
         return max(1, len(text) // 4)

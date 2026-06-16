@@ -1,11 +1,12 @@
 import json
+import time
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import ChatMessage, ChatSession, Document, now_iso
+from app.models.tables import ChatMessage, ChatSession, Document, RAGRetrievedChunk, RAGRun, now_iso
 from app.schemas import ChatSessionCreate
 from app.services.chroma_service import ChromaService
 from app.services.courses_service import CoursesService
@@ -18,6 +19,8 @@ class RAGService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self._last_citations: list[dict[str, Any]] = []
+        self._last_run_id: str | None = None
+        self._last_started_at: float | None = None
 
     async def create_session(self, user_id: str, body: ChatSessionCreate) -> dict[str, Any]:
         shared_doc_ids = []
@@ -78,6 +81,7 @@ class RAGService:
         await self.db.commit()
 
     async def stream_answer(self, session_id: str, question: str, user_id: str):
+        started_at = time.perf_counter()
         session = await self._get_session(user_id, session_id)
         history = await self._history(session.id)
         doc_ids = from_json_list(session.doc_ids)
@@ -115,6 +119,35 @@ class RAGService:
             system_prompt, cfg = load_prompt(prompt_name, context=context, question=question)
         else:
             system_prompt, cfg = load_prompt(prompt_name, context=context)
+        run = RAGRun(
+            user_id=user_id,
+            session_id=session.id,
+            question=question,
+            rewritten_question=rewritten,
+            doc_ids=to_json(query_doc_ids),
+            mode=session.mode,
+            prompt_name=prompt_name,
+            context_tokens=max(1, len(context) // 4),
+        )
+        self.db.add(run)
+        await self.db.flush()
+        for citation in citations:
+            self.db.add(
+                RAGRetrievedChunk(
+                    run_id=run.id,
+                    doc_id=citation.get("doc_id"),
+                    filename=citation.get("filename"),
+                    page_num=_int_or_none(citation.get("page")),
+                    chunk_index=_int_or_none(citation.get("chunk_index")),
+                    rank=int(citation.get("index") or 0),
+                    distance=_float_or_none(citation.get("distance")),
+                    snippet=str(citation.get("snippet") or ""),
+                    support_status=str(citation.get("support_status") or "unverified"),
+                )
+            )
+        await self.db.commit()
+        self._last_run_id = run.id
+        self._last_started_at = started_at
 
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history[-8:])
@@ -152,6 +185,39 @@ class RAGService:
         if not session.title or session.title == "新的對話":
             session.title = user_content[:40]
         await self.db.commit()
+
+    async def finalize_answer(
+        self,
+        assistant_content: str,
+        citations: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        citations = self._mark_citation_support(citations or self._last_citations, assistant_content)
+        if self._last_run_id:
+            run = await self.db.get(RAGRun, self._last_run_id)
+            if run:
+                run.status = "completed"
+                run.answer_tokens = max(1, len(assistant_content) // 4)
+                run.citation_support_rate = _support_rate(citations)
+                run.latency_ms = (
+                    int((time.perf_counter() - self._last_started_at) * 1000)
+                    if self._last_started_at
+                    else None
+                )
+                run.completed_at = now_iso()
+            retrieved = (
+                await self.db.execute(
+                    select(RAGRetrievedChunk).where(RAGRetrievedChunk.run_id == self._last_run_id)
+                )
+            ).scalars().all()
+            support_by_rank = {
+                int(citation["index"]): str(citation.get("support_status") or "unverified")
+                for citation in citations
+                if citation.get("index") is not None
+            }
+            for item in retrieved:
+                item.support_status = support_by_rank.get(item.rank, item.support_status)
+        await self.db.commit()
+        return citations
 
     async def get_last_citations(self) -> list[dict[str, Any]]:
         return self._last_citations
@@ -234,9 +300,32 @@ class RAGService:
                     "chunk_index": meta.get("chunk_index"),
                     "scope": "course" if meta.get("doc_id") in shared_doc_ids else "personal",
                     "distance": chunk.get("distance"),
+                    "snippet": _snippet(str(chunk["text"])),
+                    "retrieval_score": _score_from_distance(chunk.get("distance")),
+                    "support_status": "unverified",
                 }
             )
         return "\n\n".join(parts), citations
+
+    def _mark_citation_support(
+        self,
+        citations: list[dict[str, Any]],
+        assistant_content: str,
+    ) -> list[dict[str, Any]]:
+        normalized_answer = _normalize_text(assistant_content)
+        result = []
+        for citation in citations:
+            snippet = str(citation.get("snippet") or "")
+            support_status = "unverified"
+            if snippet:
+                snippet_words = [word for word in _normalize_text(snippet).split() if len(word) >= 2]
+                if snippet_words:
+                    matched = sum(1 for word in snippet_words[:30] if word in normalized_answer)
+                    ratio = matched / min(len(snippet_words), 30)
+                    support_status = "supported" if ratio >= 0.18 else "partial" if ratio >= 0.08 else "unverified"
+            result.append({**citation, "support_status": support_status})
+        self._last_citations = result
+        return result
 
     def _session_out(self, session: ChatSession) -> dict[str, Any]:
         return {
@@ -248,3 +337,40 @@ class RAGService:
             "created_at": session.created_at,
             "updated_at": session.updated_at,
         }
+
+
+def _snippet(text: str, limit: int = 220) -> str:
+    compact = " ".join(text.split())
+    return compact[:limit]
+
+
+def _score_from_distance(distance: Any) -> float | None:
+    value = _float_or_none(distance)
+    if value is None:
+        return None
+    return round(max(0.0, min(1.0, 1.0 - value)), 4)
+
+
+def _support_rate(citations: list[dict[str, Any]]) -> float | None:
+    if not citations:
+        return None
+    supported = sum(1 for item in citations if item.get("support_status") == "supported")
+    return round(supported / len(citations), 4)
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join(text.lower().replace("，", " ").replace("。", " ").split())
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

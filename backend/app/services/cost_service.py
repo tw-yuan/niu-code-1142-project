@@ -40,6 +40,27 @@ def estimate_cost(tokens: int, model: str, feature: str, cost_config: dict[str, 
     return round(tokens / 1000 * rate, 6)
 
 
+def estimate_usage_cost(
+    input_tokens: int,
+    output_tokens: int,
+    model: str,
+    feature: str,
+    cost_config: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
+    pricing = cost_config.get(model) or cost_config.get(_model_family(model), {})
+    if isinstance(pricing, (int, float)):
+        input_rate = output_rate = float(pricing)
+        snapshot: dict[str, Any] = {"input": input_rate, "output": output_rate}
+    else:
+        input_rate = float(pricing.get("input", pricing.get("output", 0.0)))
+        output_rate = float(pricing.get("output", pricing.get("input", 0.0)))
+        snapshot = {"input": input_rate, "output": output_rate}
+    if feature in {"embedding", "embed"}:
+        output_tokens = 0
+    cost = input_tokens / 1000 * input_rate + output_tokens / 1000 * output_rate
+    return round(cost, 6), snapshot
+
+
 async def monthly_usage(db: AsyncSession, user_id: str) -> int:
     start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     return int(
@@ -103,7 +124,11 @@ async def cost_stats(db: AsyncSession) -> dict[str, Any]:
     daily_series: dict[str, float] = defaultdict(float)
 
     for usage, username in rows:
-        cost = estimate_cost(usage.tokens_used, usage.model, usage.feature, cost_config)
+        cost = (
+            float(usage.cost_usd)
+            if usage.cost_usd
+            else estimate_cost(usage.tokens_used, usage.model, usage.feature, cost_config)
+        )
         created = _parse_dt(usage.created_at)
         day_key = created.date().isoformat()
         daily_series[day_key] += cost
@@ -149,4 +174,3 @@ def _model_family(model: str) -> str:
     if "/" in model:
         return model.rsplit("/", 1)[-1]
     return model
-

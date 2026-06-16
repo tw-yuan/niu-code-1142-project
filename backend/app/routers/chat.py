@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -83,13 +84,20 @@ async def send_message(
             async for chunk in rag.stream_answer(session_id, body.content, current_user.id):
                 full_content += chunk
                 yield _sse({"type": "chunk", "content": chunk})
-            citations = await rag.get_last_citations()
+            citations = await rag.finalize_answer(full_content, await rag.get_last_citations())
             yield _sse({"type": "citations", "data": citations})
             await rag.save_message(
                 session_id, current_user.id, body.content, full_content, citations
             )
-        except Exception as exc:
-            yield _sse({"type": "error", "code": "llm_error", "message": str(exc)})
+        except Exception:
+            request_id = str(uuid.uuid4())
+            yield _sse(
+                {
+                    "type": "error",
+                    "code": "llm_error",
+                    "message": f"AI 回應暫時失敗，請稍後再試。錯誤代碼：{request_id}",
+                }
+            )
         finally:
             yield "data: [DONE]\n\n"
 
