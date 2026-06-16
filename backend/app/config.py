@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_SIZE_MB: int = 50
     MAX_PAGES_PER_DOC: int = 100
+    WORKER_CONCURRENCY: int = 2
     DEFAULT_USER_QUOTA_MB: int = 500
     DEFAULT_TOKEN_QUOTA: int = 1_000_000
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
