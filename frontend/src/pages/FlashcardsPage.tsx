@@ -98,7 +98,6 @@ export function FlashcardsPage() {
   }
 
   async function deleteCard(card: FlashcardItem) {
-    if (!window.confirm(`確定刪除「${card.front}」這張閃卡？`)) return
     await apiFetch(`/flashcards/${card.id}`, { method: "DELETE" })
     await load()
   }
