@@ -3,13 +3,16 @@ import { BookOpen, Copy, Plus, Users } from "lucide-react"
 import { apiFetch, CourseItem, DocumentItem } from "../lib/api"
 
 export function CoursesPage() {
+  type CourseMember = { user_id: string; username: string; email: string; role: string; joined_at: string }
+  type CourseProgress = { user_id: string; username: string; email: string; role: string; chat_sessions: number; chat_messages: number; notes: number; flashcards: number; quizzes: number; last_activity_at: string | null }
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [selected, setSelected] = useState<CourseItem | null>(null)
   const [title, setTitle] = useState("")
   const [joinCode, setJoinCode] = useState("")
   const [docId, setDocId] = useState("")
-  const [members, setMembers] = useState<Array<{ user_id: string; role: string; joined_at: string }>>([])
+  const [members, setMembers] = useState<CourseMember[]>([])
+  const [progress, setProgress] = useState<CourseProgress[]>([])
 
   async function load() {
     const [nextCourses, docs] = await Promise.all([
@@ -23,9 +26,11 @@ export function CoursesPage() {
 
   async function openCourse(id: string) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`)
-    const nextMembers = await apiFetch<Array<{ user_id: string; role: string; joined_at: string }>>(`/courses/${id}/members`)
+    const nextMembers = await apiFetch<CourseMember[]>(`/courses/${id}/members`)
+    const nextProgress = await apiFetch<{ students: CourseProgress[] }>(`/courses/${id}/progress`).catch(() => ({ students: [] }))
     setSelected(course)
     setMembers(nextMembers)
+    setProgress(nextProgress.students)
   }
 
   useEffect(() => {
@@ -117,6 +122,40 @@ export function CoursesPage() {
                   <Users size={16} />
                   {members.length} 位成員
                 </div>
+              </div>
+              <div className="mb-5 grid gap-3 lg:grid-cols-2">
+                <section className="rounded-lg border border-zinc-200">
+                  <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">成員</div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
+                    {members.map((member) => (
+                      <div key={member.user_id} className="px-3 py-2 text-sm">
+                        <div className="font-medium">{member.username ?? member.user_id}</div>
+                        <div className="text-xs text-zinc-500">{member.email ?? ""} · {member.role}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="rounded-lg border border-zinc-200">
+                  <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">學生進度</div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
+                    {progress.map((item) => (
+                      <div key={item.user_id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-sm">
+                        <div>
+                          <div className="font-medium">{item.username}</div>
+                          <div className="text-xs text-zinc-500">
+                            對話 {item.chat_sessions} / 訊息 {item.chat_messages} / 筆記 {item.notes}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs text-zinc-500">
+                          測驗 {item.quizzes}
+                          <br />
+                          閃卡 {item.flashcards}
+                        </div>
+                      </div>
+                    ))}
+                    {progress.length === 0 && <div className="px-3 py-8 text-sm text-zinc-500">目前沒有可顯示的進度</div>}
+                  </div>
+                </section>
               </div>
               {(selected.role === "instructor" || selected.join_code) && (
                 <div className="mb-5 flex gap-2">

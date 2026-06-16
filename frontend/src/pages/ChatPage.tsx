@@ -11,6 +11,7 @@ export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [courses, setCourses] = useState<CourseItem[]>([])
+  const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
@@ -28,6 +29,9 @@ export function ChatPage() {
     () => sessions.find((session) => session.id === activeId),
     [sessions, activeId],
   )
+  const scopeDocuments = courseId
+    ? selectedCourse?.documents ?? []
+    : documents.filter((doc) => doc.status === "ready")
 
   useEffect(() => {
     loadSessions().catch(() => undefined)
@@ -41,6 +45,24 @@ export function ChatPage() {
     }
   }, [routeSessionId])
 
+  useEffect(() => {
+    if (!courseId) {
+      setSelectedCourse(null)
+      setSelectedDocs((prev) => prev.filter((docId) => documents.some((doc) => doc.id === docId)))
+      return
+    }
+    apiFetch<CourseItem>(`/courses/${courseId}`)
+      .then((course) => {
+        setSelectedCourse(course)
+        const allowed = new Set((course.documents ?? []).map((doc) => doc.id))
+        setSelectedDocs((prev) => prev.filter((docId) => allowed.has(docId)))
+      })
+      .catch(() => {
+        setSelectedCourse(null)
+        setSelectedDocs([])
+      })
+  }, [courseId, documents])
+
   async function loadSessions() {
     const data = await apiFetch<ChatSession[]>("/chat/sessions")
     setSessions(data)
@@ -53,6 +75,9 @@ export function ChatPage() {
     const detail = await apiFetch<ChatSession>(`/chat/sessions/${id}`)
     setActiveId(id)
     setMessages(detail.messages ?? [])
+    setMode(detail.mode)
+    setCourseId(detail.course_id ?? "")
+    setSelectedDocs(detail.doc_ids)
     if (pushUrl) navigate(`/chat/${id}`)
   }
 
@@ -149,7 +174,10 @@ export function ChatPage() {
           <select
             className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
             value={courseId}
-            onChange={(event) => setCourseId(event.target.value)}
+            onChange={(event) => {
+              setCourseId(event.target.value)
+              setSelectedDocs([])
+            }}
           >
             <option value="">個人文件</option>
             {courses.map((course) => (
@@ -159,24 +187,30 @@ export function ChatPage() {
             ))}
           </select>
           <div className="space-y-2">
-            {documents
-              .filter((doc) => doc.status === "ready")
-              .map((doc) => (
-                <label key={doc.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedDocs.includes(doc.id)}
-                    onChange={(event) => {
-                      setSelectedDocs((prev) =>
-                        event.target.checked
-                          ? [...prev, doc.id]
-                          : prev.filter((item) => item !== doc.id),
-                      )
-                    }}
-                  />
-                  <span className="truncate">{doc.filename}</span>
-                </label>
-              ))}
+            {scopeDocuments.map((doc) => (
+              <label key={doc.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selectedDocs.includes(doc.id)}
+                  onChange={(event) => {
+                    setSelectedDocs((prev) =>
+                      event.target.checked
+                        ? [...prev, doc.id]
+                        : prev.filter((item) => item !== doc.id),
+                    )
+                  }}
+                />
+                <span className="truncate">{doc.filename}</span>
+              </label>
+            ))}
+            {scopeDocuments.length === 0 && (
+              <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                {courseId ? "此課程尚無可用教材" : "尚無 ready 文件"}
+              </div>
+            )}
+            {courseId && scopeDocuments.length > 0 && selectedDocs.length === 0 && (
+              <div className="text-xs text-zinc-500">未勾選時會搜尋此課程全部教材</div>
+            )}
           </div>
         </div>
         <div className="max-h-[55vh] overflow-y-auto p-2 scrollbar-thin">

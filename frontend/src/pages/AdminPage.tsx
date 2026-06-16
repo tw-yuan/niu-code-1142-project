@@ -1,14 +1,18 @@
-import { FormEvent, useEffect, useMemo, useState } from "react"
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react"
 import {
   Ban,
+  BookOpen,
   CheckCircle2,
+  FileText,
   KeyRound,
+  MessageSquare,
   Plus,
   RefreshCw,
   Save,
   Search,
   Shield,
   Trash2,
+  Users,
   UserPlus,
 } from "lucide-react"
 import {
@@ -79,6 +83,64 @@ interface ReliabilityStats {
   events: Array<{ id: string; detail: Record<string, unknown>; created_at: string }>
 }
 
+interface AdminDocument {
+  id: string
+  user_id: string
+  username: string
+  email: string
+  filename: string
+  file_type: string
+  file_size: number
+  status: string
+  page_count: number | null
+  chunk_count: number | null
+  error_msg: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface AdminList<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+interface AdminChatSession {
+  id: string
+  user_id: string
+  username: string
+  title: string | null
+  doc_ids: string[]
+  course_id: string | null
+  mode: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+interface AdminChatDetail extends AdminChatSession {
+  messages: Array<{ id: string; role: string; content: string; token_count: number | null; created_at: string }>
+}
+
+interface AdminCourse {
+  id: string
+  owner_id: string
+  owner_username: string
+  title: string
+  description: string | null
+  join_code: string
+  is_active: number
+  member_count: number
+  document_count: number
+  created_at: string
+}
+
+interface AdminCourseDetail extends AdminCourse {
+  members: Array<{ user_id: string; username: string; email: string; role: "student" | "instructor"; joined_at: string }>
+  documents: Array<{ id: string; user_id: string; username: string; filename: string; status: string; page_count: number | null; chunk_count: number | null; created_at: string }>
+}
+
 interface UserForm {
   username: string
   email: string
@@ -107,6 +169,14 @@ export function AdminPage() {
   const [totalUsers, setTotalUsers] = useState(0)
   const [selected, setSelected] = useState<AdminUserDetail | null>(null)
   const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>([])
+  const [adminDocuments, setAdminDocuments] = useState<AdminDocument[]>([])
+  const [adminChats, setAdminChats] = useState<AdminChatSession[]>([])
+  const [adminCourses, setAdminCourses] = useState<AdminCourse[]>([])
+  const [selectedChat, setSelectedChat] = useState<AdminChatDetail | null>(null)
+  const [selectedCourse, setSelectedCourse] = useState<AdminCourseDetail | null>(null)
+  const [courseMemberUserId, setCourseMemberUserId] = useState("")
+  const [courseMemberRole, setCourseMemberRole] = useState<"student" | "instructor">("student")
+  const [courseDocumentId, setCourseDocumentId] = useState("")
   const [configText, setConfigText] = useState("")
   const [configMessage, setConfigMessage] = useState("")
   const [q, setQ] = useState("")
@@ -144,6 +214,7 @@ export function AdminPage() {
       apiFetch<Array<Record<string, unknown>>>("/admin/audit-logs?limit=20"),
       apiFetch<Record<string, unknown>>("/admin/config"),
       loadUsers(),
+      loadResources(),
     ])
     setStats(nextStats)
     setCost(nextCost)
@@ -164,6 +235,17 @@ export function AdminPage() {
     if (selected && !data.items.some((user) => user.id === selected.id)) {
       setSelected(null)
     }
+  }
+
+  async function loadResources() {
+    const [documents, chats, courses] = await Promise.all([
+      apiFetch<AdminList<AdminDocument>>("/admin/documents?limit=50"),
+      apiFetch<AdminList<AdminChatSession>>("/admin/chat-sessions?limit=50"),
+      apiFetch<AdminList<AdminCourse>>("/admin/courses?limit=50"),
+    ])
+    setAdminDocuments(documents.items)
+    setAdminChats(chats.items)
+    setAdminCourses(courses.items)
   }
 
   async function selectUser(userId: string) {
@@ -242,6 +324,94 @@ export function AdminPage() {
     setSelected(null)
     setMessage("使用者資料已清除")
     await loadUsers()
+  }
+
+  async function deleteAdminDocument(doc: AdminDocument) {
+    if (!window.confirm(`確定刪除文件 ${doc.filename}？會同步清除檔案與向量資料。`)) return
+    setMessage("")
+    setError("")
+    await apiFetch(`/admin/documents/${doc.id}`, { method: "DELETE" })
+    setMessage("文件已刪除")
+    await loadResources()
+  }
+
+  async function openAdminChat(sessionId: string) {
+    setSelectedChat(await apiFetch<AdminChatDetail>(`/admin/chat-sessions/${sessionId}`))
+  }
+
+  async function deleteAdminChat(session: AdminChatSession) {
+    if (!window.confirm(`確定刪除對話 ${session.title ?? session.id}？`)) return
+    setMessage("")
+    setError("")
+    await apiFetch(`/admin/chat-sessions/${session.id}`, { method: "DELETE" })
+    setSelectedChat(null)
+    setMessage("對話已刪除")
+    await loadResources()
+  }
+
+  async function openAdminCourse(courseId: string) {
+    setSelectedCourse(await apiFetch<AdminCourseDetail>(`/admin/courses/${courseId}`))
+  }
+
+  async function saveAdminCourse() {
+    if (!selectedCourse) return
+    const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: selectedCourse.title,
+        description: selectedCourse.description,
+        is_active: selectedCourse.is_active,
+      }),
+    })
+    setSelectedCourse(updated)
+    setMessage("課程已更新")
+    await loadResources()
+  }
+
+  async function deleteAdminCourse(course: AdminCourse) {
+    if (!window.confirm(`確定刪除課程 ${course.title}？`)) return
+    setMessage("")
+    setError("")
+    await apiFetch(`/admin/courses/${course.id}`, { method: "DELETE" })
+    setSelectedCourse(null)
+    setMessage("課程已刪除")
+    await loadResources()
+  }
+
+  async function addCourseMember() {
+    if (!selectedCourse || !courseMemberUserId.trim()) return
+    const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ user_id: courseMemberUserId.trim(), role: courseMemberRole }),
+    })
+    setSelectedCourse(updated)
+    setCourseMemberUserId("")
+    await loadResources()
+  }
+
+  async function removeCourseMember(userId: string) {
+    if (!selectedCourse) return
+    const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/members/${userId}`, { method: "DELETE" })
+    setSelectedCourse(updated)
+    await loadResources()
+  }
+
+  async function addCourseDocument() {
+    if (!selectedCourse || !courseDocumentId.trim()) return
+    const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/documents`, {
+      method: "POST",
+      body: JSON.stringify({ doc_id: courseDocumentId.trim() }),
+    })
+    setSelectedCourse(updated)
+    setCourseDocumentId("")
+    await loadResources()
+  }
+
+  async function removeCourseDocument(docId: string) {
+    if (!selectedCourse) return
+    const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/documents/${docId}`, { method: "DELETE" })
+    setSelectedCourse(updated)
+    await loadResources()
   }
 
   async function saveConfig() {
@@ -455,6 +625,129 @@ export function AdminPage() {
         </section>
       </div>
 
+      <section className="mb-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold">全域資源管理</h2>
+            <p className="mt-1 text-sm text-zinc-500">管理員可跨使用者管理文件、對話與課程</p>
+          </div>
+          <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => loadResources().catch(handleError)}>
+            <RefreshCw size={16} />
+            更新資源
+          </button>
+        </div>
+        <div className="grid gap-0 xl:grid-cols-3">
+          <ResourcePanel title="文件" icon={<FileText size={17} />}>
+            {adminDocuments.map((doc) => (
+              <div key={doc.id} className="border-b border-zinc-100 p-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{doc.filename}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{doc.username} · {formatBytes(doc.file_size)} · {doc.status}</div>
+                    {doc.error_msg && <div className="mt-1 line-clamp-2 text-xs text-red-600">{doc.error_msg}</div>}
+                  </div>
+                  <button className="shrink-0 rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50" onClick={() => deleteAdminDocument(doc).catch(handleError)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {adminDocuments.length === 0 && <EmptyResource />}
+          </ResourcePanel>
+
+          <ResourcePanel title="對話" icon={<MessageSquare size={17} />}>
+            {adminChats.map((session) => (
+              <div key={session.id} className="border-b border-zinc-100 p-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <button className="min-w-0 text-left" onClick={() => openAdminChat(session.id).catch(handleError)}>
+                    <div className="truncate font-medium">{session.title ?? "未命名對話"}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{session.username} · {session.mode} · {session.message_count} 則</div>
+                  </button>
+                  <button className="shrink-0 rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50" onClick={() => deleteAdminChat(session).catch(handleError)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {selectedChat && (
+              <div className="max-h-80 overflow-y-auto border-t border-zinc-200 bg-zinc-50 p-3">
+                <div className="mb-2 text-xs font-semibold text-zinc-500">對話內容</div>
+                {selectedChat.messages.map((message) => (
+                  <div key={message.id} className="mb-2 rounded-md bg-white p-2 text-xs">
+                    <div className="mb-1 font-medium">{message.role} · {shortDate(message.created_at)}</div>
+                    <div className="line-clamp-4 text-zinc-600">{message.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {adminChats.length === 0 && <EmptyResource />}
+          </ResourcePanel>
+
+          <ResourcePanel title="課程" icon={<BookOpen size={17} />}>
+            {adminCourses.map((course) => (
+              <div key={course.id} className="border-b border-zinc-100 p-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <button className="min-w-0 text-left" onClick={() => openAdminCourse(course.id).catch(handleError)}>
+                    <div className="truncate font-medium">{course.title}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{course.owner_username} · {course.member_count} 人 · {course.document_count} 文件</div>
+                  </button>
+                  <button className="shrink-0 rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50" onClick={() => deleteAdminCourse(course).catch(handleError)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {selectedCourse && (
+              <div className="border-t border-zinc-200 bg-zinc-50 p-3">
+                <div className="grid gap-2">
+                  <Input label="課程名稱" value={selectedCourse.title} onChange={(value) => setSelectedCourse((course) => course ? { ...course, title: value } : course)} />
+                  <Input label="描述" value={selectedCourse.description ?? ""} onChange={(value) => setSelectedCourse((course) => course ? { ...course, description: value } : course)} />
+                  <Select label="狀態" value={String(selectedCourse.is_active)} onChange={(value) => setSelectedCourse((course) => course ? { ...course, is_active: Number(value) } : course)} options={[["1", "啟用"], ["0", "停用"]]} />
+                  <button className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={() => saveAdminCourse().catch(handleError)}>
+                    <Save size={16} />
+                    儲存課程
+                  </button>
+                </div>
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-500">
+                    <Users size={14} />
+                    成員
+                  </div>
+                  <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
+                    <input className="rounded-lg border border-zinc-200 px-3 py-2 text-xs" value={courseMemberUserId} onChange={(event) => setCourseMemberUserId(event.target.value)} placeholder="user_id" />
+                    <select className="rounded-lg border border-zinc-200 px-2 py-2 text-xs" value={courseMemberRole} onChange={(event) => setCourseMemberRole(event.target.value as "student" | "instructor")}>
+                      <option value="student">student</option>
+                      <option value="instructor">instructor</option>
+                    </select>
+                    <button className="rounded-lg border border-zinc-200 px-3 py-2 text-xs hover:bg-white" onClick={() => addCourseMember().catch(handleError)}>加入</button>
+                  </div>
+                  {selectedCourse.members.map((member) => (
+                    <div key={member.user_id} className="flex items-center justify-between rounded-md bg-white px-2 py-1 text-xs">
+                      <span className="truncate">{member.username} · {member.role}</span>
+                      <button className="text-red-600" onClick={() => removeCourseMember(member.user_id).catch(handleError)}>移除</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <div className="mb-2 text-xs font-semibold text-zinc-500">教材</div>
+                  <div className="mb-2 flex gap-2">
+                    <input className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs" value={courseDocumentId} onChange={(event) => setCourseDocumentId(event.target.value)} placeholder="doc_id" />
+                    <button className="rounded-lg border border-zinc-200 px-3 py-2 text-xs hover:bg-white" onClick={() => addCourseDocument().catch(handleError)}>加入</button>
+                  </div>
+                  {selectedCourse.documents.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between rounded-md bg-white px-2 py-1 text-xs">
+                      <span className="truncate">{doc.filename} · {doc.status}</span>
+                      <button className="text-red-600" onClick={() => removeCourseDocument(doc.id).catch(handleError)}>移除</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {adminCourses.length === 0 && <EmptyResource />}
+          </ResourcePanel>
+        </div>
+      </section>
+
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">Feature 成本</h2>
@@ -532,6 +825,22 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
       <div className="mt-1 font-semibold">{value}</div>
     </div>
   )
+}
+
+function ResourcePanel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="min-h-80 border-b border-zinc-200 xl:border-b-0 xl:border-r xl:last:border-r-0">
+      <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3 text-sm font-semibold">
+        <span className="text-zinc-500">{icon}</span>
+        {title}
+      </div>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+function EmptyResource() {
+  return <div className="p-6 text-sm text-zinc-500">目前沒有資料</div>
 }
 
 function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {

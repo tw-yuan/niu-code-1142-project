@@ -152,6 +152,17 @@ class AdminPasswordReset(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class AdminCourseUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    is_active: int | None = Field(default=None, ge=0, le=1)
+
+
+class AdminCourseMemberUpdate(BaseModel):
+    user_id: str
+    role: Literal["student", "instructor"] = "student"
+
+
 class AdminConfigUpdate(BaseModel):
     chat: dict[str, Any] | None = None
     vision: dict[str, Any] | None = None

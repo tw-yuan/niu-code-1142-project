@@ -3,16 +3,39 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.tables import AdminConfig, Document, SystemEvent, TokenUsage, User, now_iso
-from app.schemas import AdminConfigUpdate, AdminPasswordReset, AdminUserCreate, AdminUserUpdate
+from app.models.tables import (
+    AdminConfig,
+    ChatMessage,
+    ChatSession,
+    Course,
+    CourseDocument,
+    CourseMember,
+    Document,
+    SystemEvent,
+    TokenUsage,
+    User,
+    now_iso,
+)
+from app.schemas import (
+    AdminConfigUpdate,
+    AdminCourseMemberUpdate,
+    AdminCourseUpdate,
+    AdminPasswordReset,
+    AdminUserCreate,
+    AdminUserUpdate,
+    CourseDocumentRequest,
+)
 from app.services.audit_service import AuditService
+from app.services.chroma_service import ChromaService
 from app.services.cost_service import cost_stats
+from app.services.json_utils import from_json_list
 from app.services.privacy_service import PrivacyService
 from app.services.security import hash_password
+from app.services.storage import remove_document_dir
 
 
 class AdminService:
@@ -215,6 +238,444 @@ class AdminService:
                 for row in rows[:30]
             ],
         }
+
+    async def list_documents(
+        self,
+        q: str | None = None,
+        user_id: str | None = None,
+        status_value: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        conditions = []
+        if q:
+            conditions.append(Document.filename.ilike(f"%{q}%"))
+        if user_id:
+            conditions.append(Document.user_id == user_id)
+        if status_value:
+            conditions.append(Document.status == status_value)
+        stmt = select(Document, User.username, User.email).join(User, User.id == Document.user_id)
+        count_stmt = select(func.count(Document.id))
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        rows = (
+            await self.db.execute(
+                stmt.order_by(desc(Document.created_at)).limit(limit).offset(offset)
+            )
+        ).all()
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        return {
+            "items": [
+                {
+                    "id": doc.id,
+                    "user_id": doc.user_id,
+                    "username": username,
+                    "email": email,
+                    "filename": doc.filename,
+                    "file_type": doc.file_type,
+                    "file_size": doc.file_size,
+                    "status": doc.status,
+                    "page_count": doc.page_count,
+                    "chunk_count": doc.chunk_count,
+                    "error_msg": doc.error_msg,
+                    "created_at": doc.created_at,
+                    "updated_at": doc.updated_at,
+                }
+                for doc, username, email in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def delete_document(self, doc_id: str, actor_id: str | None = None) -> dict[str, Any]:
+        doc = (await self.db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        user_id = doc.user_id
+        await ChromaService().delete_doc_chunks(user_id, doc_id)
+        await self.db.delete(doc)
+        await self.db.commit()
+        remove_document_dir(user_id, doc_id)
+        await AuditService(self.db).log(
+            "admin.document_delete",
+            user_id=actor_id,
+            resource=f"document:{doc_id}",
+            detail={"owner_id": user_id, "filename": doc.filename},
+        )
+        return {"ok": True}
+
+    async def list_chat_sessions(
+        self,
+        q: str | None = None,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        conditions = []
+        if q:
+            conditions.append(ChatSession.title.ilike(f"%{q}%"))
+        if user_id:
+            conditions.append(ChatSession.user_id == user_id)
+        stmt = (
+            select(ChatSession, User.username, func.count(ChatMessage.id))
+            .join(User, User.id == ChatSession.user_id)
+            .outerjoin(ChatMessage, ChatMessage.session_id == ChatSession.id)
+            .group_by(ChatSession.id, User.username)
+        )
+        count_stmt = select(func.count(ChatSession.id))
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        rows = (
+            await self.db.execute(
+                stmt.order_by(desc(ChatSession.updated_at)).limit(limit).offset(offset)
+            )
+        ).all()
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        return {
+            "items": [
+                {
+                    "id": session.id,
+                    "user_id": session.user_id,
+                    "username": username,
+                    "title": session.title,
+                    "doc_ids": from_json_list(session.doc_ids),
+                    "course_id": session.course_id,
+                    "mode": session.mode,
+                    "message_count": int(message_count),
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                }
+                for session, username, message_count in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def chat_session_detail(self, session_id: str) -> dict[str, Any]:
+        row = (
+            await self.db.execute(
+                select(ChatSession, User.username)
+                .join(User, User.id == ChatSession.user_id)
+                .where(ChatSession.id == session_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+        session, username = row
+        messages = (
+            await self.db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session.id)
+                .order_by(ChatMessage.created_at)
+            )
+        ).scalars().all()
+        return {
+            "id": session.id,
+            "user_id": session.user_id,
+            "username": username,
+            "title": session.title,
+            "doc_ids": from_json_list(session.doc_ids),
+            "course_id": session.course_id,
+            "mode": session.mode,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "messages": [
+                {
+                    "id": message.id,
+                    "role": message.role,
+                    "content": message.content,
+                    "citations": from_json_list(message.citations),
+                    "token_count": message.token_count,
+                    "created_at": message.created_at,
+                }
+                for message in messages
+            ],
+        }
+
+    async def delete_chat_session(self, session_id: str, actor_id: str | None = None) -> dict[str, Any]:
+        session = (
+            await self.db.execute(select(ChatSession).where(ChatSession.id == session_id))
+        ).scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+        owner_id = session.user_id
+        await self.db.delete(session)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.chat_delete",
+            user_id=actor_id,
+            resource=f"chat_session:{session_id}",
+            detail={"owner_id": owner_id},
+        )
+        return {"ok": True}
+
+    async def list_courses(
+        self,
+        q: str | None = None,
+        owner_id: str | None = None,
+        is_active: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        conditions = []
+        if q:
+            conditions.append(Course.title.ilike(f"%{q}%"))
+        if owner_id:
+            conditions.append(Course.owner_id == owner_id)
+        if is_active is not None:
+            conditions.append(Course.is_active == is_active)
+        stmt = (
+            select(
+                Course,
+                User.username,
+                func.count(distinct(CourseMember.user_id)),
+                func.count(distinct(CourseDocument.doc_id)),
+            )
+            .join(User, User.id == Course.owner_id)
+            .outerjoin(CourseMember, CourseMember.course_id == Course.id)
+            .outerjoin(CourseDocument, CourseDocument.course_id == Course.id)
+            .group_by(Course.id, User.username)
+        )
+        count_stmt = select(func.count(Course.id))
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        rows = (
+            await self.db.execute(
+                stmt.order_by(desc(Course.created_at)).limit(limit).offset(offset)
+            )
+        ).all()
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        return {
+            "items": [
+                {
+                    "id": course.id,
+                    "owner_id": course.owner_id,
+                    "owner_username": owner_username,
+                    "title": course.title,
+                    "description": course.description,
+                    "join_code": course.join_code,
+                    "is_active": course.is_active,
+                    "member_count": int(member_count),
+                    "document_count": int(document_count),
+                    "created_at": course.created_at,
+                }
+                for course, owner_username, member_count, document_count in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def course_detail(self, course_id: str) -> dict[str, Any]:
+        row = (
+            await self.db.execute(
+                select(Course, User.username)
+                .join(User, User.id == Course.owner_id)
+                .where(Course.id == course_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        course, owner_username = row
+        members = (
+            await self.db.execute(
+                select(CourseMember, User.username, User.email)
+                .join(User, User.id == CourseMember.user_id)
+                .where(CourseMember.course_id == course_id)
+                .order_by(CourseMember.joined_at)
+            )
+        ).all()
+        docs = (
+            await self.db.execute(
+                select(Document, User.username)
+                .join(CourseDocument, CourseDocument.doc_id == Document.id)
+                .join(User, User.id == Document.user_id)
+                .where(CourseDocument.course_id == course_id)
+                .order_by(desc(CourseDocument.added_at))
+            )
+        ).all()
+        return {
+            "id": course.id,
+            "owner_id": course.owner_id,
+            "owner_username": owner_username,
+            "title": course.title,
+            "description": course.description,
+            "join_code": course.join_code,
+            "is_active": course.is_active,
+            "created_at": course.created_at,
+            "members": [
+                {
+                    "user_id": member.user_id,
+                    "username": username,
+                    "email": email,
+                    "role": member.role,
+                    "joined_at": member.joined_at,
+                }
+                for member, username, email in members
+            ],
+            "documents": [
+                {
+                    "id": doc.id,
+                    "user_id": doc.user_id,
+                    "username": username,
+                    "filename": doc.filename,
+                    "status": doc.status,
+                    "page_count": doc.page_count,
+                    "chunk_count": doc.chunk_count,
+                    "created_at": doc.created_at,
+                }
+                for doc, username in docs
+            ],
+        }
+
+    async def update_course(
+        self,
+        course_id: str,
+        body: AdminCourseUpdate,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        for field in ("title", "description", "is_active"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(course, field, value)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_update",
+            user_id=actor_id,
+            resource=f"course:{course_id}",
+            detail=body.model_dump(exclude_none=True),
+        )
+        return await self.course_detail(course_id)
+
+    async def delete_course(self, course_id: str, actor_id: str | None = None) -> dict[str, Any]:
+        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        await self.db.delete(course)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_delete",
+            user_id=actor_id,
+            resource=f"course:{course_id}",
+        )
+        return {"ok": True}
+
+    async def upsert_course_member(
+        self,
+        course_id: str,
+        body: AdminCourseMemberUpdate,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        course = (await self.db.execute(select(Course.id).where(Course.id == course_id))).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        user = (await self.db.execute(select(User.id).where(User.id == body.user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        member = (
+            await self.db.execute(
+                select(CourseMember).where(
+                    and_(CourseMember.course_id == course_id, CourseMember.user_id == body.user_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            self.db.add(CourseMember(course_id=course_id, user_id=body.user_id, role=body.role))
+        else:
+            member.role = body.role
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_member_upsert",
+            user_id=actor_id,
+            resource=f"course:{course_id}:user:{body.user_id}",
+            detail={"role": body.role},
+        )
+        return await self.course_detail(course_id)
+
+    async def remove_course_member(
+        self,
+        course_id: str,
+        user_id: str,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        member = (
+            await self.db.execute(
+                select(CourseMember).where(
+                    and_(CourseMember.course_id == course_id, CourseMember.user_id == user_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found")
+        await self.db.delete(member)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_member_remove",
+            user_id=actor_id,
+            resource=f"course:{course_id}:user:{user_id}",
+        )
+        return await self.course_detail(course_id)
+
+    async def add_course_document(
+        self,
+        course_id: str,
+        body: CourseDocumentRequest,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        course = (await self.db.execute(select(Course.id).where(Course.id == course_id))).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        doc = (await self.db.execute(select(Document.id).where(Document.id == body.doc_id))).scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        existing = (
+            await self.db.execute(
+                select(CourseDocument).where(
+                    and_(CourseDocument.course_id == course_id, CourseDocument.doc_id == body.doc_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            self.db.add(CourseDocument(course_id=course_id, doc_id=body.doc_id))
+            await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_document_add",
+            user_id=actor_id,
+            resource=f"course:{course_id}:document:{body.doc_id}",
+        )
+        return await self.course_detail(course_id)
+
+    async def remove_course_document(
+        self,
+        course_id: str,
+        doc_id: str,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        item = (
+            await self.db.execute(
+                select(CourseDocument).where(
+                    and_(CourseDocument.course_id == course_id, CourseDocument.doc_id == doc_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found")
+        await self.db.delete(item)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.course_document_remove",
+            user_id=actor_id,
+            resource=f"course:{course_id}:document:{doc_id}",
+        )
+        return await self.course_detail(course_id)
 
     async def stats(self) -> dict[str, Any]:
         users = (await self.db.execute(select(func.count(User.id)))).scalar_one()

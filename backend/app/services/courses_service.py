@@ -5,11 +5,23 @@ import string
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import Course, CourseDocument, CourseMember, Document
+from app.models.tables import (
+    ChatMessage,
+    ChatSession,
+    Course,
+    CourseDocument,
+    CourseMember,
+    Document,
+    Flashcard,
+    Note,
+    Quiz,
+    User,
+)
 from app.schemas import CourseCreate, CourseDocumentRequest, CourseJoinRequest
+from app.services.json_utils import from_json_list
 
 
 class CoursesService:
@@ -116,17 +128,77 @@ class CoursesService:
         await self.require_member(user_id, course_id)
         rows = (
             await self.db.execute(
-                select(CourseMember).where(CourseMember.course_id == course_id)
+                select(CourseMember, User.username, User.email)
+                .join(User, User.id == CourseMember.user_id)
+                .where(CourseMember.course_id == course_id)
+                .order_by(CourseMember.joined_at)
             )
-        ).scalars().all()
+        ).all()
         return [
             {
-                "user_id": row.user_id,
-                "role": row.role,
-                "joined_at": row.joined_at,
+                "user_id": member.user_id,
+                "username": username,
+                "email": email,
+                "role": member.role,
+                "joined_at": member.joined_at,
             }
-            for row in rows
+            for member, username, email in rows
         ]
+
+    async def progress(self, user_id: str, course_id: str) -> dict[str, Any]:
+        await self.require_role(user_id, course_id, {"instructor"})
+        doc_ids = await self.course_document_ids(user_id, course_id)
+        members = await self.members(user_id, course_id)
+        rows = []
+        for member in members:
+            member_id = member["user_id"]
+            chat_sessions = (
+                await self.db.execute(
+                    select(ChatSession)
+                    .where(and_(ChatSession.user_id == member_id, ChatSession.course_id == course_id))
+                    .order_by(desc(ChatSession.updated_at))
+                )
+            ).scalars().all()
+            chat_session_ids = [session.id for session in chat_sessions]
+            message_count = 0
+            if chat_session_ids:
+                message_count = (
+                    await self.db.execute(
+                        select(func.count(ChatMessage.id)).where(ChatMessage.session_id.in_(chat_session_ids))
+                    )
+                ).scalar_one()
+            note_count = 0
+            flashcard_count = 0
+            quiz_count = 0
+            if doc_ids:
+                note_count = (
+                    await self.db.execute(
+                        select(func.count(Note.id)).where(and_(Note.user_id == member_id, Note.doc_id.in_(doc_ids)))
+                    )
+                ).scalar_one()
+                flashcard_count = (
+                    await self.db.execute(
+                        select(func.count(Flashcard.id)).where(
+                            and_(Flashcard.user_id == member_id, Flashcard.doc_id.in_(doc_ids))
+                        )
+                    )
+                ).scalar_one()
+                quizzes = (
+                    await self.db.execute(select(Quiz).where(Quiz.user_id == member_id))
+                ).scalars().all()
+                quiz_count = sum(1 for quiz in quizzes if set(from_json_list(quiz.doc_ids)) & set(doc_ids))
+            rows.append(
+                {
+                    **member,
+                    "chat_sessions": len(chat_sessions),
+                    "chat_messages": int(message_count),
+                    "notes": int(note_count),
+                    "flashcards": int(flashcard_count),
+                    "quizzes": int(quiz_count),
+                    "last_activity_at": chat_sessions[0].updated_at if chat_sessions else None,
+                }
+            )
+        return {"course_id": course_id, "document_count": len(doc_ids), "students": rows}
 
     async def course_document_ids(self, user_id: str, course_id: str) -> list[str]:
         await self._get_course(course_id)

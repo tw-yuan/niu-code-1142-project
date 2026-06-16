@@ -89,6 +89,15 @@ async def course_members(
     return await CoursesService(db).members(current_user.id, course_id)
 
 
+@router.get("/{course_id}/progress")
+async def course_progress(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).progress(current_user.id, course_id)
+
+
 @router.post("/{course_id}/documents")
 async def add_course_document(
     course_id: str,
