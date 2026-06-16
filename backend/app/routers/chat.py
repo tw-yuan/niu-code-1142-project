@@ -22,7 +22,7 @@ async def create_session(
 ):
     session = await RAGService(db).create_session(current_user.id, body)
     await AuditService(db).log(
-        "chat.session.create",
+        "chat.session_create",
         user_id=current_user.id,
         resource=f"chat_session:{session['id']}",
         request=request,
@@ -57,7 +57,7 @@ async def delete_session(
 ):
     await RAGService(db).delete_session(current_user.id, session_id)
     await AuditService(db).log(
-        "chat.session.delete",
+        "chat.session_delete",
         user_id=current_user.id,
         resource=f"chat_session:{session_id}",
         request=request,

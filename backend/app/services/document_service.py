@@ -1,10 +1,12 @@
+import json
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import Document
+from app.models.tables import ChatMessage, ChatSession, Document, Flashcard, Quiz, QuizAttempt
 from app.services.chroma_service import ChromaService
 from app.services.storage import (
     ensure_user_quota,
@@ -90,3 +92,120 @@ class DocumentService:
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page not found")
         return path
+
+    async def coverage(self, user_id: str, doc_id: str) -> dict[str, list[dict[str, Any]]]:
+        doc = await self.get_document(user_id, doc_id)
+        chunks = await ChromaService().get_document_chunks(user_id, [doc_id])
+        pages = sorted(
+            {
+                int(item["metadata"].get("page_num", 1))
+                for item in chunks
+                if item["metadata"].get("page_num")
+            }
+        )
+        if not pages and doc.page_count:
+            pages = list(range(1, doc.page_count + 1))
+        if not pages:
+            return {"chapters": []}
+
+        chapter_size = 10
+        chapters = []
+        for start in range(min(pages), max(pages) + 1, chapter_size):
+            end = min(start + chapter_size - 1, max(pages))
+            chapters.append(
+                {
+                    "title": f"第 {len(chapters) + 1} 區段",
+                    "page_range": [start, end],
+                    "quiz_attempts": 0,
+                    "quiz_score_avg": 0.0,
+                    "flashcard_count": 0,
+                    "flashcard_mastered": 0,
+                    "chat_mentions": 0,
+                    "coverage_score": 0.0,
+                }
+            )
+
+        flashcards = (
+            await self.db.execute(
+                select(Flashcard).where(and_(Flashcard.user_id == user_id, Flashcard.doc_id == doc_id))
+            )
+        ).scalars().all()
+        for card in flashcards:
+            chapter = _chapter_for_page(chapters, card.source_page)
+            if chapter is None:
+                continue
+            chapter["flashcard_count"] += 1
+            if card.repetition >= 2:
+                chapter["flashcard_mastered"] += 1
+
+        scores = await self._quiz_scores_for_doc(user_id, doc_id)
+        for chapter in chapters:
+            chapter["quiz_attempts"] = len(scores)
+            chapter["quiz_score_avg"] = round(sum(scores) / len(scores), 4) if scores else 0.0
+
+        mentions = await self._chat_mentions(user_id, doc_id)
+        for page, count in mentions.items():
+            chapter = _chapter_for_page(chapters, page)
+            if chapter is not None:
+                chapter["chat_mentions"] += count
+
+        for chapter in chapters:
+            flashcard_score = (
+                chapter["flashcard_mastered"] / chapter["flashcard_count"]
+                if chapter["flashcard_count"]
+                else 0.0
+            )
+            chapter["coverage_score"] = round(
+                chapter["quiz_score_avg"] * 0.4
+                + flashcard_score * 0.4
+                + min(chapter["chat_mentions"] / 3, 1.0) * 0.2,
+                4,
+            )
+        return {"chapters": chapters}
+
+    async def _quiz_scores_for_doc(self, user_id: str, doc_id: str) -> list[float]:
+        quizzes = (
+            await self.db.execute(select(Quiz).where(Quiz.user_id == user_id))
+        ).scalars().all()
+        quiz_ids = [quiz.id for quiz in quizzes if doc_id in json.loads(quiz.doc_ids)]
+        if not quiz_ids:
+            return []
+        attempts = (
+            await self.db.execute(
+                select(QuizAttempt).where(
+                    and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id.in_(quiz_ids))
+                )
+            )
+        ).scalars().all()
+        return [float(attempt.total_score or 0) for attempt in attempts]
+
+    async def _chat_mentions(self, user_id: str, doc_id: str) -> dict[int, int]:
+        sessions = (
+            await self.db.execute(select(ChatSession.id).where(ChatSession.user_id == user_id))
+        ).scalars().all()
+        if not sessions:
+            return {}
+        messages = (
+            await self.db.execute(
+                select(ChatMessage).where(
+                    and_(ChatMessage.session_id.in_(sessions), ChatMessage.citations != "[]")
+                )
+            )
+        ).scalars().all()
+        mentions: dict[int, int] = {}
+        for message in messages:
+            for citation in json.loads(message.citations):
+                if citation.get("doc_id") == doc_id and citation.get("page"):
+                    page = int(citation["page"])
+                    mentions[page] = mentions.get(page, 0) + 1
+        return mentions
+
+
+def _chapter_for_page(chapters: list[dict[str, Any]], page: int | None) -> dict[str, Any] | None:
+    if page is None:
+        return chapters[0] if chapters else None
+    for chapter in chapters:
+        start, end = chapter["page_range"]
+        if start <= page <= end:
+            return chapter
+    return None

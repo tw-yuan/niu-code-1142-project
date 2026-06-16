@@ -10,7 +10,20 @@ from app.config import settings
 from app.dependencies import get_db, get_token_from_request
 from app.models.database import SessionLocal, init_db
 from app.models.tables import User
-from app.routers import admin, auth, chat, documents, flashcards, mindmap, quiz, summary
+from app.routers import (
+    admin,
+    auth,
+    chat,
+    courses,
+    documents,
+    flashcards,
+    goals,
+    legal,
+    mindmap,
+    notes,
+    quiz,
+    summary,
+)
 from app.services.health_service import health_report
 from app.services.security import decode_token
 from app.services.ws_manager import subscribe_user
@@ -32,6 +45,10 @@ app.include_router(summary.router)
 app.include_router(quiz.router)
 app.include_router(mindmap.router)
 app.include_router(flashcards.router)
+app.include_router(notes.router)
+app.include_router(goals.router)
+app.include_router(courses.router)
+app.include_router(legal.router)
 app.include_router(admin.router)
 
 

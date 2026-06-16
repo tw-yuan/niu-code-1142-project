@@ -15,5 +15,9 @@ celery_app.conf.update(
             "task": "app.tasks.maintenance_tasks.push_quota_warnings",
             "schedule": 3600.0,
         },
+        "purge-due-users-daily": {
+            "task": "app.tasks.maintenance_tasks.purge_due_users",
+            "schedule": 86400.0,
+        },
     },
 )

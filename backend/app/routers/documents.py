@@ -7,6 +7,7 @@ from app.models.tables import User
 from app.schemas import DocumentOut
 from app.services.audit_service import AuditService
 from app.services.document_service import DocumentService
+from app.services.legal_service import LegalService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -18,6 +19,7 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await LegalService(db).require_consent(current_user.id, "copyright_declaration")
     doc = await DocumentService(db).upload(current_user.id, file)
     await AuditService(db).log(
         "document.upload",
@@ -70,6 +72,15 @@ async def get_status(
     db: AsyncSession = Depends(get_db),
 ):
     return await DocumentService(db).get_document(current_user.id, doc_id)
+
+
+@router.get("/{doc_id}/coverage")
+async def get_coverage(
+    doc_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await DocumentService(db).coverage(current_user.id, doc_id)
 
 
 @router.get("/{doc_id}/pages/{page_num}")

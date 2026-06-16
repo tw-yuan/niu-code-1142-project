@@ -11,6 +11,7 @@ from app.models.tables import AdminConfig, Document, SystemEvent, TokenUsage, Us
 from app.schemas import AdminConfigUpdate, AdminUserUpdate
 from app.services.audit_service import AuditService
 from app.services.cost_service import cost_stats
+from app.services.privacy_service import PrivacyService
 
 
 class AdminService:
@@ -47,7 +48,7 @@ class AdminService:
                 setattr(user, field, value)
         await self.db.commit()
         await AuditService(self.db).log(
-            "admin.user.update",
+            "admin.user_update",
             user_id=actor_id,
             resource=f"user:{user_id}",
             detail=body.model_dump(exclude_none=True),
@@ -82,7 +83,7 @@ class AdminService:
             row.updated_at = now_iso()
         await self.db.commit()
         await AuditService(self.db).log(
-            "admin.config.update",
+            "admin.config_update",
             user_id=actor_id,
             resource="admin_config:llm_config",
             detail=incoming,
@@ -156,6 +157,23 @@ class AdminService:
             }
             for user in users
         ]
+
+    async def user_deletion_status(self, user_id: str) -> dict[str, Any]:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        return {
+            "user_id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_active": user.is_active,
+            "deletion_requested_at": user.deletion_requested_at,
+            "deletion_scheduled_at": user.deletion_scheduled_at,
+            "export_expires_at": user.export_expires_at,
+        }
+
+    async def force_purge_user(self, user_id: str, actor_id: str) -> dict[str, Any]:
+        return await PrivacyService(self.db).force_purge(user_id, actor_id=actor_id)
 
     async def _load_config(self) -> dict[str, Any]:
         default = default_llm_config()

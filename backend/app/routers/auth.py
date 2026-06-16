@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Cookie, Depends, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_current_user_optional, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.schemas import DeleteConfirmRequest, LoginRequest, RegisterRequest, TokenResponse, UserOut
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService, clear_refresh_cookie, issue_tokens
 from app.services.cost_service import quota_status
+from app.services.privacy_service import PrivacyService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,7 +35,15 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     svc = AuthService(db)
-    user = await svc.login(body)
+    try:
+        user = await svc.login(body)
+    except HTTPException:
+        await AuditService(db).log(
+            "auth.login_failed",
+            request=request,
+            detail={"identifier": body.identifier},
+        )
+        raise
     access_token = issue_tokens(response, user)
     await AuditService(db).log("auth.login", user_id=user.id, request=request)
     return TokenResponse(access_token=access_token, user=await _user_out(db, user))
@@ -53,7 +63,7 @@ async def refresh(
     svc = AuthService(db)
     user = await svc.user_from_refresh_token(refresh_token)
     access_token = issue_tokens(response, user)
-    await AuditService(db).log("auth.refresh", user_id=user.id, request=request)
+    await AuditService(db).log("auth.token_refresh", user_id=user.id, request=request)
     return TokenResponse(access_token=access_token, user=await _user_out(db, user))
 
 
@@ -76,6 +86,51 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ):
     return await _user_out(db, current_user)
+
+
+@router.post("/me/delete-request")
+async def delete_request(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await PrivacyService(db).request_delete(current_user.id)
+
+
+@router.post("/me/delete-confirm")
+async def delete_confirm(
+    body: DeleteConfirmRequest,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await PrivacyService(db).confirm_delete(current_user.id, body.confirmation_code)
+    clear_refresh_cookie(response)
+    return result
+
+
+@router.post("/me/delete-cancel")
+async def delete_cancel(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await PrivacyService(db).cancel_delete(current_user.id)
+
+
+@router.post("/me/export-request")
+async def export_request(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await PrivacyService(db).export_request(current_user.id)
+
+
+@router.get("/me/export-download")
+async def export_download(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    path = await PrivacyService(db).export_download_path(current_user.id)
+    return FileResponse(path, media_type="application/zip", filename="learnai-export.zip")
 
 
 async def _user_out(db: AsyncSession, user: User) -> UserOut:

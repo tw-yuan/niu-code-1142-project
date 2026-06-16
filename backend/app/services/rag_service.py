@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.tables import ChatMessage, ChatSession, Document, now_iso
 from app.schemas import ChatSessionCreate
 from app.services.chroma_service import ChromaService
+from app.services.courses_service import CoursesService
 from app.services.json_utils import from_json_list, to_json
 from app.services.llm_client import LLMClient
 from app.services.prompt_loader import load_prompt
@@ -19,11 +20,15 @@ class RAGService:
         self._last_citations: list[dict[str, Any]] = []
 
     async def create_session(self, user_id: str, body: ChatSessionCreate) -> dict[str, Any]:
-        await self._validate_doc_ids(user_id, body.doc_ids)
+        shared_doc_ids = []
+        if body.course_id:
+            shared_doc_ids = await CoursesService(self.db).course_document_ids(user_id, body.course_id)
+        await self._validate_doc_ids(user_id, body.doc_ids, shared_doc_ids)
         session = ChatSession(
             user_id=user_id,
             title=body.title or "新的對話",
             doc_ids=to_json(body.doc_ids),
+            course_id=body.course_id,
             mode=body.mode,
         )
         self.db.add(session)
@@ -73,11 +78,20 @@ class RAGService:
         session = await self._get_session(user_id, session_id)
         history = await self._history(session.id)
         doc_ids = from_json_list(session.doc_ids)
+        shared_doc_ids = []
+        if session.course_id:
+            shared_doc_ids = await CoursesService(self.db).course_document_ids(user_id, session.course_id)
         rewritten = await self._rewrite_question(question, history, user_id)
         llm = LLMClient(self.db)
         query_embedding = (await llm.embed([rewritten], user_id=user_id))[0]
-        chunks = await ChromaService().query_chunks(user_id, query_embedding, doc_ids=doc_ids, n_results=5)
-        context, citations = self._build_context(chunks)
+        chunks = await ChromaService().query_chunks(
+            user_id,
+            query_embedding,
+            doc_ids=doc_ids,
+            shared_doc_ids=shared_doc_ids,
+            n_results=5,
+        )
+        context, citations = self._build_context(chunks, set(shared_doc_ids))
         self._last_citations = citations
 
         prompt_name = {
@@ -166,7 +180,12 @@ class RAGService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
         return session
 
-    async def _validate_doc_ids(self, user_id: str, doc_ids: list[str]) -> None:
+    async def _validate_doc_ids(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        shared_doc_ids: list[str] | None = None,
+    ) -> None:
         if not doc_ids:
             return
         rows = (
@@ -174,12 +193,18 @@ class RAGService:
                 select(Document.id).where(and_(Document.user_id == user_id, Document.id.in_(doc_ids)))
             )
         ).scalars().all()
-        if set(rows) != set(doc_ids):
+        allowed = set(rows) | set(shared_doc_ids or [])
+        if not set(doc_ids).issubset(allowed):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    def _build_context(self, chunks: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    def _build_context(
+        self,
+        chunks: list[dict[str, Any]],
+        shared_doc_ids: set[str] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         if not chunks:
             return "目前沒有可用的參考資料。", []
+        shared_doc_ids = shared_doc_ids or set()
         parts: list[str] = []
         citations: list[dict[str, Any]] = []
         for index, chunk in enumerate(chunks, 1):
@@ -194,6 +219,7 @@ class RAGService:
                     "filename": meta.get("filename"),
                     "page": meta.get("page_num"),
                     "chunk_index": meta.get("chunk_index"),
+                    "scope": "course" if meta.get("doc_id") in shared_doc_ids else "personal",
                     "distance": chunk.get("distance"),
                 }
             )
@@ -204,8 +230,8 @@ class RAGService:
             "id": session.id,
             "title": session.title,
             "doc_ids": json.loads(session.doc_ids),
+            "course_id": session.course_id,
             "mode": session.mode,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
         }
-

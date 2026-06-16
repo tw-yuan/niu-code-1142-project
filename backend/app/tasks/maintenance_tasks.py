@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.models.database import SessionLocal
 from app.models.tables import User
 from app.services.cost_service import quota_status
+from app.services.privacy_service import PrivacyService
 from app.services.ws_manager import push_to_user
 from app.tasks.celery_app import celery_app
 
@@ -32,3 +33,13 @@ async def _push_quota_warnings_async() -> None:
                         "token_quota": user.token_quota,
                     },
                 )
+
+
+@celery_app.task(name="app.tasks.maintenance_tasks.purge_due_users")
+def purge_due_users() -> int:
+    return asyncio.run(_purge_due_users_async())
+
+
+async def _purge_due_users_async() -> int:
+    async with SessionLocal() as db:
+        return await PrivacyService(db).purge_due_users()

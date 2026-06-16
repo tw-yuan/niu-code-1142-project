@@ -88,3 +88,21 @@ async def deletion_status(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminService(db).deletion_status()
+
+
+@router.get("/users/{user_id}/deletion-status")
+async def user_deletion_status(
+    user_id: str,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).user_deletion_status(user_id)
+
+
+@router.post("/users/{user_id}/force-purge")
+async def force_purge_user(
+    user_id: str,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).force_purge_user(user_id, current_user.id)

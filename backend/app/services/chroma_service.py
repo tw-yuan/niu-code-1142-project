@@ -57,10 +57,11 @@ class ChromaService:
         user_id: str,
         query_embedding: list[float],
         doc_ids: list[str] | None = None,
+        shared_doc_ids: list[str] | None = None,
         n_results: int = 5,
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
-            self._query_chunks_sync, user_id, query_embedding, doc_ids, n_results
+            self._query_chunks_sync, user_id, query_embedding, doc_ids, shared_doc_ids, n_results
         )
 
     def _query_chunks_sync(
@@ -68,9 +69,10 @@ class ChromaService:
         user_id: str,
         query_embedding: list[float],
         doc_ids: list[str] | None,
+        shared_doc_ids: list[str] | None,
         n_results: int,
     ) -> list[dict[str, Any]]:
-        where = _where_for(user_id, doc_ids)
+        where = _where_for(user_id, doc_ids, shared_doc_ids)
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
@@ -108,13 +110,36 @@ class ChromaService:
                 where={"$and": [{"user_id": {"$eq": user_id}}, {"doc_id": {"$eq": doc_id}}]}
             )
 
+    async def delete_user_chunks(self, user_id: str) -> None:
+        await asyncio.to_thread(self._delete_user_chunks_sync, user_id)
 
-def _where_for(user_id: str, doc_ids: list[str] | None) -> dict[str, Any]:
-    where: dict[str, Any] = {"user_id": {"$eq": user_id}}
+    def _delete_user_chunks_sync(self, user_id: str) -> None:
+        with FileLock(self.lock_path):
+            self.collection.delete(where={"user_id": {"$eq": user_id}})
+
+
+def _where_for(
+    user_id: str,
+    doc_ids: list[str] | None,
+    shared_doc_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    shared_doc_ids = shared_doc_ids or []
+    access_filter: dict[str, Any]
+    if shared_doc_ids:
+        access_filter = {
+            "$or": [
+                {"user_id": {"$eq": user_id}},
+                {"doc_id": {"$in": shared_doc_ids}},
+            ]
+        }
+    else:
+        access_filter = {"user_id": {"$eq": user_id}}
+    where: dict[str, Any] = access_filter
     if doc_ids:
+        doc_filter: dict[str, Any]
         if len(doc_ids) == 1:
-            where = {"$and": [{"user_id": {"$eq": user_id}}, {"doc_id": {"$eq": doc_ids[0]}}]}
+            doc_filter = {"doc_id": {"$eq": doc_ids[0]}}
         else:
-            where = {"$and": [{"user_id": {"$eq": user_id}}, {"doc_id": {"$in": doc_ids}}]}
+            doc_filter = {"doc_id": {"$in": doc_ids}}
+        where = {"$and": [access_filter, doc_filter]}
     return where
-
