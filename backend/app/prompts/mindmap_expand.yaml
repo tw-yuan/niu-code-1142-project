@@ -6,6 +6,7 @@ system: |
   你是 LearnAI 心智圖節點展開助手。請根據參考資料，針對文件「{document_title}」中的節點路徑「{node_path}」產生下一層子節點。
 
   請嚴格輸出 JSON object，不要輸出 Markdown、表格、程式碼區塊或額外說明。
+  所有 JSON 字串必須是單行字串；不要在 title、summary 或 label 內插入實體換行。若內容包含公式，請使用可被 JSON 正確跳脫的單行 LaTeX，例如 "$E=mc^2$"。
 
   JSON 格式：
   {{

@@ -47,7 +47,7 @@ class MindmapTreeService:
 
     async def save_tree(self, user_id: str, doc_id: str, json_text: str) -> LearningArtifact:
         doc = await self._get_document(user_id, doc_id)
-        parsed = parse_json_llm(json_text)
+        parsed = _parse_mindmap_json(json_text, fallback_title=doc.filename)
         tree = normalize_mindmap_tree(parsed, doc_id=doc.id, fallback_title=doc.filename)
         artifact = LearningArtifact(
             user_id=user_id,
@@ -130,7 +130,7 @@ class MindmapTreeService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mindmap node not found")
         target = node_path[-1]
         target_depth = int(target.get("depth") or len(node_path) - 1)
-        parsed = parse_json_llm(json_text)
+        parsed = _parse_mindmap_children_json(json_text)
         children = parsed.get("children", [])
         if not isinstance(children, list):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid mindmap expansion JSON")
@@ -294,6 +294,139 @@ def normalize_mindmap_tree(parsed: dict[str, Any], doc_id: str, fallback_title: 
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
+
+
+def _parse_mindmap_json(text: str, fallback_title: str) -> dict[str, Any]:
+    try:
+        return parse_json_llm(text)
+    except json.JSONDecodeError:
+        repaired = _repair_json_text(text)
+        if repaired:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+    fallback_children = _fallback_children_from_text(text)
+    return {
+        "title": fallback_title,
+        "summary": "AI 輸出 JSON 格式不完整，已保留可辨識的節點內容。",
+        "root": {
+            "title": fallback_title,
+            "summary": "AI 輸出 JSON 格式不完整，已用可解析內容建立心智圖。",
+            "children": fallback_children,
+        },
+    }
+
+
+def _parse_mindmap_children_json(text: str) -> dict[str, Any]:
+    try:
+        return parse_json_llm(text)
+    except json.JSONDecodeError:
+        repaired = _repair_json_text(text)
+        if repaired:
+            try:
+                parsed = json.loads(repaired)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+    return {"children": _fallback_children_from_text(text)}
+
+
+def _repair_json_text(text: str) -> str | None:
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    if not cleaned:
+        return None
+    start = cleaned.find("{")
+    if start > 0:
+        cleaned = cleaned[start:]
+    end = cleaned.rfind("}")
+    if end >= 0:
+        cleaned = cleaned[: end + 1]
+    cleaned = _escape_control_chars_in_strings(cleaned)
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    return _close_json_fragment(cleaned)
+
+
+def _escape_control_chars_in_strings(text: str) -> str:
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            result.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            result.append(char)
+            in_string = not in_string
+            continue
+        if in_string and char in {"\n", "\r", "\t"}:
+            result.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[char])
+        else:
+            result.append(char)
+    return "".join(result)
+
+
+def _close_json_fragment(text: str) -> str:
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in {"}", "]"} and stack and stack[-1] == char:
+            stack.pop()
+    suffix = '"' if in_string else ""
+    suffix += "".join(reversed(stack))
+    return f"{text}{suffix}"
+
+
+def _fallback_children_from_text(text: str) -> list[dict[str, Any]]:
+    labels: list[str] = []
+    patterns = [
+        r'"title"\s*:\s*"([^"]+)"',
+        r'"label"\s*:\s*"([^"]+)"',
+        r"^\s*[-*+]\s+(.+)$",
+        r"^\s*#{1,6}\s+(.+)$",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.MULTILINE):
+            label = _clean_label(match.group(1), "", max_len=MAX_LABEL_LEN)
+            if label and label not in labels:
+                labels.append(label)
+            if len(labels) >= 12:
+                break
+        if labels:
+            break
+    return [
+        {
+            "title": label,
+            "summary": None,
+            "type": "concept",
+            "source_refs": [],
+            "children": [],
+        }
+        for label in labels[:MAX_CHILDREN]
+    ]
 
 
 def markdown_to_tree(markdown: str, doc_id: str) -> MindmapTree:
