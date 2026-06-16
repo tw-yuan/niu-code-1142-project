@@ -1,6 +1,15 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react"
-import { BookOpenCheck, Eye, FileText, ListChecks, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import {
+  BookOpenCheck,
+  Eye,
+  FileText,
+  ListChecks,
+  MessageSquareText,
+  RefreshCw,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   BASE_URL,
   apiFetch,
@@ -9,282 +18,296 @@ import {
   DocumentItem,
   DocumentUploadResult,
   refreshToken,
-} from "../lib/api"
-import { LoadingButton } from "../components/app/LoadingButton"
-import { MarkdownContent } from "../components/app/MarkdownContent"
-import { useAuthStore } from "../store/auth"
-import { wsManager } from "../lib/ws"
+} from "../lib/api";
+import { LoadingButton } from "../components/app/LoadingButton";
+import { MarkdownContent } from "../components/app/MarkdownContent";
+import { useAuthStore } from "../store/auth";
+import { wsManager } from "../lib/ws";
 
 export function DocumentsPage() {
-  const [documents, setDocuments] = useState<DocumentItem[]>([])
-  const [selected, setSelected] = useState<DocumentItem | null>(null)
-  const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({ chapters: [] })
-  const [content, setContent] = useState<DocumentContent | null>(null)
-  const [contentLoading, setContentLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const [consentLoading, setConsentLoading] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [batchDeleting, setBatchDeleting] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState("")
-  const [consented, setConsented] = useState(false)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const { id } = useParams()
-  const navigate = useNavigate()
-  const user = useAuthStore((state) => state.user)
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [selected, setSelected] = useState<DocumentItem | null>(null);
+  const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({
+    chapters: [],
+  });
+  const [content, setContent] = useState<DocumentContent | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [consentLoading, setConsentLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [consented, setConsented] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const selectedDocs = useMemo(
     () => documents.filter((doc) => selectedDocIds.includes(doc.id)),
     [documents, selectedDocIds],
-  )
-  const selectedReadyDocs = selectedDocs.filter((doc) => doc.status === "ready")
-  const selectedOwnedDocs = selectedDocs.filter((doc) => doc.user_id === user?.id)
-  const allSelected = documents.length > 0 && selectedDocIds.length === documents.length
+  );
+  const ownedDocuments = useMemo(
+    () => documents.filter((doc) => doc.user_id === user?.id),
+    [documents, user?.id],
+  );
+  const sharedDocuments = useMemo(
+    () => documents.filter((doc) => doc.user_id !== user?.id),
+    [documents, user?.id],
+  );
+  const selectedReadyDocs = selectedDocs.filter(
+    (doc) => doc.status === "ready",
+  );
+  const selectedOwnedDocs = selectedDocs.filter(
+    (doc) => doc.user_id === user?.id,
+  );
+  const allOwnedSelected =
+    ownedDocuments.length > 0 &&
+    ownedDocuments.every((doc) => selectedDocIds.includes(doc.id));
+  const allSharedSelected =
+    sharedDocuments.length > 0 &&
+    sharedDocuments.every((doc) => selectedDocIds.includes(doc.id));
 
   async function loadDocuments(showSpinner = false) {
-    if (showSpinner) setRefreshing(true)
+    if (showSpinner) setRefreshing(true);
     try {
-      const data = await apiFetch<DocumentItem[]>("/documents")
-      setDocuments(data)
-      const active = id ? data.find((doc) => doc.id === id) : null
-      setSelected(active ?? data[0] ?? null)
+      const data = await apiFetch<DocumentItem[]>("/documents");
+      setDocuments(data);
+      const active = id ? data.find((doc) => doc.id === id) : null;
+      setSelected(active ?? data[0] ?? null);
     } finally {
-      if (showSpinner) setRefreshing(false)
+      if (showSpinner) setRefreshing(false);
     }
   }
 
   useEffect(() => {
-    loadDocuments().catch(() => undefined)
+    loadDocuments().catch(() => undefined);
     apiFetch<Array<{ consent_type: string }>>("/legal/consents")
-      .then((items) => setConsented(items.some((item) => item.consent_type === "copyright_declaration")))
-      .catch(() => undefined)
-    const token = localStorage.getItem("access_token")
-    if (token) wsManager.connect(token)
-    const offStatus = wsManager.on("doc_status", () => loadDocuments().catch(() => undefined))
-    const offReady = wsManager.on("doc_ready", () => loadDocuments().catch(() => undefined))
+      .then((items) =>
+        setConsented(
+          items.some((item) => item.consent_type === "copyright_declaration"),
+        ),
+      )
+      .catch(() => undefined);
+    const token = localStorage.getItem("access_token");
+    if (token) wsManager.connect(token);
+    const offStatus = wsManager.on("doc_status", () =>
+      loadDocuments().catch(() => undefined),
+    );
+    const offReady = wsManager.on("doc_ready", () =>
+      loadDocuments().catch(() => undefined),
+    );
     return () => {
-      offStatus()
-      offReady()
-    }
-  }, [id])
+      offStatus();
+      offReady();
+    };
+  }, [id]);
 
   useEffect(() => {
-    if (!selected) return
-    apiFetch<{ chapters: CoverageChapter[] }>(`/documents/${selected.id}/coverage`)
+    if (!selected) return;
+    apiFetch<{ chapters: CoverageChapter[] }>(
+      `/documents/${selected.id}/coverage`,
+    )
       .then(setCoverage)
-      .catch(() => setCoverage({ chapters: [] }))
-    setContent(null)
-  }, [selected])
+      .catch(() => setCoverage({ chapters: [] }));
+    setContent(null);
+  }, [selected]);
 
   useEffect(() => {
     if (!selected?.page_count) {
-      setPreviewUrl("")
-      return
+      setPreviewUrl("");
+      return;
     }
-    let objectUrl = ""
-    let active = true
+    let objectUrl = "";
+    let active = true;
     loadAuthorizedBlob(`/documents/${selected.id}/pages/1`)
       .then((blob) => {
-        if (!active) return
-        objectUrl = URL.createObjectURL(blob)
-        setPreviewUrl(objectUrl)
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
       })
-      .catch(() => setPreviewUrl(""))
+      .catch(() => setPreviewUrl(""));
     return () => {
-      active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [selected?.id, selected?.page_count])
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selected?.id, selected?.page_count]);
 
   useEffect(() => {
-    setSelectedDocIds((current) => current.filter((docId) => documents.some((doc) => doc.id === docId)))
-  }, [documents])
+    setSelectedDocIds((current) =>
+      current.filter((docId) => documents.some((doc) => doc.id === docId)),
+    );
+  }, [documents]);
 
   async function uploadFiles(files: File[]) {
-    if (files.length === 0) return
-    setLoading(true)
-    setError("")
+    if (files.length === 0) return;
+    setLoading(true);
+    setError("");
     try {
-      const results = await apiUploadMany<DocumentUploadResult[]>("/documents/upload-batch", files)
-      const failed = results.filter((item) => !item.ok)
+      const results = await apiUploadMany<DocumentUploadResult[]>(
+        "/documents/upload-batch",
+        files,
+      );
+      const failed = results.filter((item) => !item.ok);
       if (failed.length > 0) {
-        setError(failed.map((item) => `${item.filename}: ${item.error ?? "上傳失敗"}`).join("；"))
+        setError(
+          failed
+            .map((item) => `${item.filename}: ${item.error ?? "上傳失敗"}`)
+            .join("；"),
+        );
       }
-      await loadDocuments()
+      await loadDocuments();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "上傳失敗")
+      setError(err instanceof Error ? err.message : "上傳失敗");
     } finally {
-      setLoading(false)
-      setPendingFiles([])
+      setLoading(false);
+      setPendingFiles([]);
     }
   }
 
   function onFile(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? [])
-    if (files.length === 0) return
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
     if (!consented) {
-      setPendingFiles(files)
+      setPendingFiles(files);
     } else {
-      uploadFiles(files).catch(() => undefined)
+      uploadFiles(files).catch(() => undefined);
     }
-    event.target.value = ""
+    event.target.value = "";
   }
 
   async function acceptConsentAndUpload() {
-    setConsentLoading(true)
+    setConsentLoading(true);
     try {
       await apiFetch("/legal/consent", {
         method: "POST",
         body: JSON.stringify({ consent_type: "copyright_declaration" }),
-      })
-      setConsented(true)
-      if (pendingFiles.length > 0) await uploadFiles(pendingFiles)
+      });
+      setConsented(true);
+      if (pendingFiles.length > 0) await uploadFiles(pendingFiles);
     } finally {
-      setConsentLoading(false)
+      setConsentLoading(false);
     }
   }
 
   async function deleteDocument(docId: string) {
-    setDeletingId(docId)
+    setDeletingId(docId);
     try {
-      await apiFetch(`/documents/${docId}`, { method: "DELETE" })
+      await apiFetch(`/documents/${docId}`, { method: "DELETE" });
       if (selected?.id === docId) {
-        setSelected(null)
-        navigate("/documents")
+        setSelected(null);
+        navigate("/documents");
       }
-      await loadDocuments()
+      await loadDocuments();
     } finally {
-      setDeletingId(null)
+      setDeletingId(null);
     }
   }
 
   async function deleteSelectedDocuments() {
-    if (selectedOwnedDocs.length === 0) return
-    setBatchDeleting(true)
+    if (selectedOwnedDocs.length === 0) return;
+    setBatchDeleting(true);
     try {
       for (const doc of selectedOwnedDocs) {
-        await apiFetch(`/documents/${doc.id}`, { method: "DELETE" })
+        await apiFetch(`/documents/${doc.id}`, { method: "DELETE" });
       }
       if (selected && selectedOwnedDocs.some((doc) => doc.id === selected.id)) {
-        setSelected(null)
-        navigate("/documents")
+        setSelected(null);
+        navigate("/documents");
       }
       setSelectedDocIds((current) =>
-        current.filter((docId) => !selectedOwnedDocs.some((doc) => doc.id === docId)),
-      )
-      await loadDocuments()
+        current.filter(
+          (docId) => !selectedOwnedDocs.some((doc) => doc.id === docId),
+        ),
+      );
+      await loadDocuments();
     } finally {
-      setBatchDeleting(false)
+      setBatchDeleting(false);
     }
   }
 
   function toggleDocSelection(docId: string) {
     setSelectedDocIds((current) =>
-      current.includes(docId) ? current.filter((item) => item !== docId) : [...current, docId],
-    )
+      current.includes(docId)
+        ? current.filter((item) => item !== docId)
+        : [...current, docId],
+    );
   }
 
-  function toggleAllDocuments() {
-    setSelectedDocIds(allSelected ? [] : documents.map((doc) => doc.id))
+  function toggleDocumentGroup(
+    groupDocs: DocumentItem[],
+    shouldSelect: boolean,
+  ) {
+    setSelectedDocIds((current) => {
+      const next = new Set(current);
+      groupDocs.forEach((doc) => {
+        if (shouldSelect) {
+          next.add(doc.id);
+        } else {
+          next.delete(doc.id);
+        }
+      });
+      return Array.from(next);
+    });
   }
 
   function openBatchChat() {
-    if (selectedReadyDocs.length === 0) return
-    navigate(`/chat?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`)
+    if (selectedReadyDocs.length === 0) return;
+    navigate(
+      `/chat?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`,
+    );
   }
 
   function openBatchQuiz() {
-    if (selectedReadyDocs.length === 0) return
-    navigate(`/quiz/generate?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`)
+    if (selectedReadyDocs.length === 0) return;
+    navigate(
+      `/quiz/generate?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`,
+    );
   }
 
   async function loadContent() {
-    if (!selected) return
-    setContentLoading(true)
+    if (!selected) return;
+    setContentLoading(true);
     try {
-      setContent(await apiFetch<DocumentContent>(`/documents/${selected.id}/content`))
+      setContent(
+        await apiFetch<DocumentContent>(`/documents/${selected.id}/content`),
+      );
     } finally {
-      setContentLoading(false)
+      setContentLoading(false);
     }
   }
 
-  return (
-    <div>
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">文件</h1>
-          <p className="mt-1 text-sm text-zinc-500">PDF、Markdown、PPTX、DOCX</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <LoadingButton
-            className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
-            onClick={() => loadDocuments(true)}
-            loading={refreshing}
-            loadingText="更新中"
-            icon={<RefreshCw size={16} />}
-          >
-            重新整理
-          </LoadingButton>
-          <label className={["inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white", loading ? "cursor-not-allowed bg-zinc-300" : "cursor-pointer bg-indigo-600 hover:bg-indigo-700"].join(" ")}>
-            {loading ? <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Upload size={16} />}
-            {loading ? "上傳中" : "上傳"}
-            <input className="hidden" type="file" accept=".pdf,.md,.pptx,.docx" multiple onChange={onFile} />
-          </label>
-        </div>
-      </div>
-      {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+  function renderDocumentSection(
+    title: string,
+    docs: DocumentItem[],
+    allGroupSelected: boolean,
+    onToggleAll: () => void,
+    emptyText: string,
+  ) {
+    return (
       <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-        {selectedDocIds.length > 0 && (
-          <div className="flex flex-col gap-3 border-b border-zinc-200 bg-indigo-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-indigo-800">
-              已選擇 {selectedDocIds.length} 個文件
-              {selectedReadyDocs.length !== selectedDocIds.length && (
-                <span className="ml-2 text-xs text-indigo-600">只有 ready 文件可用於對話/測驗</span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                onClick={openBatchChat}
-                disabled={selectedReadyDocs.length === 0}
-              >
-                <MessageSquareText size={16} />
-                多檔對話
-              </button>
-              <button
-                className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-                onClick={openBatchQuiz}
-                disabled={selectedReadyDocs.length === 0}
-              >
-                <ListChecks size={16} />
-                多檔測驗
-              </button>
-              <LoadingButton
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
-                onClick={deleteSelectedDocuments}
-                disabled={selectedOwnedDocs.length === 0}
-                loading={batchDeleting}
-                loadingText="刪除中"
-                icon={<Trash2 size={16} />}
-              >
-                刪除可刪除 {selectedOwnedDocs.length}
-              </LoadingButton>
-              <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50" onClick={() => setSelectedDocIds([])}>
-                清除選取
-              </button>
-            </div>
+        <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
+            <p className="mt-1 text-xs text-zinc-500">{docs.length} 個文件</p>
           </div>
-        )}
+        </div>
         <div className="grid grid-cols-[44px_1fr_120px_120px] border-b border-zinc-200 px-5 py-3 text-xs font-medium uppercase text-zinc-500">
-          <label className="flex items-center" title={allSelected ? "取消全選" : "全選文件"}>
+          <label
+            className="flex items-center"
+            title={allGroupSelected ? "取消全選" : "全選文件"}
+          >
             <input
               className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
               type="checkbox"
-              checked={allSelected}
-              onChange={toggleAllDocuments}
-              aria-label={allSelected ? "取消全選文件" : "全選文件"}
+              checked={allGroupSelected}
+              onChange={onToggleAll}
+              disabled={docs.length === 0}
+              aria-label={
+                allGroupSelected ? `取消全選${title}` : `全選${title}`
+              }
             />
           </label>
           <div>名稱</div>
@@ -292,7 +315,7 @@ export function DocumentsPage() {
           <div className="text-right">大小</div>
         </div>
         <div className="divide-y divide-zinc-100">
-          {documents.map((doc) => (
+          {docs.map((doc) => (
             <div
               key={doc.id}
               className={[
@@ -312,8 +335,8 @@ export function DocumentsPage() {
               <button
                 className="flex min-w-0 items-center gap-3 text-left"
                 onClick={() => {
-                  setSelected(doc)
-                  navigate(`/documents/${doc.id}`)
+                  setSelected(doc);
+                  navigate(`/documents/${doc.id}`);
                 }}
               >
                 <FileText size={18} className="shrink-0 text-zinc-500" />
@@ -326,114 +349,287 @@ export function DocumentsPage() {
                 </div>
               </button>
               <span className={statusClass(doc.status)}>{doc.status}</span>
-              <div className="text-right text-zinc-500">{formatBytes(doc.file_size)}</div>
+              <div className="text-right text-zinc-500">
+                {formatBytes(doc.file_size)}
+              </div>
             </div>
           ))}
-          {documents.length === 0 && (
+          {docs.length === 0 && (
             <div className="px-5 py-12 text-center text-sm text-zinc-500">
-              {loading ? "上傳中" : "尚無文件"}
+              {loading ? "上傳中" : emptyText}
             </div>
           )}
         </div>
       </section>
-      <aside className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-        {selected ? (
-          <div>
-            <div className="border-b border-zinc-200 p-5">
-              <div className="text-sm font-semibold">{selected.filename}</div>
-              <div className="mt-1 text-xs text-zinc-500">{selected.page_count ?? 0} 頁 · {selected.chunk_count ?? 0} chunks</div>
-              {selected.user_id !== user?.id && (
-                <div className="mt-2 inline-flex rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-700">課程共享文件</div>
-              )}
-            </div>
-            <div className="space-y-3 p-5">
-              {selected.status === "ready" && (
-                <div className="flex flex-wrap gap-2">
-                  <Link className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" to={`/chat?doc=${selected.id}`}>
-                    <MessageSquareText size={16} />
-                    開始對話
-                  </Link>
-                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/summary/${selected.id}`}>
-                    <BookOpenCheck size={16} />
-                    摘要
-                  </Link>
-                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/mindmap/${selected.id}`}>
-                    心智圖
-                  </Link>
-                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/quiz/generate?doc=${selected.id}`}>
-                    生成測驗
-                  </Link>
-                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/flashcards?doc=${selected.id}`}>
-                    建立閃卡
-                  </Link>
-                  <LoadingButton className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100" onClick={loadContent} loading={contentLoading} loadingText="載入中" icon={<Eye size={16} />}>
-                    瀏覽內容
-                  </LoadingButton>
-                </div>
-              )}
-              {selected.status === "error" && selected.error_msg && (
-                <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{selected.error_msg}</div>
-              )}
-              {previewUrl ? (
-                <img
-                  className="aspect-[3/4] w-full rounded-md border border-zinc-200 object-contain"
-                  src={previewUrl}
-                  alt="文件第一頁預覽"
-                />
-              ) : (
-                <div className="rounded-md border border-dashed border-zinc-200 p-6 text-center text-sm text-zinc-500">尚無頁面預覽</div>
-              )}
-              <div>
-                <div className="mb-2 text-sm font-medium">學習覆蓋度</div>
-                <div className="space-y-2">
-                  {coverage.chapters.map((chapter) => (
-                    <div key={chapter.title}>
-                      <div className="mb-1 flex justify-between text-xs text-zinc-500">
-                        <span>{chapter.title}</span>
-                        <span>{Math.round(chapter.coverage_score * 100)}%</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-zinc-100">
-                        <div className="h-2 rounded-full bg-indigo-600" style={{ width: `${Math.round(chapter.coverage_score * 100)}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                  {coverage.chapters.length === 0 && <div className="text-sm text-zinc-500">尚無學習記錄</div>}
-                </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">文件</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            PDF、Markdown、PPTX、DOCX
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <LoadingButton
+            className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+            onClick={() => loadDocuments(true)}
+            loading={refreshing}
+            loadingText="更新中"
+            icon={<RefreshCw size={16} />}
+          >
+            重新整理
+          </LoadingButton>
+          <label
+            className={[
+              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white",
+              loading
+                ? "cursor-not-allowed bg-zinc-300"
+                : "cursor-pointer bg-indigo-600 hover:bg-indigo-700",
+            ].join(" ")}
+          >
+            {loading ? (
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
+            ) : (
+              <Upload size={16} />
+            )}
+            {loading ? "上傳中" : "上傳"}
+            <input
+              className="hidden"
+              type="file"
+              accept=".pdf,.md,.pptx,.docx"
+              multiple
+              onChange={onFile}
+            />
+          </label>
+        </div>
+      </div>
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          {selectedDocIds.length > 0 && (
+            <section className="flex flex-col gap-3 rounded-lg border border-indigo-100 bg-indigo-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-indigo-800">
+                已選擇 {selectedDocIds.length} 個文件
+                {selectedReadyDocs.length !== selectedDocIds.length && (
+                  <span className="ml-2 text-xs text-indigo-600">
+                    只有 ready 文件可用於對話/測驗
+                  </span>
+                )}
               </div>
-              {contentLoading && <div className="rounded-md bg-zinc-50 p-3 text-sm text-zinc-500">載入文件內容中</div>}
-              {content && (
-                <div className="max-h-96 overflow-auto rounded-lg border border-zinc-200 p-4">
-                  <MarkdownContent className="text-sm">{content.content || "尚無可瀏覽文字"}</MarkdownContent>
-                </div>
-              )}
-              {selected.user_id === user?.id && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  onClick={openBatchChat}
+                  disabled={selectedReadyDocs.length === 0}
+                >
+                  <MessageSquareText size={16} />
+                  多檔對話
+                </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                  onClick={openBatchQuiz}
+                  disabled={selectedReadyDocs.length === 0}
+                >
+                  <ListChecks size={16} />
+                  多檔測驗
+                </button>
                 <LoadingButton
-                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-                  onClick={() => deleteDocument(selected.id)}
-                  loading={deletingId === selected.id}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                  onClick={deleteSelectedDocuments}
+                  disabled={selectedOwnedDocs.length === 0}
+                  loading={batchDeleting}
                   loadingText="刪除中"
                   icon={<Trash2 size={16} />}
                 >
-                  刪除文件
+                  刪除可刪除 {selectedOwnedDocs.length}
                 </LoadingButton>
-              )}
+                <button
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+                  onClick={() => setSelectedDocIds([])}
+                >
+                  清除選取
+                </button>
+              </div>
+            </section>
+          )}
+          {renderDocumentSection(
+            "我的文件",
+            ownedDocuments,
+            allOwnedSelected,
+            () => toggleDocumentGroup(ownedDocuments, !allOwnedSelected),
+            "尚無自己的文件",
+          )}
+          {renderDocumentSection(
+            "課程共享文件",
+            sharedDocuments,
+            allSharedSelected,
+            () => toggleDocumentGroup(sharedDocuments, !allSharedSelected),
+            "尚無課程共享文件",
+          )}
+        </div>
+        <aside className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+          {selected ? (
+            <div>
+              <div className="border-b border-zinc-200 p-5">
+                <div className="text-sm font-semibold">{selected.filename}</div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  {selected.page_count ?? 0} 頁 · {selected.chunk_count ?? 0}{" "}
+                  chunks
+                </div>
+                {selected.user_id !== user?.id && (
+                  <div className="mt-2 inline-flex rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-700">
+                    課程共享文件
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3 p-5">
+                {selected.status === "ready" && (
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                      to={`/chat?doc=${selected.id}`}
+                    >
+                      <MessageSquareText size={16} />
+                      開始對話
+                    </Link>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                      to={`/summary/${selected.id}`}
+                    >
+                      <BookOpenCheck size={16} />
+                      摘要
+                    </Link>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                      to={`/mindmap/${selected.id}`}
+                    >
+                      心智圖
+                    </Link>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                      to={`/quiz/generate?doc=${selected.id}`}
+                    >
+                      生成測驗
+                    </Link>
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                      to={`/flashcards?doc=${selected.id}`}
+                    >
+                      建立閃卡
+                    </Link>
+                    <LoadingButton
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                      onClick={loadContent}
+                      loading={contentLoading}
+                      loadingText="載入中"
+                      icon={<Eye size={16} />}
+                    >
+                      瀏覽內容
+                    </LoadingButton>
+                  </div>
+                )}
+                {selected.status === "error" && selected.error_msg && (
+                  <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+                    {selected.error_msg}
+                  </div>
+                )}
+                {previewUrl ? (
+                  <img
+                    className="aspect-[3/4] w-full rounded-md border border-zinc-200 object-contain"
+                    src={previewUrl}
+                    alt="文件第一頁預覽"
+                  />
+                ) : (
+                  <div className="rounded-md border border-dashed border-zinc-200 p-6 text-center text-sm text-zinc-500">
+                    尚無頁面預覽
+                  </div>
+                )}
+                <div>
+                  <div className="mb-2 text-sm font-medium">學習覆蓋度</div>
+                  <div className="space-y-2">
+                    {coverage.chapters.map((chapter) => (
+                      <div key={chapter.title}>
+                        <div className="mb-1 flex justify-between text-xs text-zinc-500">
+                          <span>{chapter.title}</span>
+                          <span>
+                            {Math.round(chapter.coverage_score * 100)}%
+                          </span>
+                        </div>
+                        <div className="h-2 rounded-full bg-zinc-100">
+                          <div
+                            className="h-2 rounded-full bg-indigo-600"
+                            style={{
+                              width: `${Math.round(chapter.coverage_score * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {coverage.chapters.length === 0 && (
+                      <div className="text-sm text-zinc-500">尚無學習記錄</div>
+                    )}
+                  </div>
+                </div>
+                {contentLoading && (
+                  <div className="rounded-md bg-zinc-50 p-3 text-sm text-zinc-500">
+                    載入文件內容中
+                  </div>
+                )}
+                {content && (
+                  <div className="max-h-96 overflow-auto rounded-lg border border-zinc-200 p-4">
+                    <MarkdownContent className="text-sm">
+                      {content.content || "尚無可瀏覽文字"}
+                    </MarkdownContent>
+                  </div>
+                )}
+                {selected.user_id === user?.id && (
+                  <LoadingButton
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                    onClick={() => deleteDocument(selected.id)}
+                    loading={deletingId === selected.id}
+                    loadingText="刪除中"
+                    icon={<Trash2 size={16} />}
+                  >
+                    刪除文件
+                  </LoadingButton>
+                )}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="p-6 text-sm text-zinc-500">選擇文件查看詳情</div>
-        )}
-      </aside>
+          ) : (
+            <div className="p-6 text-sm text-zinc-500">選擇文件查看詳情</div>
+          )}
+        </aside>
       </div>
       {pendingFiles.length > 0 && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-zinc-950/30 p-4">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold">上傳前著作權聲明</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-600">
-              您選擇的 {pendingFiles.length} 個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
+              您選擇的 {pendingFiles.length}{" "}
+              個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
             </p>
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onClick={() => setPendingFiles([])} disabled={consentLoading}>取消</button>
-              <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={acceptConsentAndUpload} loading={consentLoading || loading} loadingText="送出中">
+              <button
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                onClick={() => setPendingFiles([])}
+                disabled={consentLoading}
+              >
+                取消
+              </button>
+              <LoadingButton
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+                onClick={acceptConsentAndUpload}
+                loading={consentLoading || loading}
+                loadingText="送出中"
+              >
                 我已了解並同意
               </LoadingButton>
             </div>
@@ -441,42 +637,42 @@ export function DocumentsPage() {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 interface CoverageChapter {
-  title: string
-  page_range: [number, number]
-  quiz_attempts: number
-  quiz_score_avg: number
-  flashcard_count: number
-  flashcard_mastered: number
-  chat_mentions: number
-  coverage_score: number
+  title: string;
+  page_range: [number, number];
+  quiz_attempts: number;
+  quiz_score_avg: number;
+  flashcard_count: number;
+  flashcard_mastered: number;
+  chat_mentions: number;
+  coverage_score: number;
 }
 
 function statusClass(status: string) {
-  const base = "inline-flex w-fit rounded-lg px-2 py-1 text-xs"
-  if (status === "ready") return `${base} bg-emerald-50 text-emerald-700`
-  if (status === "error") return `${base} bg-red-50 text-red-600`
-  return `${base} bg-indigo-50 text-indigo-700`
+  const base = "inline-flex w-fit rounded-lg px-2 py-1 text-xs";
+  if (status === "ready") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "error") return `${base} bg-red-50 text-red-600`;
+  return `${base} bg-indigo-50 text-indigo-700`;
 }
 
 function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 async function loadAuthorizedBlob(path: string): Promise<Blob> {
-  let res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  let res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
   if (res.status === 401 && (await refreshToken())) {
-    res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+    res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
   }
-  if (!res.ok) throw new Error("Failed to load file")
-  return res.blob()
+  if (!res.ok) throw new Error("Failed to load file");
+  return res.blob();
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token")
-  return token ? { Authorization: `Bearer ${token}` } : undefined
+  const token = localStorage.getItem("access_token");
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
 }
