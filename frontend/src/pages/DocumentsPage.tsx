@@ -133,7 +133,6 @@ export function DocumentsPage() {
   }
 
   async function deleteDocument(docId: string) {
-    if (!window.confirm("確定刪除此文件與向量資料？")) return
     setDeletingId(docId)
     try {
       await apiFetch(`/documents/${docId}`, { method: "DELETE" })

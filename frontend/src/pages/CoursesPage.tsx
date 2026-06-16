@@ -152,7 +152,6 @@ export function CoursesPage() {
 
   async function removeMember(member: CourseMember) {
     if (!selected || !canManage) return
-    if (!window.confirm(`確定移除 ${member.username ?? member.user_id}？`)) return
     setBusyAction(`remove-member-${member.user_id}`)
     try {
       await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, { method: "DELETE" })
@@ -175,7 +174,6 @@ export function CoursesPage() {
 
   async function leaveCourse() {
     if (!selected || isOwner) return
-    if (!window.confirm(`確定退出 ${selected.title}？`)) return
     setBusyAction("leave")
     try {
       await apiFetch(`/courses/${selected.id}/leave`, { method: "POST" })

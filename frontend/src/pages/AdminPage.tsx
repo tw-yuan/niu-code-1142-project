@@ -332,7 +332,6 @@ export function AdminPage() {
   }
 
   async function deleteAdminDocument(doc: AdminDocument) {
-    if (!window.confirm(`確定刪除文件 ${doc.filename}？會同步清除檔案與向量資料。`)) return
     setMessage("")
     setError("")
     await apiFetch(`/admin/documents/${doc.id}`, { method: "DELETE" })
@@ -345,7 +344,6 @@ export function AdminPage() {
   }
 
   async function deleteAdminChat(session: AdminChatSession) {
-    if (!window.confirm(`確定刪除對話 ${session.title ?? session.id}？`)) return
     setMessage("")
     setError("")
     await apiFetch(`/admin/chat-sessions/${session.id}`, { method: "DELETE" })
@@ -374,7 +372,6 @@ export function AdminPage() {
   }
 
   async function deleteAdminCourse(course: AdminCourse) {
-    if (!window.confirm(`確定刪除課程 ${course.title}？`)) return
     setMessage("")
     setError("")
     await apiFetch(`/admin/courses/${course.id}`, { method: "DELETE" })
@@ -396,8 +393,6 @@ export function AdminPage() {
 
   async function removeCourseMember(userId: string) {
     if (!selectedCourse) return
-    const member = selectedCourse.members.find((item) => item.user_id === userId)
-    if (member && !window.confirm(`確定移除 ${member.username}？`)) return
     const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/members/${userId}`, { method: "DELETE" })
     setSelectedCourse(updated)
     await loadResources()
@@ -416,8 +411,6 @@ export function AdminPage() {
 
   async function removeCourseDocument(docId: string) {
     if (!selectedCourse) return
-    const doc = selectedCourse.documents.find((item) => item.id === docId)
-    if (doc && !window.confirm(`確定從課程移除 ${doc.filename}？`)) return
     const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/documents/${docId}`, { method: "DELETE" })
     setSelectedCourse(updated)
     await loadResources()
