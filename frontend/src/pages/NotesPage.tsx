@@ -2,8 +2,10 @@ import { FormEvent, useEffect, useState } from "react"
 import { Download, NotebookPen, Plus } from "lucide-react"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { BASE_URL, apiFetch, DocumentItem, NoteItem, refreshToken } from "../lib/api"
+import { useAuthStore } from "../store/auth"
 
 export function NotesPage() {
+  const user = useAuthStore((state) => state.user)
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [notes, setNotes] = useState<NoteItem[]>([])
   const [docId, setDocId] = useState("")
@@ -70,7 +72,9 @@ export function NotesPage() {
             <select className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
               <option value="">全部文件</option>
               {documents.map((doc) => (
-                <option key={doc.id} value={doc.id}>{doc.filename}</option>
+                <option key={doc.id} value={doc.id}>
+                  {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
+                </option>
               ))}
             </select>
             <input className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={q} onChange={(event) => setQ(event.target.value)} placeholder="搜尋筆記" />

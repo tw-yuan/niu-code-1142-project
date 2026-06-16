@@ -1,20 +1,25 @@
 import { ChangeEvent, useEffect, useState } from "react"
-import { BookOpenCheck, FileText, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
+import { BookOpenCheck, Eye, FileText, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   BASE_URL,
   apiFetch,
   apiUploadMany,
+  DocumentContent,
   DocumentItem,
   DocumentUploadResult,
   refreshToken,
 } from "../lib/api"
+import { MarkdownContent } from "../components/app/MarkdownContent"
+import { useAuthStore } from "../store/auth"
 import { wsManager } from "../lib/ws"
 
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({ chapters: [] })
+  const [content, setContent] = useState<DocumentContent | null>(null)
+  const [contentLoading, setContentLoading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState("")
   const [consented, setConsented] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -22,6 +27,7 @@ export function DocumentsPage() {
   const [error, setError] = useState("")
   const { id } = useParams()
   const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
 
   async function loadDocuments() {
     const data = await apiFetch<DocumentItem[]>("/documents")
@@ -50,6 +56,7 @@ export function DocumentsPage() {
     apiFetch<{ chapters: CoverageChapter[] }>(`/documents/${selected.id}/coverage`)
       .then(setCoverage)
       .catch(() => setCoverage({ chapters: [] }))
+    setContent(null)
   }, [selected])
 
   useEffect(() => {
@@ -121,6 +128,16 @@ export function DocumentsPage() {
     await loadDocuments()
   }
 
+  async function loadContent() {
+    if (!selected) return
+    setContentLoading(true)
+    try {
+      setContent(await apiFetch<DocumentContent>(`/documents/${selected.id}/content`))
+    } finally {
+      setContentLoading(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -167,6 +184,7 @@ export function DocumentsPage() {
                   <div className="truncate font-medium">{doc.filename}</div>
                   <div className="text-xs text-zinc-500">
                     {doc.page_count ?? 0} 頁 · {doc.chunk_count ?? 0} chunks
+                    {doc.user_id !== user?.id ? " · 課程共享" : ""}
                   </div>
                 </div>
               </div>
@@ -187,6 +205,9 @@ export function DocumentsPage() {
             <div className="border-b border-zinc-200 p-5">
               <div className="text-sm font-semibold">{selected.filename}</div>
               <div className="mt-1 text-xs text-zinc-500">{selected.page_count ?? 0} 頁 · {selected.chunk_count ?? 0} chunks</div>
+              {selected.user_id !== user?.id && (
+                <div className="mt-2 inline-flex rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-700">課程共享文件</div>
+              )}
             </div>
             <div className="space-y-3 p-5">
               {selected.status === "ready" && (
@@ -202,6 +223,10 @@ export function DocumentsPage() {
                     <MessageSquareText size={16} />
                     對話
                   </Link>
+                  <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" onClick={loadContent}>
+                    <Eye size={16} />
+                    瀏覽內容
+                  </button>
                 </div>
               )}
               {selected.status === "error" && selected.error_msg && (
@@ -233,13 +258,21 @@ export function DocumentsPage() {
                   {coverage.chapters.length === 0 && <div className="text-sm text-zinc-500">尚無學習記錄</div>}
                 </div>
               </div>
-              <button
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-                onClick={() => deleteDocument(selected.id)}
-              >
-                <Trash2 size={16} />
-                刪除文件
-              </button>
+              {contentLoading && <div className="rounded-md bg-zinc-50 p-3 text-sm text-zinc-500">載入文件內容中</div>}
+              {content && (
+                <div className="max-h-96 overflow-auto rounded-lg border border-zinc-200 p-4">
+                  <MarkdownContent className="text-sm">{content.content || "尚無可瀏覽文字"}</MarkdownContent>
+                </div>
+              )}
+              {selected.user_id === user?.id && (
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                  onClick={() => deleteDocument(selected.id)}
+                >
+                  <Trash2 size={16} />
+                  刪除文件
+                </button>
+              )}
             </div>
           </div>
         ) : (

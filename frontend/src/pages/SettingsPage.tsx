@@ -1,14 +1,47 @@
-import { useState } from "react"
-import { Download, Trash2 } from "lucide-react"
-import { BASE_URL, apiFetch, refreshToken } from "../lib/api"
+import { FormEvent, useEffect, useState } from "react"
+import { Download, Save, ShieldCheck, Trash2 } from "lucide-react"
+import { BASE_URL, apiFetch, refreshToken, User } from "../lib/api"
 import { useAuthStore } from "../store/auth"
 
 export function SettingsPage() {
-  const { user, logout } = useAuthStore()
+  const { user, logout, setUser } = useAuthStore()
+  const [username, setUsername] = useState(user?.username ?? "")
+  const [email, setEmail] = useState(user?.email ?? "")
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
   const [code, setCode] = useState("")
   const [input, setInput] = useState("")
   const [exportReady, setExportReady] = useState(false)
   const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    setUsername(user?.username ?? "")
+    setEmail(user?.email ?? "")
+  }, [user?.username, user?.email])
+
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault()
+    setError("")
+    const updated = await apiFetch<User>("/auth/me", {
+      method: "PUT",
+      body: JSON.stringify({ username: username.trim(), email: email.trim() }),
+    })
+    setUser(updated)
+    setMessage("帳號資料已更新")
+  }
+
+  async function changePassword(event: FormEvent) {
+    event.preventDefault()
+    setError("")
+    await apiFetch("/auth/me/password", {
+      method: "PUT",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    })
+    setCurrentPassword("")
+    setNewPassword("")
+    setMessage("密碼已更新，請於下次操作時重新登入")
+  }
 
   async function requestExport() {
     const result = await apiFetch<{ expires_at: string }>("/auth/me/export-request", { method: "POST" })
@@ -44,6 +77,41 @@ export function SettingsPage() {
         <p className="mt-1 text-sm text-zinc-500">{user?.email}</p>
       </div>
       {message && <div className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">{message}</div>}
+      {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-4 font-semibold">個人資料</h2>
+        <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => saveProfile(event).catch((err) => setError(err instanceof Error ? err.message : "更新失敗"))}>
+          <label className="text-sm">
+            <span className="mb-1 block text-zinc-600">Username</span>
+            <input className="w-full rounded-lg border border-zinc-200 px-3 py-2" value={username} onChange={(event) => setUsername(event.target.value)} />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-zinc-600">Email</span>
+            <input className="w-full rounded-lg border border-zinc-200 px-3 py-2" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          </label>
+          <div className="sm:col-span-2">
+            <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+              <Save size={16} />
+              儲存個人資料
+            </button>
+          </div>
+        </form>
+      </section>
+      <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-4 flex items-center gap-2 font-semibold">
+          <ShieldCheck size={18} />
+          密碼
+        </h2>
+        <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => changePassword(event).catch((err) => setError(err instanceof Error ? err.message : "密碼更新失敗"))}>
+          <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="目前密碼" />
+          <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="新密碼" />
+          <div className="sm:col-span-2">
+            <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" disabled={!currentPassword || newPassword.length < 8}>
+              更新密碼
+            </button>
+          </div>
+        </form>
+      </section>
       <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-2 font-semibold">資料匯出</h2>
         <p className="mb-4 text-sm leading-6 text-zinc-600">匯出 profile、文件清單、對話、閃卡、測驗紀錄與筆記。ZIP 有效期 24 小時。</p>

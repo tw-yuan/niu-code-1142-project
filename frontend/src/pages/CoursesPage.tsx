@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react"
-import { BookOpen, Copy, Plus, Users } from "lucide-react"
+import { BookOpen, Copy, LogOut, Plus, Users } from "lucide-react"
 import { ApiError, apiFetch, CourseItem, DocumentItem } from "../lib/api"
 import { useAuthStore } from "../store/auth"
 
@@ -27,7 +27,7 @@ export function CoursesPage() {
       apiFetch<DocumentItem[]>("/documents"),
     ])
     setCourses(nextCourses)
-    setDocuments(docs.filter((doc) => doc.status === "ready"))
+    setDocuments(docs.filter((doc) => doc.status === "ready" && doc.user_id === user?.id))
     if (!selected && nextCourses[0]) await openCourse(nextCourses[0].id)
   }
 
@@ -129,6 +129,14 @@ export function CoursesPage() {
     await openCourse(selected.id)
   }
 
+  async function leaveCourse() {
+    if (!selected || isOwner) return
+    if (!window.confirm(`確定退出 ${selected.title}？`)) return
+    await apiFetch(`/courses/${selected.id}/leave`, { method: "POST" })
+    setSelected(null)
+    await load()
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -192,6 +200,12 @@ export function CoursesPage() {
                   <Users size={16} />
                   {members.length} 位成員
                 </div>
+                {!isOwner && (
+                  <button className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50" onClick={leaveCourse}>
+                    <LogOut size={16} />
+                    退出課程
+                  </button>
+                )}
               </div>
               <div className="mb-5 grid gap-3 lg:grid-cols-2">
                 <section className="rounded-lg border border-zinc-200">

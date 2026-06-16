@@ -94,7 +94,9 @@ export function QuizPage() {
           <h2 className="mb-4 font-semibold">生成測驗</h2>
           <select className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
             {documents.map((doc) => (
-              <option key={doc.id} value={doc.id}>{doc.filename}</option>
+              <option key={doc.id} value={doc.id}>
+                {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
+              </option>
             ))}
           </select>
           <div className="mb-3 grid grid-cols-2 gap-2">

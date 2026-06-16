@@ -31,6 +31,7 @@ export interface AuthResponse {
 
 export interface DocumentItem {
   id: string
+  user_id: string
   filename: string
   file_type: string
   file_size: number
@@ -40,6 +41,16 @@ export interface DocumentItem {
   error_msg: string | null
   created_at: string
   updated_at: string
+}
+
+export interface DocumentContent {
+  id: string
+  filename: string
+  file_type: string
+  status: string
+  page_count: number | null
+  pages: Array<{ page_num: number; text: string }>
+  content: string
 }
 
 export interface DocumentUploadResult {

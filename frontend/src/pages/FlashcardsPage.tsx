@@ -93,7 +93,9 @@ export function FlashcardsPage() {
           <select className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
             <option value="">不綁定文件</option>
             {documents.map((doc) => (
-              <option key={doc.id} value={doc.id}>{doc.filename}</option>
+              <option key={doc.id} value={doc.id}>
+                {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
+              </option>
             ))}
           </select>
           <button
