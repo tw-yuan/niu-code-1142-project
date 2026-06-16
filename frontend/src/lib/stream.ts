@@ -1,10 +1,12 @@
-import { BASE_URL, Citation, refreshToken } from "./api"
+import { BASE_URL, Citation, MindmapNode, MindmapTree, refreshToken } from "./api"
 
 export type StreamEvent =
   | { type: "chunk"; content: string }
   | { type: "citations"; data: Citation[] }
   | { type: "quiz_meta"; data: { quiz_id: string; question_count?: number } }
-  | { type: "mindmap_meta"; data: { mindmap_id: string } }
+  | { type: "mindmap_tree"; data: MindmapTree }
+  | { type: "mindmap_patch"; data: { op: "append_children"; mindmap_id: string; node_id: string; children: MindmapNode[]; tree: MindmapTree; content: string } }
+  | { type: "mindmap_meta"; data: { mindmap_id: string; format?: "tree_json" | "markdown"; schema_version?: number } }
   | { type: "flashcard_meta"; data: { count: number } }
   | { type: "summary_meta"; data: { summary_id: string } }
   | { type: "error"; code: string; message: string }

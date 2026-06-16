@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { MindmapCanvas } from "../components/app/MindmapCanvas"
-import { apiFetch, DocumentItem } from "../lib/api"
+import { apiFetch, DocumentItem, MindmapResponse, MindmapTree } from "../lib/api"
 import { streamFetch } from "../lib/stream"
 import { useAuthStore } from "../store/auth"
 
@@ -13,13 +13,24 @@ export function MindmapPage() {
   const user = useAuthStore((state) => state.user)
   const [doc, setDoc] = useState<DocumentItem | null>(null)
   const [content, setContent] = useState("")
+  const [tree, setTree] = useState<MindmapTree | null>(null)
+  const [artifactId, setArtifactId] = useState<string | null>(null)
+  const [format, setFormat] = useState<"tree_json" | "markdown" | null>(null)
   const [streaming, setStreaming] = useState(false)
+  const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
     if (!docId) return
     apiFetch<DocumentItem>(`/documents/${docId}`).then(setDoc).catch(() => undefined)
-    apiFetch<{ content: string }>(`/mindmap/${docId}`).then((data) => setContent(data.content)).catch(() => undefined)
+    apiFetch<MindmapResponse>(`/mindmap/${docId}`)
+      .then((data) => {
+        setContent(data.content)
+        setTree(data.tree)
+        setArtifactId(data.id)
+        setFormat(data.format)
+      })
+      .catch(() => undefined)
   }, [docId])
 
   async function generate() {
@@ -27,12 +38,22 @@ export function MindmapPage() {
     setStreaming(true)
     setError("")
     setContent("")
+    setTree(null)
+    setArtifactId(null)
+    setFormat(null)
     let next = ""
     try {
-      for await (const event of streamFetch("/mindmap/stream", { doc_id: docId })) {
+      for await (const event of streamFetch("/mindmap/stream", { doc_id: docId, format: "tree_json" })) {
         if (event.type === "chunk") {
           next += event.content
           setContent(next)
+        } else if (event.type === "mindmap_tree") {
+          setTree(event.data)
+          setContent(treeToMarkdown(event.data))
+          setFormat("tree_json")
+        } else if (event.type === "mindmap_meta") {
+          setArtifactId(event.data.mindmap_id)
+          setFormat(event.data.format ?? "tree_json")
         } else if (event.type === "error") {
           setError(event.message)
         }
@@ -41,6 +62,26 @@ export function MindmapPage() {
       setError(err instanceof Error ? err.message : "心智圖生成失敗")
     } finally {
       setStreaming(false)
+    }
+  }
+
+  async function expandNode(nodeId: string) {
+    if (!artifactId || format !== "tree_json" || user?.quota_status === "exceeded") return
+    setExpandingNodeId(nodeId)
+    setError("")
+    try {
+      for await (const event of streamFetch(`/mindmap/${artifactId}/nodes/${nodeId}/expand/stream`, { max_children: 5 })) {
+        if (event.type === "mindmap_patch") {
+          setTree(event.data.tree)
+          setContent(event.data.content)
+        } else if (event.type === "error") {
+          setError(event.message)
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "節點展開失敗")
+    } finally {
+      setExpandingNodeId(null)
     }
   }
 
@@ -65,7 +106,14 @@ export function MindmapPage() {
       <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         {content ? (
           <div className="space-y-5">
-            <MindmapCanvas markdown={content} />
+            <MindmapCanvas
+              tree={tree}
+              markdown={content}
+              artifactId={artifactId ?? undefined}
+              canAiExpand={format === "tree_json" && user?.quota_status !== "exceeded"}
+              expandingNodeId={expandingNodeId ?? undefined}
+              onAiExpand={expandNode}
+            />
             <details className="rounded-lg border border-zinc-200 p-4">
               <summary className="cursor-pointer text-sm font-medium text-zinc-700">查看 Markdown 原文</summary>
               <div className="mt-4">
@@ -82,4 +130,17 @@ export function MindmapPage() {
       </section>
     </div>
   )
+}
+
+function treeToMarkdown(tree: MindmapTree) {
+  const lines = [`# ${tree.root.title || tree.title}`]
+  function walk(nodes: MindmapTree["root"]["children"], depth: number) {
+    for (const node of nodes) {
+      if (depth === 1) lines.push(`## ${node.title}`)
+      else lines.push(`${"  ".repeat(depth - 2)}- ${node.title}`)
+      walk(node.children, depth + 1)
+    }
+  }
+  walk(tree.root.children, 1)
+  return lines.join("\n")
 }

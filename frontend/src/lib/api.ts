@@ -92,6 +92,45 @@ export interface Citation {
   support_status?: "supported" | "partial" | "unverified" | string
 }
 
+export interface MindmapSourceRef {
+  doc_id?: string
+  page_num?: number | null
+  chunk_index?: number | null
+  label?: string | null
+}
+
+export interface MindmapNode {
+  id: string
+  title: string
+  summary?: string | null
+  depth: number
+  order: number
+  type?: "concept" | "process" | "example" | "pitfall" | "comparison" | "formula" | "application" | "summary" | string
+  expandable?: boolean
+  children_loaded?: boolean
+  children: MindmapNode[]
+  source_refs?: MindmapSourceRef[]
+  parent_id?: string
+}
+
+export interface MindmapTree {
+  schema_version: number
+  title: string
+  doc_id: string
+  root: MindmapNode
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MindmapResponse {
+  id: string
+  doc_id: string
+  format: "tree_json" | "markdown"
+  schema_version: number
+  tree: MindmapTree | null
+  content: string
+}
+
 export interface FlashcardItem {
   id: string
   doc_id: string | null
