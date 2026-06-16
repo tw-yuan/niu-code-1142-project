@@ -13,6 +13,7 @@ export function QuizPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [quizzes, setQuizzes] = useState<QuizItem[]>([])
   const [docId, setDocId] = useState("")
+  const [docIds, setDocIds] = useState<string[]>([])
   const [courseId, setCourseId] = useState("")
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [publishToCourse, setPublishToCourse] = useState(false)
@@ -33,6 +34,7 @@ export function QuizPage() {
   const isWrongbook = location.pathname.endsWith("/wrongbook")
 
   const activeQuiz = useMemo(() => quizzes.find((quiz) => quiz.id === id), [id, quizzes])
+  const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : []
 
   async function load() {
     const [docs, nextQuizzes, wrongbookRows, nextCourses] = await Promise.all([
@@ -46,7 +48,10 @@ export function QuizPage() {
     setQuizzes(nextQuizzes)
     setWrongbook(wrongbookRows)
     setCourses(nextCourses)
-    if (!docId && ready[0]) setDocId(ready[0].id)
+    if (docIds.length === 0 && !docId && ready[0]) {
+      setDocId(ready[0].id)
+      setDocIds([ready[0].id])
+    }
   }
 
   useEffect(() => {
@@ -56,8 +61,16 @@ export function QuizPage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const doc = params.get("doc")
+    const docs = params.get("docs")
     const course = params.get("course")
-    if (doc) setDocId(doc)
+    if (docs) {
+      const nextDocIds = docs.split(",").map((item) => item.trim()).filter(Boolean)
+      setDocIds(nextDocIds)
+      setDocId(nextDocIds[0] ?? "")
+    } else if (doc) {
+      setDocId(doc)
+      setDocIds([doc])
+    }
     if (course) {
       setCourseId(course)
       setPublishToCourse(true)
@@ -71,7 +84,7 @@ export function QuizPage() {
   }, [id])
 
   async function generate() {
-    if (!docId || user?.quota_status === "exceeded") return
+    if (activeDocIds.length === 0 || user?.quota_status === "exceeded") return
     setPreview("")
     setError("")
     setStreaming(true)
@@ -79,7 +92,7 @@ export function QuizPage() {
     let failed = false
     try {
       for await (const event of streamFetch("/quiz/stream", {
-        doc_ids: [docId],
+        doc_ids: activeDocIds,
         types: ["MC"],
         count,
         difficulty,
@@ -145,14 +158,30 @@ export function QuizPage() {
           <h2 className="mb-4 font-semibold">生成測驗</h2>
           <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="quiz-title">測驗標題</label>
           <input id="quiz-title" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="選填" />
-          <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="quiz-doc">文件</label>
-          <select id="quiz-doc" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
+          <div className="mb-1 text-xs font-medium text-zinc-500">文件</div>
+          <div className="mb-3 max-h-44 overflow-auto rounded-lg border border-zinc-200 p-2">
             {documents.map((doc) => (
-              <option key={doc.id} value={doc.id}>
-                {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
-              </option>
+              <label key={doc.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50">
+                <input
+                  type="checkbox"
+                  checked={docIds.includes(doc.id)}
+                  onChange={(event) => {
+                    setDocIds((current) => {
+                      const next = event.target.checked
+                        ? [...current, doc.id]
+                        : current.filter((item) => item !== doc.id)
+                      setDocId(next[0] ?? "")
+                      return next
+                    })
+                  }}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
+                </span>
+              </label>
             ))}
-          </select>
+            {documents.length === 0 && <div className="px-2 py-3 text-sm text-zinc-500">尚無 ready 文件</div>}
+          </div>
           <div className="mb-3 grid grid-cols-2 gap-2">
             <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" type="number" min={1} max={50} value={count} onChange={(event) => setCount(Number(event.target.value))} />
             <select className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
@@ -173,8 +202,8 @@ export function QuizPage() {
               ))}
             </select>
           )}
-          <LoadingButton className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={generate} disabled={!docId || streaming || user?.quota_status === "exceeded"} loading={streaming} loadingText="生成中" icon={<Wand2 size={16} />}>
-            生成測驗
+          <LoadingButton className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={generate} disabled={activeDocIds.length === 0 || streaming || user?.quota_status === "exceeded"} loading={streaming} loadingText="生成中" icon={<Wand2 size={16} />}>
+            {activeDocIds.length > 1 ? `用 ${activeDocIds.length} 個文件生成測驗` : "生成測驗"}
           </LoadingButton>
           {error && <div role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           {preview && <pre aria-live="polite" className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}

@@ -1,5 +1,5 @@
-import { ChangeEvent, useEffect, useState } from "react"
-import { BookOpenCheck, Eye, FileText, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
+import { ChangeEvent, useEffect, useMemo, useState } from "react"
+import { BookOpenCheck, Eye, FileText, ListChecks, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   BASE_URL,
@@ -24,14 +24,23 @@ export function DocumentsPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [consentLoading, setConsentLoading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [batchDeleting, setBatchDeleting] = useState(false)
   const [previewUrl, setPreviewUrl] = useState("")
   const [consented, setConsented] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const { id } = useParams()
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
+  const selectedDocs = useMemo(
+    () => documents.filter((doc) => selectedDocIds.includes(doc.id)),
+    [documents, selectedDocIds],
+  )
+  const selectedReadyDocs = selectedDocs.filter((doc) => doc.status === "ready")
+  const selectedOwnedDocs = selectedDocs.filter((doc) => doc.user_id === user?.id)
+  const allSelected = documents.length > 0 && selectedDocIds.length === documents.length
 
   async function loadDocuments(showSpinner = false) {
     if (showSpinner) setRefreshing(true)
@@ -87,6 +96,10 @@ export function DocumentsPage() {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [selected?.id, selected?.page_count])
+
+  useEffect(() => {
+    setSelectedDocIds((current) => current.filter((docId) => documents.some((doc) => doc.id === docId)))
+  }, [documents])
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return
@@ -146,6 +159,46 @@ export function DocumentsPage() {
     }
   }
 
+  async function deleteSelectedDocuments() {
+    if (selectedOwnedDocs.length === 0) return
+    setBatchDeleting(true)
+    try {
+      for (const doc of selectedOwnedDocs) {
+        await apiFetch(`/documents/${doc.id}`, { method: "DELETE" })
+      }
+      if (selected && selectedOwnedDocs.some((doc) => doc.id === selected.id)) {
+        setSelected(null)
+        navigate("/documents")
+      }
+      setSelectedDocIds((current) =>
+        current.filter((docId) => !selectedOwnedDocs.some((doc) => doc.id === docId)),
+      )
+      await loadDocuments()
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  function toggleDocSelection(docId: string) {
+    setSelectedDocIds((current) =>
+      current.includes(docId) ? current.filter((item) => item !== docId) : [...current, docId],
+    )
+  }
+
+  function toggleAllDocuments() {
+    setSelectedDocIds(allSelected ? [] : documents.map((doc) => doc.id))
+  }
+
+  function openBatchChat() {
+    if (selectedReadyDocs.length === 0) return
+    navigate(`/chat?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`)
+  }
+
+  function openBatchQuiz() {
+    if (selectedReadyDocs.length === 0) return
+    navigate(`/quiz/generate?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`)
+  }
+
   async function loadContent() {
     if (!selected) return
     setContentLoading(true)
@@ -183,22 +236,86 @@ export function DocumentsPage() {
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_120px_120px] border-b border-zinc-200 px-5 py-3 text-xs font-medium uppercase text-zinc-500">
+        {selectedDocIds.length > 0 && (
+          <div className="flex flex-col gap-3 border-b border-zinc-200 bg-indigo-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-indigo-800">
+              已選擇 {selectedDocIds.length} 個文件
+              {selectedReadyDocs.length !== selectedDocIds.length && (
+                <span className="ml-2 text-xs text-indigo-600">只有 ready 文件可用於對話/測驗</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                onClick={openBatchChat}
+                disabled={selectedReadyDocs.length === 0}
+              >
+                <MessageSquareText size={16} />
+                多檔對話
+              </button>
+              <button
+                className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                onClick={openBatchQuiz}
+                disabled={selectedReadyDocs.length === 0}
+              >
+                <ListChecks size={16} />
+                多檔測驗
+              </button>
+              <LoadingButton
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                onClick={deleteSelectedDocuments}
+                disabled={selectedOwnedDocs.length === 0}
+                loading={batchDeleting}
+                loadingText="刪除中"
+                icon={<Trash2 size={16} />}
+              >
+                刪除可刪除 {selectedOwnedDocs.length}
+              </LoadingButton>
+              <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50" onClick={() => setSelectedDocIds([])}>
+                清除選取
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="grid grid-cols-[44px_1fr_120px_120px] border-b border-zinc-200 px-5 py-3 text-xs font-medium uppercase text-zinc-500">
+          <label className="flex items-center" title={allSelected ? "取消全選" : "全選文件"}>
+            <input
+              className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAllDocuments}
+              aria-label={allSelected ? "取消全選文件" : "全選文件"}
+            />
+          </label>
           <div>名稱</div>
           <div>狀態</div>
           <div className="text-right">大小</div>
         </div>
         <div className="divide-y divide-zinc-100">
           {documents.map((doc) => (
-            <button
+            <div
               key={doc.id}
-              className="grid w-full grid-cols-[1fr_120px_120px] items-center px-5 py-4 text-left text-sm hover:bg-zinc-50"
-              onClick={() => {
-                setSelected(doc)
-                navigate(`/documents/${doc.id}`)
-              }}
+              className={[
+                "grid grid-cols-[44px_1fr_120px_120px] items-center px-5 py-4 text-sm hover:bg-zinc-50",
+                selectedDocIds.includes(doc.id) ? "bg-indigo-50/60" : "",
+              ].join(" ")}
             >
-              <div className="flex min-w-0 items-center gap-3">
+              <label className="flex items-center" title="選取文件">
+                <input
+                  className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
+                  type="checkbox"
+                  checked={selectedDocIds.includes(doc.id)}
+                  onChange={() => toggleDocSelection(doc.id)}
+                  aria-label={`選取 ${doc.filename}`}
+                />
+              </label>
+              <button
+                className="flex min-w-0 items-center gap-3 text-left"
+                onClick={() => {
+                  setSelected(doc)
+                  navigate(`/documents/${doc.id}`)
+                }}
+              >
                 <FileText size={18} className="shrink-0 text-zinc-500" />
                 <div className="min-w-0">
                   <div className="truncate font-medium">{doc.filename}</div>
@@ -207,10 +324,10 @@ export function DocumentsPage() {
                     {doc.user_id !== user?.id ? " · 課程共享" : ""}
                   </div>
                 </div>
-              </div>
+              </button>
               <span className={statusClass(doc.status)}>{doc.status}</span>
               <div className="text-right text-zinc-500">{formatBytes(doc.file_size)}</div>
-            </button>
+            </div>
           ))}
           {documents.length === 0 && (
             <div className="px-5 py-12 text-center text-sm text-zinc-500">

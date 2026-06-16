@@ -61,10 +61,12 @@ export function ChatPage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const doc = params.get("doc")
+    const docs = params.get("docs")
     const course = params.get("course")
     const nextMode = params.get("mode")
     if (course) setCourseId(course)
-    if (doc) setSelectedDocs([doc])
+    if (docs) setSelectedDocs(docs.split(",").map((item) => item.trim()).filter(Boolean))
+    else if (doc) setSelectedDocs([doc])
     if (nextMode && modeDescriptions[nextMode]) setMode(nextMode)
   }, [location.search])
 
