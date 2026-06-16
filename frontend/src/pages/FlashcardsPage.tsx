@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
-import { BrainCircuit, Plus, Wand2 } from "lucide-react"
+import { BrainCircuit, Plus, Trash2, Wand2 } from "lucide-react"
 import { useLocation } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api"
@@ -97,6 +97,12 @@ export function FlashcardsPage() {
     await load()
   }
 
+  async function deleteCard(card: FlashcardItem) {
+    if (!window.confirm(`確定刪除「${card.front}」這張閃卡？`)) return
+    await apiFetch(`/flashcards/${card.id}`, { method: "DELETE" })
+    await load()
+  }
+
   const activeReviewCard = dueCards[reviewIndex]
 
   return (
@@ -181,9 +187,19 @@ export function FlashcardsPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             {cards.map((card) => (
               <article key={card.id} className="rounded-lg border border-zinc-200 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <BrainCircuit size={16} className="text-zinc-500" />
-                  {card.front}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                    <BrainCircuit size={16} className="shrink-0 text-zinc-500" />
+                    <span className="break-words">{card.front}</span>
+                  </div>
+                  <button
+                    className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600"
+                    onClick={() => deleteCard(card)}
+                    title="刪除閃卡"
+                    aria-label="刪除閃卡"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
                 <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">{card.back}</div>
                 <AIGeneratedBadge variant="inline" text="AI 或使用者建立內容，請自行驗證" />
