@@ -84,6 +84,10 @@ export function ChatPage() {
     const docs = params.get("docs");
     const course = params.get("course");
     const nextMode = params.get("mode");
+    if (doc || docs || course) {
+      setActiveId(null);
+      setMessages([]);
+    }
     if (course) setCourseId(course);
     if (docs)
       setSelectedDocs(
@@ -105,9 +109,11 @@ export function ChatPage() {
   useEffect(() => {
     if (!courseId) {
       setSelectedCourse(null);
-      setSelectedDocs((prev) =>
-        prev.filter((docId) => documents.some((doc) => doc.id === docId)),
-      );
+      if (documents.length > 0) {
+        setSelectedDocs((prev) =>
+          prev.filter((docId) => documents.some((doc) => doc.id === docId)),
+        );
+      }
       return;
     }
     apiFetch<CourseItem>(`/courses/${courseId}`)
@@ -129,7 +135,12 @@ export function ChatPage() {
   async function loadSessions() {
     const data = await apiFetch<ChatSession[]>("/chat/sessions");
     setSessions(data);
-    if (!activeId && !routeSessionId && data[0]) {
+    if (
+      !activeId &&
+      !routeSessionId &&
+      data[0] &&
+      !hasDraftChatScope(location.search)
+    ) {
       await openSession(data[0].id);
     }
   }
@@ -514,6 +525,13 @@ export function ChatPage() {
         </form>
       </section>
     </div>
+  );
+}
+
+function hasDraftChatScope(search: string) {
+  const params = new URLSearchParams(search);
+  return Boolean(
+    params.get("doc") || params.get("docs") || params.get("course"),
   );
 }
 

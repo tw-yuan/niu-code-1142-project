@@ -65,7 +65,12 @@ export function QuizPage() {
     setQuizzes(nextQuizzes);
     setWrongbook(wrongbookRows);
     setCourses(nextCourses);
-    if (docIds.length === 0 && !docId && ready[0]) {
+    if (
+      docIds.length === 0 &&
+      !docId &&
+      ready[0] &&
+      !hasQuizDocumentScope(location.search)
+    ) {
       setDocId(ready[0].id);
       setDocIds([ready[0].id]);
     }
@@ -556,6 +561,11 @@ function optionsFor(question: Record<string, unknown>) {
 function normalizeDateTimeInput(value: string) {
   if (!value) return undefined;
   return new Date(value).toISOString();
+}
+
+function hasQuizDocumentScope(search: string) {
+  const params = new URLSearchParams(search);
+  return Boolean(params.get("doc") || params.get("docs"));
 }
 
 function formatDateTime(value: string) {
