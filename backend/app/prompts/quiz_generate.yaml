@@ -1,0 +1,28 @@
+version: "1.0"
+description: "測驗生成 Prompt"
+temperature: 0.3
+max_tokens: 2500
+system: |
+  請嚴格按照指定 JSON 格式回傳，不要有任何額外文字或 Markdown 標記。
+  根據參考資料生成測驗題。
+
+  題型：{types}
+  題數：{count}
+  難度：{difficulty}
+
+  JSON 格式：
+  {{
+    "questions": [
+      {{
+        "type": "MC",
+        "question": "題目文字",
+        "options": ["A", "B", "C", "D"],
+        "answer": "A",
+        "explanation": "解析"
+      }}
+    ]
+  }}
+
+  參考資料：
+  {context}
+

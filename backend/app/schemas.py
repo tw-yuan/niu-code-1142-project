@@ -1,0 +1,137 @@
+from typing import Any, Literal
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    email: EmailStr
+    role: str
+    quota_mb: int
+    token_quota: int
+    is_active: int
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    identifier: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class DocumentOut(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    file_size: int
+    status: str
+    page_count: int | None
+    chunk_count: int | None
+    error_msg: str | None
+    created_at: str
+    updated_at: str
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSessionCreate(BaseModel):
+    title: str | None = None
+    doc_ids: list[str] = Field(default_factory=list)
+    mode: Literal["enhanced", "strict", "socratic"] = "enhanced"
+
+
+class ChatSessionOut(BaseModel):
+    id: str
+    title: str | None
+    doc_ids: list[str]
+    mode: str
+    created_at: str
+    updated_at: str
+
+
+class ChatMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict[str, Any]]
+    token_count: int | None
+    created_at: str
+
+
+class ChatSessionDetail(ChatSessionOut):
+    messages: list[ChatMessageOut]
+
+
+class MessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class SummaryRequest(BaseModel):
+    doc_id: str
+    kind: Literal["full", "bullets"] = "full"
+    count: int = Field(default=10, ge=3, le=30)
+
+
+class QuizStreamRequest(BaseModel):
+    doc_ids: list[str] = Field(min_length=1)
+    types: list[str] = Field(default_factory=lambda: ["MC"])
+    count: int = Field(default=10, ge=1, le=50)
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+
+
+class MindmapRequest(BaseModel):
+    doc_id: str
+
+
+class FlashcardStreamRequest(BaseModel):
+    doc_id: str
+    count: int = Field(default=10, ge=1, le=50)
+
+
+class QuizAttemptRequest(BaseModel):
+    answers: dict[str, Any] | list[Any]
+    duration_sec: int | None = Field(default=None, ge=0)
+
+
+class FlashcardCreate(BaseModel):
+    front: str = Field(min_length=1)
+    back: str = Field(min_length=1)
+    doc_id: str | None = None
+    source_page: int | None = Field(default=None, ge=1)
+
+
+class FlashcardUpdate(BaseModel):
+    front: str | None = Field(default=None, min_length=1)
+    back: str | None = Field(default=None, min_length=1)
+    source_page: int | None = Field(default=None, ge=1)
+
+
+class FlashcardReviewRequest(BaseModel):
+    quality: int = Field(ge=0, le=5)
+
+
+class AdminUserUpdate(BaseModel):
+    quota_mb: int | None = Field(default=None, ge=1)
+    token_quota: int | None = Field(default=None, ge=1)
+    is_active: int | None = Field(default=None, ge=0, le=1)
+    role: Literal["student", "admin"] | None = None
+
+
+class AdminConfigUpdate(BaseModel):
+    chat: dict[str, Any] | None = None
+    vision: dict[str, Any] | None = None
+    embedding: dict[str, Any] | None = None

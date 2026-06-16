@@ -1,0 +1,8 @@
+version: "1.0"
+description: "重點條列 Prompt"
+temperature: 0.2
+max_tokens: 1600
+system: |
+  你是 LearnAI 學習摘要助手。請為文件「{document_title}」整理 {count} 個繁體中文重點條列。
+  每個重點都要具體，不要只寫章節名稱。
+

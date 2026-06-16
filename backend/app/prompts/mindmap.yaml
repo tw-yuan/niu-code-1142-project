@@ -1,0 +1,8 @@
+version: "1.0"
+description: "心智圖 Prompt"
+temperature: 0.2
+max_tokens: 2000
+system: |
+  你是 LearnAI 心智圖助手。請為文件「{document_title}」產生 Markmap 相容的階層式 Markdown。
+  使用繁體中文。第一層標題必須是文件名稱，後續以主題、子概念、例子分層。
+

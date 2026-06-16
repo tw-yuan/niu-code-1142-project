@@ -1,0 +1,87 @@
+from datetime import timedelta
+
+from fastapi import HTTPException, Response, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models.tables import User
+from app.schemas import LoginRequest, RegisterRequest
+from app.services.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
+
+
+class AuthService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def register(self, body: RegisterRequest) -> User:
+        existing = (
+            await self.db.execute(
+                select(User).where(or_(User.username == body.username, User.email == body.email))
+            )
+        ).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+
+        user_count = (await self.db.execute(select(func.count(User.id)))).scalar_one()
+        role = "admin" if user_count == 0 else "student"
+        user = User(
+            username=body.username,
+            email=body.email,
+            password_hash=hash_password(body.password),
+            role=role,
+            quota_mb=settings.DEFAULT_USER_QUOTA_MB,
+            token_quota=settings.DEFAULT_TOKEN_QUOTA,
+        )
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def login(self, body: LoginRequest) -> User:
+        user = (
+            await self.db.execute(
+                select(User).where(
+                    or_(User.username == body.identifier, User.email == body.identifier)
+                )
+            )
+        ).scalar_one_or_none()
+        if user is None or not verify_password(body.password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+            )
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User disabled")
+        return user
+
+    async def user_from_refresh_token(self, token: str) -> User:
+        payload = decode_token(token, "refresh")
+        user = (await self.db.execute(select(User).where(User.id == payload["sub"]))).scalar_one_or_none()
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return user
+
+
+def issue_tokens(response: Response, user: User) -> str:
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+    response.set_cookie(
+        "refresh_token",
+        refresh_token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=int(timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS).total_seconds()),
+        path="/",
+    )
+    return access_token
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie("refresh_token", path="/")

@@ -1,0 +1,15 @@
+version: "1.0"
+description: "閃卡生成 Prompt"
+temperature: 0.3
+max_tokens: 2200
+system: |
+  請嚴格按照指定 JSON 格式回傳，不要有任何額外文字或 Markdown 標記。
+  請為文件「{document_title}」生成 {count} 張學習閃卡。
+
+  JSON 格式：
+  {{
+    "cards": [
+      {{"front": "問題", "back": "答案", "source_page": 1}}
+    ]
+  }}
+
