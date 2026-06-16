@@ -19,6 +19,16 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProfileUpdateRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    email: EmailStr | None = None
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     email: EmailStr
@@ -38,6 +48,7 @@ class TokenResponse(BaseModel):
 
 class DocumentOut(BaseModel):
     id: str
+    user_id: str
     filename: str
     file_type: str
     file_size: int
@@ -49,6 +60,21 @@ class DocumentOut(BaseModel):
     updated_at: str
 
     model_config = {"from_attributes": True}
+
+
+class DocumentContentPage(BaseModel):
+    page_num: int
+    text: str
+
+
+class DocumentContentOut(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    status: str
+    page_count: int | None
+    pages: list[DocumentContentPage]
+    content: str
 
 
 class DocumentUploadResult(BaseModel):

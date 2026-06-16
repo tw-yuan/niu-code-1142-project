@@ -4,7 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_current_user_optional, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import DeleteConfirmRequest, LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.schemas import (
+    DeleteConfirmRequest,
+    LoginRequest,
+    PasswordChangeRequest,
+    ProfileUpdateRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService, clear_refresh_cookie, issue_tokens
 from app.services.cost_service import quota_status
@@ -86,6 +94,37 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ):
     return await _user_out(db, current_user)
+
+
+@router.put("/me", response_model=UserOut)
+async def update_me(
+    body: ProfileUpdateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await AuthService(db).update_profile(current_user.id, body)
+    await AuditService(db).log(
+        "auth.profile_update",
+        user_id=current_user.id,
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return await _user_out(db, user)
+
+
+@router.put("/me/password")
+async def change_password(
+    body: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await AuthService(db).change_password(current_user.id, body)
+    clear_refresh_cookie(response)
+    await AuditService(db).log("auth.password_change", user_id=current_user.id, request=request)
+    return {"ok": True}
 
 
 @router.post("/me/delete-request")

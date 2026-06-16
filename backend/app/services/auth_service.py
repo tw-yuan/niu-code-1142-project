@@ -1,12 +1,12 @@
 from datetime import timedelta
 
 from fastapi import HTTPException, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.tables import User
-from app.schemas import LoginRequest, RegisterRequest
+from app.schemas import LoginRequest, PasswordChangeRequest, ProfileUpdateRequest, RegisterRequest
 from app.services.security import (
     create_access_token,
     create_refresh_token,
@@ -66,6 +66,41 @@ class AuthService:
         if user is None or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         return user
+
+    async def update_profile(self, user_id: str, body: ProfileUpdateRequest) -> User:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if body.username is not None and body.username != user.username:
+            existing = (
+                await self.db.execute(
+                    select(User.id).where(and_(User.username == body.username, User.id != user_id))
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+            user.username = body.username
+        if body.email is not None and body.email != user.email:
+            existing = (
+                await self.db.execute(
+                    select(User.id).where(and_(User.email == body.email, User.id != user_id))
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+            user.email = str(body.email)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def change_password(self, user_id: str, body: PasswordChangeRequest) -> None:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if not verify_password(body.current_password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
+        user.password_hash = hash_password(body.new_password)
+        await self.db.commit()
 
 
 def issue_tokens(response: Response, user: User) -> str:

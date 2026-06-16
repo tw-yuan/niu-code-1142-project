@@ -99,15 +99,31 @@ class DocumentService:
         remove_document_dir(user_id, doc_id)
 
     async def page_path(self, user_id: str, doc_id: str, page_num: int) -> Path:
-        await self.get_document(user_id, doc_id)
-        path = page_image_path(user_id, doc_id, page_num)
+        doc = await self.get_document(user_id, doc_id)
+        path = page_image_path(doc.user_id, doc_id, page_num)
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page not found")
         return path
 
+    async def content(self, user_id: str, doc_id: str) -> dict[str, Any]:
+        doc = await self.get_document(user_id, doc_id)
+        pages = await self._content_pages(user_id, doc)
+        return {
+            "id": doc.id,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "status": doc.status,
+            "page_count": doc.page_count,
+            "pages": pages,
+            "content": "\n\n".join(
+                f"=== 第 {page['page_num']} 頁 ===\n{page['text']}" for page in pages
+            ),
+        }
+
     async def coverage(self, user_id: str, doc_id: str) -> dict[str, list[dict[str, Any]]]:
         doc = await self.get_document(user_id, doc_id)
-        chunks = await ChromaService().get_document_chunks(user_id, [doc_id])
+        shared_doc_ids = await DocumentAccessService(self.db).shared_doc_ids(user_id, [doc_id])
+        chunks = await ChromaService().get_document_chunks(user_id, [doc_id], shared_doc_ids)
         pages = sorted(
             {
                 int(item["metadata"].get("page_num", 1))
@@ -212,6 +228,28 @@ class DocumentService:
                     mentions[page] = mentions.get(page, 0) + 1
         return mentions
 
+    async def _content_pages(self, user_id: str, doc: Document) -> list[dict[str, Any]]:
+        if doc.file_type == "md":
+            path = Path(doc.local_path)
+            if path.exists():
+                text = await _read_text(path)
+                return [{"page_num": 1, "text": text}]
+
+        cached_pages = await _ocr_cache_pages(Path(doc.local_path).parent / "pages" / "ocr_cache.json")
+        if cached_pages:
+            return cached_pages
+
+        shared_doc_ids = await DocumentAccessService(self.db).shared_doc_ids(user_id, [doc.id])
+        chunks = await ChromaService().get_document_chunks(user_id, [doc.id], shared_doc_ids)
+        grouped: dict[int, list[str]] = {}
+        for chunk in chunks:
+            page_num = int(chunk["metadata"].get("page_num") or 1)
+            grouped.setdefault(page_num, []).append(str(chunk["text"]))
+        return [
+            {"page_num": page_num, "text": "\n\n".join(texts)}
+            for page_num, texts in sorted(grouped.items())
+        ]
+
 
 def _chapter_for_page(chapters: list[dict[str, Any]], page: int | None) -> dict[str, Any] | None:
     if page is None:
@@ -221,3 +259,31 @@ def _chapter_for_page(chapters: list[dict[str, Any]], page: int | None) -> dict[
         if start <= page <= end:
             return chapter
     return None
+
+
+async def _read_text(path: Path) -> str:
+    import asyncio
+
+    return await asyncio.to_thread(path.read_text, encoding="utf-8", errors="ignore")
+
+
+async def _ocr_cache_pages(path: Path) -> list[dict[str, Any]]:
+    import asyncio
+
+    if not path.exists():
+        return []
+
+    def load() -> list[dict[str, Any]]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        pages = []
+        for raw_page, payload in data.items():
+            if not isinstance(payload, dict):
+                continue
+            try:
+                page_num = int(raw_page)
+            except ValueError:
+                continue
+            pages.append({"page_num": page_num, "text": str(payload.get("text") or "")})
+        return sorted(pages, key=lambda item: item["page_num"])
+
+    return await asyncio.to_thread(load)

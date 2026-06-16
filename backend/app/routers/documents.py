@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import DocumentOut, DocumentUploadResult
+from app.schemas import DocumentContentOut, DocumentOut, DocumentUploadResult
 from app.services.audit_service import AuditService
 from app.services.document_service import DocumentService
 from app.services.legal_service import LegalService
@@ -126,6 +126,15 @@ async def get_coverage(
     db: AsyncSession = Depends(get_db),
 ):
     return await DocumentService(db).coverage(current_user.id, doc_id)
+
+
+@router.get("/{doc_id}/content", response_model=DocumentContentOut)
+async def get_content(
+    doc_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await DocumentService(db).content(current_user.id, doc_id)
 
 
 @router.get("/{doc_id}/pages/{page_num}")
