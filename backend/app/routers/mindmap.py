@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import MindmapRequest
+from app.schemas import MindmapExpandRequest, MindmapRequest
 from app.services.cost_service import check_quota
 from app.services.document_service import DocumentService
 from app.services.learning_service import LearningService
+from app.services.mindmap_tree_service import MindmapTreeService, tree_to_markdown
 
 router = APIRouter(prefix="/mindmap", tags=["mindmap"])
 
@@ -20,18 +21,37 @@ async def stream_mindmap(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    svc = LearningService(db)
     await DocumentService(db).get_document(current_user.id, body.doc_id)
     await check_quota(db, current_user.id)
+    legacy_svc = LearningService(db)
+    tree_svc = MindmapTreeService(db)
 
     async def event_stream():
         full = ""
         try:
-            async for chunk in svc.stream_mindmap(current_user.id, body.doc_id):
-                full += chunk
-                yield _sse({"type": "chunk", "content": chunk})
-            artifact = await svc.save_artifact(current_user.id, body.doc_id, "mindmap", full)
-            yield _sse({"type": "mindmap_meta", "data": {"mindmap_id": artifact.id}})
+            if body.format == "markdown":
+                async for chunk in legacy_svc.stream_mindmap(current_user.id, body.doc_id):
+                    full += chunk
+                    yield _sse({"type": "chunk", "content": chunk})
+                artifact = await legacy_svc.save_artifact(current_user.id, body.doc_id, "mindmap", full)
+                yield _sse({"type": "mindmap_meta", "data": {"mindmap_id": artifact.id, "format": "markdown"}})
+            else:
+                async for chunk in tree_svc.stream_tree(current_user.id, body.doc_id):
+                    full += chunk
+                    yield _sse({"type": "chunk", "content": chunk})
+                artifact = await tree_svc.save_tree(current_user.id, body.doc_id, full)
+                tree = json.loads(artifact.content)
+                yield _sse({"type": "mindmap_tree", "data": tree})
+                yield _sse(
+                    {
+                        "type": "mindmap_meta",
+                        "data": {
+                            "mindmap_id": artifact.id,
+                            "format": "tree_json",
+                            "schema_version": tree.get("schema_version"),
+                        },
+                    }
+                )
         except Exception as exc:
             yield _sse({"type": "error", "code": "mindmap_error", "message": str(exc)})
         finally:
@@ -50,8 +70,55 @@ async def get_mindmap(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    artifact = await LearningService(db).latest_artifact(current_user.id, doc_id, "mindmap")
-    return {"id": artifact.id, "doc_id": artifact.doc_id, "content": artifact.content}
+    return await MindmapTreeService(db).latest_mindmap(current_user.id, doc_id)
+
+
+@router.post("/{artifact_id}/nodes/{node_id}/expand/stream", dependencies=[rate_limit("mindmap_expand", 15, 3600)])
+async def expand_mindmap_node(
+    artifact_id: str,
+    node_id: str,
+    body: MindmapExpandRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_quota(db, current_user.id)
+    svc = MindmapTreeService(db)
+
+    async def event_stream():
+        full = ""
+        try:
+            async for chunk in svc.stream_expand_node(
+                current_user.id,
+                artifact_id,
+                node_id,
+                max_children=body.max_children,
+            ):
+                full += chunk
+                yield _sse({"type": "chunk", "content": chunk})
+            artifact, tree, children = await svc.save_expanded_node(current_user.id, artifact_id, node_id, full)
+            yield _sse(
+                {
+                    "type": "mindmap_patch",
+                    "data": {
+                        "op": "append_children",
+                        "mindmap_id": artifact.id,
+                        "node_id": node_id,
+                        "children": children,
+                        "tree": tree,
+                        "content": tree_to_markdown(tree),
+                    },
+                }
+            )
+        except Exception as exc:
+            yield _sse({"type": "error", "code": "mindmap_expand_error", "message": str(exc)})
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.put("/{artifact_id}")

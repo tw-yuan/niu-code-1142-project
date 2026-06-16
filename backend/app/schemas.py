@@ -137,6 +137,11 @@ class QuizStreamRequest(BaseModel):
 
 class MindmapRequest(BaseModel):
     doc_id: str
+    format: Literal["tree_json", "markdown"] = "tree_json"
+
+
+class MindmapExpandRequest(BaseModel):
+    max_children: int = Field(default=5, ge=1, le=6)
 
 
 class FlashcardStreamRequest(BaseModel):
