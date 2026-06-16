@@ -62,6 +62,18 @@ async def _ensure_sqlite_columns(conn) -> None:
     if "course_id" not in existing_quizzes:
         await conn.execute(text("ALTER TABLE quizzes ADD COLUMN course_id TEXT"))
 
+    existing_course_quizzes = {
+        row[1] for row in (await conn.execute(text("PRAGMA table_info(course_quizzes)"))).fetchall()
+    }
+    course_quiz_columns = {
+        "available_from": "TEXT",
+        "answer_visible_at": "TEXT",
+        "attempt_limit": "INTEGER",
+    }
+    for column, column_type in course_quiz_columns.items():
+        if column not in existing_course_quizzes:
+            await conn.execute(text(f"ALTER TABLE course_quizzes ADD COLUMN {column} {column_type}"))
+
     existing_usage = {
         row[1] for row in (await conn.execute(text("PRAGMA table_info(token_usage)"))).fetchall()
     }

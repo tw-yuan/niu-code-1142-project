@@ -50,6 +50,9 @@ async def stream_quiz(
                 course_id=body.course_id,
                 publish_to_course=body.publish_to_course,
                 due_at=body.due_at,
+                available_from=body.available_from,
+                answer_visible_at=body.answer_visible_at,
+                attempt_limit=body.attempt_limit,
             )
             yield _sse(
                 {"type": "quiz_meta", "data": {"quiz_id": quiz.id, "question_count": body.count}}
@@ -96,6 +99,9 @@ async def publish_quiz(
         quiz_id,
         title=body.title,
         due_at=body.due_at,
+        available_from=body.available_from,
+        answer_visible_at=body.answer_visible_at,
+        attempt_limit=body.attempt_limit,
         status_value=body.status,
     )
 

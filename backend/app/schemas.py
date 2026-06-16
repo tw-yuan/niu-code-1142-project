@@ -133,6 +133,9 @@ class QuizStreamRequest(BaseModel):
     course_id: str | None = None
     publish_to_course: bool = False
     due_at: str | None = None
+    available_from: str | None = None
+    answer_visible_at: str | None = None
+    attempt_limit: int | None = Field(default=None, ge=1, le=20)
 
 
 class MindmapRequest(BaseModel):
@@ -157,6 +160,9 @@ class QuizAttemptRequest(BaseModel):
 class CourseQuizPublishRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     due_at: str | None = None
+    available_from: str | None = None
+    answer_visible_at: str | None = None
+    attempt_limit: int | None = Field(default=None, ge=1, le=20)
     status: Literal["published", "draft"] = "published"
 
 
@@ -270,6 +276,30 @@ class CourseMemberRoleUpdate(BaseModel):
 
 class CourseDocumentRequest(BaseModel):
     doc_id: str
+
+
+class CourseAssignmentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str | None = None
+    kind: Literal["custom", "quiz", "read_summary", "note", "flashcards"] = "custom"
+    doc_id: str | None = None
+    quiz_id: str | None = None
+    due_at: str | None = None
+    status: Literal["published", "draft"] = "published"
+
+
+class CourseAssignmentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = None
+    kind: Literal["custom", "quiz", "read_summary", "note", "flashcards"] | None = None
+    doc_id: str | None = None
+    quiz_id: str | None = None
+    due_at: str | None = None
+    status: Literal["published", "draft", "archived"] | None = None
+
+
+class CourseAssignmentSubmit(BaseModel):
+    response: str | None = None
 
 
 class LegalConsentRequest(BaseModel):

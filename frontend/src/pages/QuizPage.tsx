@@ -1,95 +1,115 @@
-import { FormEvent, useEffect, useMemo, useState } from "react"
-import { CheckCircle2, ListChecks, Plus, Wand2 } from "lucide-react"
-import { Link, useLocation, useParams } from "react-router-dom"
-import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
-import { LoadingButton } from "../components/app/LoadingButton"
-import { apiFetch, CourseItem, DocumentItem, QuizDiagnostic, QuizItem } from "../lib/api"
-import { streamFetch } from "../lib/stream"
-import { useAuthStore } from "../store/auth"
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, ListChecks, Plus, Wand2 } from "lucide-react";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
+import { LoadingButton } from "../components/app/LoadingButton";
+import {
+  apiFetch,
+  CourseItem,
+  DocumentItem,
+  QuizDiagnostic,
+  QuizItem,
+} from "../lib/api";
+import { streamFetch } from "../lib/stream";
+import { useAuthStore } from "../store/auth";
 
 export function QuizPage() {
-  const { id } = useParams()
-  const user = useAuthStore((state) => state.user)
-  const [documents, setDocuments] = useState<DocumentItem[]>([])
-  const [quizzes, setQuizzes] = useState<QuizItem[]>([])
-  const [docId, setDocId] = useState("")
-  const [docIds, setDocIds] = useState<string[]>([])
-  const [courseId, setCourseId] = useState("")
-  const [courses, setCourses] = useState<CourseItem[]>([])
-  const [publishToCourse, setPublishToCourse] = useState(false)
-  const [quizTitle, setQuizTitle] = useState("")
-  const [difficulty, setDifficulty] = useState("medium")
-  const [count, setCount] = useState(5)
-  const [preview, setPreview] = useState("")
-  const [error, setError] = useState("")
-  const [streaming, setStreaming] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [wrongbookLoading, setWrongbookLoading] = useState(false)
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [score, setScore] = useState<number | null>(null)
-  const [diagnostics, setDiagnostics] = useState<QuizDiagnostic[]>([])
-  const [wrongbook, setWrongbook] = useState<Array<Record<string, unknown>>>([])
-  const [wrongbookMessage, setWrongbookMessage] = useState("")
-  const location = useLocation()
-  const isWrongbook = location.pathname.endsWith("/wrongbook")
+  const { id } = useParams();
+  const user = useAuthStore((state) => state.user);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
+  const [docId, setDocId] = useState("");
+  const [docIds, setDocIds] = useState<string[]>([]);
+  const [courseId, setCourseId] = useState("");
+  const [courses, setCourses] = useState<CourseItem[]>([]);
+  const [publishToCourse, setPublishToCourse] = useState(false);
+  const [dueAt, setDueAt] = useState("");
+  const [availableFrom, setAvailableFrom] = useState("");
+  const [answerVisibleAt, setAnswerVisibleAt] = useState("");
+  const [attemptLimit, setAttemptLimit] = useState(1);
+  const [quizTitle, setQuizTitle] = useState("");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [count, setCount] = useState(5);
+  const [preview, setPreview] = useState("");
+  const [error, setError] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [wrongbookLoading, setWrongbookLoading] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [score, setScore] = useState<number | null>(null);
+  const [diagnostics, setDiagnostics] = useState<QuizDiagnostic[]>([]);
+  const [wrongbook, setWrongbook] = useState<Array<Record<string, unknown>>>(
+    [],
+  );
+  const [wrongbookMessage, setWrongbookMessage] = useState("");
+  const location = useLocation();
+  const isWrongbook = location.pathname.endsWith("/wrongbook");
 
-  const activeQuiz = useMemo(() => quizzes.find((quiz) => quiz.id === id), [id, quizzes])
-  const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : []
+  const activeQuiz = useMemo(
+    () => quizzes.find((quiz) => quiz.id === id),
+    [id, quizzes],
+  );
+  const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
 
   async function load() {
     const [docs, nextQuizzes, wrongbookRows, nextCourses] = await Promise.all([
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<QuizItem[]>("/quiz"),
-      isWrongbook ? apiFetch<Array<Record<string, unknown>>>("/quiz/wrongbook") : Promise.resolve([]),
+      isWrongbook
+        ? apiFetch<Array<Record<string, unknown>>>("/quiz/wrongbook")
+        : Promise.resolve([]),
       apiFetch<CourseItem[]>("/courses").catch(() => []),
-    ])
-    const ready = docs.filter((doc) => doc.status === "ready")
-    setDocuments(ready)
-    setQuizzes(nextQuizzes)
-    setWrongbook(wrongbookRows)
-    setCourses(nextCourses)
+    ]);
+    const ready = docs.filter((doc) => doc.status === "ready");
+    setDocuments(ready);
+    setQuizzes(nextQuizzes);
+    setWrongbook(wrongbookRows);
+    setCourses(nextCourses);
     if (docIds.length === 0 && !docId && ready[0]) {
-      setDocId(ready[0].id)
-      setDocIds([ready[0].id])
+      setDocId(ready[0].id);
+      setDocIds([ready[0].id]);
     }
   }
 
   useEffect(() => {
-    load().catch(() => undefined)
-  }, [isWrongbook])
+    load().catch(() => undefined);
+  }, [isWrongbook]);
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    const doc = params.get("doc")
-    const docs = params.get("docs")
-    const course = params.get("course")
+    const params = new URLSearchParams(location.search);
+    const doc = params.get("doc");
+    const docs = params.get("docs");
+    const course = params.get("course");
     if (docs) {
-      const nextDocIds = docs.split(",").map((item) => item.trim()).filter(Boolean)
-      setDocIds(nextDocIds)
-      setDocId(nextDocIds[0] ?? "")
+      const nextDocIds = docs
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      setDocIds(nextDocIds);
+      setDocId(nextDocIds[0] ?? "");
     } else if (doc) {
-      setDocId(doc)
-      setDocIds([doc])
+      setDocId(doc);
+      setDocIds([doc]);
     }
     if (course) {
-      setCourseId(course)
-      setPublishToCourse(true)
+      setCourseId(course);
+      setPublishToCourse(true);
     }
-  }, [location.search])
+  }, [location.search]);
 
   useEffect(() => {
-    setAnswers({})
-    setScore(null)
-    setDiagnostics([])
-  }, [id])
+    setAnswers({});
+    setScore(null);
+    setDiagnostics([]);
+  }, [id]);
 
   async function generate() {
-    if (activeDocIds.length === 0 || user?.quota_status === "exceeded") return
-    setPreview("")
-    setError("")
-    setStreaming(true)
-    let next = ""
-    let failed = false
+    if (activeDocIds.length === 0 || user?.quota_status === "exceeded") return;
+    setPreview("");
+    setError("");
+    setStreaming(true);
+    let next = "";
+    let failed = false;
     try {
       for await (const event of streamFetch("/quiz/stream", {
         doc_ids: activeDocIds,
@@ -99,50 +119,68 @@ export function QuizPage() {
         title: quizTitle.trim() || undefined,
         course_id: courseId || undefined,
         publish_to_course: publishToCourse && Boolean(courseId),
+        due_at: publishToCourse ? normalizeDateTimeInput(dueAt) : undefined,
+        available_from: publishToCourse
+          ? normalizeDateTimeInput(availableFrom)
+          : undefined,
+        answer_visible_at: publishToCourse
+          ? normalizeDateTimeInput(answerVisibleAt)
+          : undefined,
+        attempt_limit: publishToCourse ? attemptLimit : undefined,
       })) {
         if (event.type === "chunk") {
-          next += event.content
-          setPreview(next)
+          next += event.content;
+          setPreview(next);
         } else if (event.type === "error") {
-          failed = true
-          setError(event.message)
+          failed = true;
+          setError(event.message);
         }
       }
-      if (!failed) await load()
+      if (!failed) await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "測驗生成失敗")
+      setError(err instanceof Error ? err.message : "測驗生成失敗");
     } finally {
-      setStreaming(false)
+      setStreaming(false);
     }
   }
 
   async function submit(event: FormEvent) {
-    event.preventDefault()
-    if (!activeQuiz) return
-    setSubmitting(true)
+    event.preventDefault();
+    if (!activeQuiz) return;
+    setSubmitting(true);
+    setError("");
     try {
-      const result = await apiFetch<{ total_score: number; diagnostics: QuizDiagnostic[] }>(`/quiz/${activeQuiz.id}/attempt`, {
+      const result = await apiFetch<{
+        total_score: number;
+        diagnostics: QuizDiagnostic[];
+      }>(`/quiz/${activeQuiz.id}/attempt`, {
         method: "POST",
         body: JSON.stringify({ answers }),
-      })
-      setScore(result.total_score)
-      setDiagnostics(result.diagnostics ?? [])
+      });
+      setScore(result.total_score);
+      setDiagnostics(result.diagnostics ?? []);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "提交失敗");
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
   }
 
   async function createWrongbookFlashcards() {
-    setWrongbookLoading(true)
-    setWrongbookMessage("")
+    setWrongbookLoading(true);
+    setWrongbookMessage("");
     try {
-      const created = await apiFetch<Array<Record<string, unknown>>>("/flashcards/from-wrongbook", {
-        method: "POST",
-        body: JSON.stringify({ limit: 20 }),
-      })
-      setWrongbookMessage(`已建立 ${created.length} 張錯題閃卡`)
+      const created = await apiFetch<Array<Record<string, unknown>>>(
+        "/flashcards/from-wrongbook",
+        {
+          method: "POST",
+          body: JSON.stringify({ limit: 20 }),
+        },
+      );
+      setWrongbookMessage(`已建立 ${created.length} 張錯題閃卡`);
     } finally {
-      setWrongbookLoading(false)
+      setWrongbookLoading(false);
     }
   }
 
@@ -156,12 +194,26 @@ export function QuizPage() {
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">生成測驗</h2>
-          <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="quiz-title">測驗標題</label>
-          <input id="quiz-title" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="選填" />
+          <label
+            className="mb-1 block text-xs font-medium text-zinc-500"
+            htmlFor="quiz-title"
+          >
+            測驗標題
+          </label>
+          <input
+            id="quiz-title"
+            className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            value={quizTitle}
+            onChange={(event) => setQuizTitle(event.target.value)}
+            placeholder="選填"
+          />
           <div className="mb-1 text-xs font-medium text-zinc-500">文件</div>
           <div className="mb-3 max-h-44 overflow-auto rounded-lg border border-zinc-200 p-2">
             {documents.map((doc) => (
-              <label key={doc.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50">
+              <label
+                key={doc.id}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50"
+              >
                 <input
                   type="checkbox"
                   checked={docIds.includes(doc.id)}
@@ -169,48 +221,169 @@ export function QuizPage() {
                     setDocIds((current) => {
                       const next = event.target.checked
                         ? [...current, doc.id]
-                        : current.filter((item) => item !== doc.id)
-                      setDocId(next[0] ?? "")
-                      return next
-                    })
+                        : current.filter((item) => item !== doc.id);
+                      setDocId(next[0] ?? "");
+                      return next;
+                    });
                   }}
                 />
                 <span className="min-w-0 flex-1 truncate">
-                  {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
+                  {doc.filename}
+                  {doc.user_id !== user?.id ? "（課程共享）" : ""}
                 </span>
               </label>
             ))}
-            {documents.length === 0 && <div className="px-2 py-3 text-sm text-zinc-500">尚無 ready 文件</div>}
+            {documents.length === 0 && (
+              <div className="px-2 py-3 text-sm text-zinc-500">
+                尚無 ready 文件
+              </div>
+            )}
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2">
-            <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" type="number" min={1} max={50} value={count} onChange={(event) => setCount(Number(event.target.value))} />
-            <select className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+            <input
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              type="number"
+              min={1}
+              max={50}
+              value={count}
+              onChange={(event) => setCount(Number(event.target.value))}
+            />
+            <select
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              value={difficulty}
+              onChange={(event) => setDifficulty(event.target.value)}
+            >
               <option value="easy">簡單</option>
               <option value="medium">中等</option>
               <option value="hard">困難</option>
             </select>
           </div>
           <label className="mb-3 flex items-center gap-2 text-sm text-zinc-700">
-            <input type="checkbox" checked={publishToCourse} onChange={(event) => setPublishToCourse(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={publishToCourse}
+              onChange={(event) => setPublishToCourse(event.target.checked)}
+            />
             發布到課程
           </label>
           {publishToCourse && (
-            <select aria-label="發布課程" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
-              <option value="">選擇課程</option>
-              {courses.filter((course) => course.role === "instructor").map((course) => (
-                <option key={course.id} value={course.id}>{course.title}</option>
-              ))}
-            </select>
+            <div className="mb-3 space-y-2">
+              <select
+                aria-label="發布課程"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                value={courseId}
+                onChange={(event) => setCourseId(event.target.value)}
+              >
+                <option value="">選擇課程</option>
+                {courses
+                  .filter(
+                    (course) =>
+                      course.role === "instructor" || course.role === "ta",
+                  )
+                  .map((course) => (
+                    <option key={course.id} value={course.id}>
+                      {course.title}
+                    </option>
+                  ))}
+              </select>
+              <label
+                className="block text-xs font-medium text-zinc-500"
+                htmlFor="quiz-available-from"
+              >
+                開放時間
+              </label>
+              <input
+                id="quiz-available-from"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                type="datetime-local"
+                value={availableFrom}
+                onChange={(event) => setAvailableFrom(event.target.value)}
+              />
+              <label
+                className="block text-xs font-medium text-zinc-500"
+                htmlFor="quiz-due-at"
+              >
+                截止時間
+              </label>
+              <input
+                id="quiz-due-at"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                type="datetime-local"
+                value={dueAt}
+                onChange={(event) => setDueAt(event.target.value)}
+              />
+              <label
+                className="block text-xs font-medium text-zinc-500"
+                htmlFor="quiz-answer-visible-at"
+              >
+                答案可見時間
+              </label>
+              <input
+                id="quiz-answer-visible-at"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                type="datetime-local"
+                value={answerVisibleAt}
+                onChange={(event) => setAnswerVisibleAt(event.target.value)}
+              />
+              <label
+                className="block text-xs font-medium text-zinc-500"
+                htmlFor="quiz-attempt-limit"
+              >
+                作答次數
+              </label>
+              <input
+                id="quiz-attempt-limit"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                type="number"
+                min={1}
+                max={20}
+                value={attemptLimit}
+                onChange={(event) =>
+                  setAttemptLimit(Number(event.target.value))
+                }
+              />
+            </div>
           )}
-          <LoadingButton className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={generate} disabled={activeDocIds.length === 0 || streaming || user?.quota_status === "exceeded"} loading={streaming} loadingText="生成中" icon={<Wand2 size={16} />}>
-            {activeDocIds.length > 1 ? `用 ${activeDocIds.length} 個文件生成測驗` : "生成測驗"}
+          <LoadingButton
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+            onClick={generate}
+            disabled={
+              activeDocIds.length === 0 ||
+              streaming ||
+              user?.quota_status === "exceeded"
+            }
+            loading={streaming}
+            loadingText="生成中"
+            icon={<Wand2 size={16} />}
+          >
+            {activeDocIds.length > 1
+              ? `用 ${activeDocIds.length} 個文件生成測驗`
+              : "生成測驗"}
           </LoadingButton>
-          {error && <div role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-          {preview && <pre aria-live="polite" className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}
+          {error && (
+            <div
+              role="alert"
+              className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
+            >
+              {error}
+            </div>
+          )}
+          {preview && (
+            <pre
+              aria-live="polite"
+              className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs"
+            >
+              {preview}
+            </pre>
+          )}
           <h2 className="mb-3 mt-6 font-semibold">測驗列表</h2>
           <div className="space-y-2">
             {quizzes.map((quiz) => (
-              <Link key={quiz.id} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-50" to={`/quiz/${quiz.id}`}>
+              <Link
+                key={quiz.id}
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-50"
+                to={`/quiz/${quiz.id}`}
+              >
                 <ListChecks size={16} className="text-zinc-500" />
                 {quiz.title}
               </Link>
@@ -222,49 +395,146 @@ export function QuizPage() {
             <div className="space-y-3">
               <h2 className="font-semibold">錯題本</h2>
               <div className="flex flex-wrap items-center gap-2">
-                <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" onClick={createWrongbookFlashcards} loading={wrongbookLoading} loadingText="建立中" icon={<Plus size={16} />}>
+                <LoadingButton
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  onClick={createWrongbookFlashcards}
+                  loading={wrongbookLoading}
+                  loadingText="建立中"
+                  icon={<Plus size={16} />}
+                >
                   錯題轉閃卡
                 </LoadingButton>
-                {wrongbookMessage && <span className="text-sm text-emerald-700">{wrongbookMessage}</span>}
+                {wrongbookMessage && (
+                  <span className="text-sm text-emerald-700">
+                    {wrongbookMessage}
+                  </span>
+                )}
               </div>
               {wrongbook.map((item, index) => (
-                <article key={index} className="rounded-lg border border-zinc-200 p-4 text-sm">
-                  <div className="font-medium">{String(item.question ?? "")}</div>
-                  {item.submitted_answer !== undefined && item.submitted_answer !== null && (
-                    <div className="mt-2 text-red-600">你的答案：{String(item.submitted_answer)}</div>
-                  )}
-                  <div className="mt-2 text-zinc-600">答案：{String(item.answer ?? "")}</div>
-                  {item.explanation !== undefined && item.explanation !== null && (
-                    <div className="mt-1 text-zinc-500">{String(item.explanation)}</div>
-                  )}
-                  {item.source_page !== undefined && item.source_page !== null && (
-                    <div className="mt-2 text-xs text-zinc-400">來源頁：{String(item.source_page)}</div>
-                  )}
+                <article
+                  key={index}
+                  className="rounded-lg border border-zinc-200 p-4 text-sm"
+                >
+                  <div className="font-medium">
+                    {String(item.question ?? "")}
+                  </div>
+                  {item.submitted_answer !== undefined &&
+                    item.submitted_answer !== null && (
+                      <div className="mt-2 text-red-600">
+                        你的答案：{String(item.submitted_answer)}
+                      </div>
+                    )}
+                  <div className="mt-2 text-zinc-600">
+                    答案：{String(item.answer ?? "")}
+                  </div>
+                  {item.explanation !== undefined &&
+                    item.explanation !== null && (
+                      <div className="mt-1 text-zinc-500">
+                        {String(item.explanation)}
+                      </div>
+                    )}
+                  {item.source_page !== undefined &&
+                    item.source_page !== null && (
+                      <div className="mt-2 text-xs text-zinc-400">
+                        來源頁：{String(item.source_page)}
+                      </div>
+                    )}
                 </article>
               ))}
-              {wrongbook.length === 0 && <div className="text-sm text-zinc-500">尚無錯題紀錄</div>}
+              {wrongbook.length === 0 && (
+                <div className="text-sm text-zinc-500">尚無錯題紀錄</div>
+              )}
             </div>
           ) : activeQuiz ? (
             <form onSubmit={submit} className="space-y-5">
               <h2 className="font-semibold">{activeQuiz.title}</h2>
+              {activeQuiz.course_publication && (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                  {activeQuiz.course_publication.available_from && (
+                    <span className="mr-3">
+                      開放{" "}
+                      {formatDateTime(
+                        activeQuiz.course_publication.available_from,
+                      )}
+                    </span>
+                  )}
+                  {activeQuiz.course_publication.due_at && (
+                    <span className="mr-3">
+                      截止{" "}
+                      {formatDateTime(activeQuiz.course_publication.due_at)}
+                    </span>
+                  )}
+                  {activeQuiz.course_publication.attempt_limit && (
+                    <span className="mr-3">
+                      最多 {activeQuiz.course_publication.attempt_limit} 次
+                    </span>
+                  )}
+                  {activeQuiz.latest_attempt && (
+                    <span>
+                      最近分數{" "}
+                      {Math.round(
+                        Number(activeQuiz.latest_attempt.total_score ?? 0) *
+                          100,
+                      )}
+                      %
+                    </span>
+                  )}
+                </div>
+              )}
               {activeQuiz.questions.map((question, index) => (
-                <div key={index} className="rounded-lg border border-zinc-200 p-4">
-                  <div className="mb-3 text-sm font-medium">{index + 1}. {String(question.question ?? question.prompt ?? "")}</div>
+                <div
+                  key={index}
+                  className="rounded-lg border border-zinc-200 p-4"
+                >
+                  <div className="mb-3 text-sm font-medium">
+                    {index + 1}.{" "}
+                    {String(question.question ?? question.prompt ?? "")}
+                  </div>
                   <div className="space-y-2">
                     {optionsFor(question).map((option) => (
-                      <label key={option} className="flex items-center gap-2 text-sm">
-                        <input type="radio" name={`q-${index}`} value={option} checked={answers[String(index)] === option} onChange={(event) => setAnswers((prev) => ({ ...prev, [String(index)]: event.target.value }))} />
+                      <label
+                        key={option}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="radio"
+                          name={`q-${index}`}
+                          value={option}
+                          checked={answers[String(index)] === option}
+                          onChange={(event) =>
+                            setAnswers((prev) => ({
+                              ...prev,
+                              [String(index)]: event.target.value,
+                            }))
+                          }
+                        />
                         {option}
                       </label>
                     ))}
                   </div>
-                  {score !== null && <QuestionDiagnostic diagnostic={diagnostics.find((item) => item.question_index === index)} question={question} />}
+                  {score !== null && (
+                    <QuestionDiagnostic
+                      diagnostic={diagnostics.find(
+                        (item) => item.question_index === index,
+                      )}
+                      question={question}
+                    />
+                  )}
                 </div>
               ))}
-              <LoadingButton className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300" loading={submitting} loadingText="提交中" icon={<CheckCircle2 size={16} />}>
+              <LoadingButton
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                loading={submitting}
+                loadingText="提交中"
+                icon={<CheckCircle2 size={16} />}
+              >
                 提交
               </LoadingButton>
-              {score !== null && <span className="ml-3 text-sm font-medium text-indigo-700">分數：{Math.round(score * 100)}%</span>}
+              {score !== null && (
+                <span className="ml-3 text-sm font-medium text-indigo-700">
+                  分數：{Math.round(score * 100)}%
+                </span>
+              )}
             </form>
           ) : (
             <div className="text-sm text-zinc-500">選擇或生成一份測驗</div>
@@ -272,34 +542,61 @@ export function QuizPage() {
         </section>
       </div>
     </div>
-  )
+  );
 }
 
 function optionsFor(question: Record<string, unknown>) {
-  const options = question.options
-  if (Array.isArray(options)) return options.map(String)
-  return ["A", "B", "C", "D"].filter((key) => question[key]).map((key) => String(question[key]))
+  const options = question.options;
+  if (Array.isArray(options)) return options.map(String);
+  return ["A", "B", "C", "D"]
+    .filter((key) => question[key])
+    .map((key) => String(question[key]));
+}
+
+function normalizeDateTimeInput(value: string) {
+  if (!value) return undefined;
+  return new Date(value).toISOString();
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function QuestionDiagnostic({
   diagnostic,
   question,
 }: {
-  diagnostic?: QuizDiagnostic
-  question: Record<string, unknown>
+  diagnostic?: QuizDiagnostic;
+  question: Record<string, unknown>;
 }) {
-  const isCorrect = diagnostic?.is_correct
-  const explanation = diagnostic?.explanation ?? question.explanation
+  const isCorrect = diagnostic?.is_correct;
+  const explanation = diagnostic?.explanation ?? question.explanation;
   return (
-    <div className={["mt-3 rounded-md px-3 py-2 text-xs", isCorrect ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"].join(" ")}>
+    <div
+      className={[
+        "mt-3 rounded-md px-3 py-2 text-xs",
+        isCorrect ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700",
+      ].join(" ")}
+    >
       <div className="font-medium">{isCorrect ? "答對" : "需複習"}</div>
-      <div className="mt-1">答案：{String(diagnostic?.answer ?? question.answer ?? "")}</div>
+      <div className="mt-1">
+        答案：{String(diagnostic?.answer ?? question.answer ?? "")}
+      </div>
       {diagnostic?.submitted_answer !== undefined && (
-        <div className="mt-1">你的答案：{String(diagnostic.submitted_answer ?? "未作答")}</div>
+        <div className="mt-1">
+          你的答案：{String(diagnostic.submitted_answer ?? "未作答")}
+        </div>
       )}
       {explanation !== undefined && explanation !== null && (
         <div className="mt-1 leading-5">{String(explanation)}</div>
       )}
     </div>
-  )
+  );
 }

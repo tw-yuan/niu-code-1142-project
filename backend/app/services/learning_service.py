@@ -141,6 +141,9 @@ class LearningService:
         course_id: str | None = None,
         publish_to_course: bool = False,
         due_at: str | None = None,
+        available_from: str | None = None,
+        answer_visible_at: str | None = None,
+        attempt_limit: int | None = None,
     ) -> Quiz:
         parsed = parse_json_llm(json_text)
         questions = parsed.get("questions", [])
@@ -168,6 +171,9 @@ class LearningService:
                     created_by=user_id,
                     title=title or quiz.title,
                     due_at=due_at,
+                    available_from=available_from,
+                    answer_visible_at=answer_visible_at,
+                    attempt_limit=attempt_limit,
                     status="published",
                 )
             )
@@ -184,8 +190,13 @@ class LearningService:
         course_quizzes = await self._visible_course_quizzes(user_id)
         by_id: dict[str, dict[str, Any]] = {row.id: self._quiz_out(row) for row in owned}
         for course_quiz, quiz in course_quizzes:
-            item = self._quiz_out(quiz)
+            item = self._quiz_out(
+                quiz,
+                include_answers=await self._answers_visible(user_id, course_quiz),
+            )
             item["course_publication"] = self._course_quiz_out(course_quiz)
+            latest_attempt = await self._latest_attempt(user_id, quiz.id)
+            item["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
             by_id[quiz.id] = item
         return sorted(by_id.values(), key=lambda item: str(item["created_at"]), reverse=True)
 
@@ -194,7 +205,13 @@ class LearningService:
         data = self._quiz_out(quiz)
         course_quiz = await self._course_quiz_for_quiz(user_id, quiz_id)
         if course_quiz:
+            data = self._quiz_out(
+                quiz,
+                include_answers=await self._answers_visible(user_id, course_quiz),
+            )
             data["course_publication"] = self._course_quiz_out(course_quiz)
+            latest_attempt = await self._latest_attempt(user_id, quiz.id)
+            data["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
         return data
 
     async def publish_quiz_to_course(
@@ -204,6 +221,9 @@ class LearningService:
         quiz_id: str,
         title: str | None = None,
         due_at: str | None = None,
+        available_from: str | None = None,
+        answer_visible_at: str | None = None,
+        attempt_limit: int | None = None,
         status_value: str = "published",
     ) -> dict[str, Any]:
         from app.services.courses_service import CoursesService
@@ -228,6 +248,9 @@ class LearningService:
         if existing:
             existing.title = title or existing.title
             existing.due_at = due_at
+            existing.available_from = available_from
+            existing.answer_visible_at = answer_visible_at
+            existing.attempt_limit = attempt_limit
             existing.status = status_value
             course_quiz = existing
         else:
@@ -237,6 +260,9 @@ class LearningService:
                 created_by=user_id,
                 title=title or quiz.title,
                 due_at=due_at,
+                available_from=available_from,
+                answer_visible_at=answer_visible_at,
+                attempt_limit=attempt_limit,
                 status=status_value,
             )
             self.db.add(course_quiz)
@@ -258,15 +284,14 @@ class LearningService:
         ).all()
         items: list[dict[str, Any]] = []
         for course_quiz, quiz in rows:
-            item = {**self._quiz_out(quiz), "course_publication": self._course_quiz_out(course_quiz)}
-            latest_attempt = (
-                await self.db.execute(
-                    select(QuizAttempt)
-                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz.id))
-                    .order_by(desc(QuizAttempt.completed_at))
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+            item = {
+                **self._quiz_out(
+                    quiz,
+                    include_answers=await self._answers_visible(user_id, course_quiz),
+                ),
+                "course_publication": self._course_quiz_out(course_quiz),
+            }
+            latest_attempt = await self._latest_attempt(user_id, quiz.id)
             item["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
             items.append(item)
         return items
@@ -275,6 +300,8 @@ class LearningService:
         self, user_id: str, quiz_id: str, body: QuizAttemptRequest
     ) -> dict[str, Any]:
         quiz = await self._get_quiz(user_id, quiz_id)
+        course_quiz = await self._course_quiz_for_quiz(user_id, quiz_id)
+        policy = await self._ensure_attempt_allowed(user_id, course_quiz)
         questions = json.loads(quiz.questions)
         score = _score_quiz(questions, body.answers)
         attempt = QuizAttempt(
@@ -287,13 +314,18 @@ class LearningService:
         self.db.add(attempt)
         await self.db.commit()
         await self.db.refresh(attempt)
-        diagnostics = _quiz_diagnostics(questions, body.answers)
+        diagnostics = _quiz_diagnostics(
+            questions,
+            body.answers,
+            include_answers=await self._answers_visible(user_id, course_quiz) if course_quiz else True,
+        )
         return {
             "id": attempt.id,
             "quiz_id": quiz.id,
             "total_score": attempt.total_score,
             "completed_at": attempt.completed_at,
             "diagnostics": diagnostics,
+            "policy": policy,
         }
 
     async def quiz_attempts(self, user_id: str, quiz_id: str) -> list[dict[str, Any]]:
@@ -322,6 +354,9 @@ class LearningService:
         result: list[dict[str, Any]] = []
         for quiz_data in quizzes:
             quiz = await self._get_quiz(user_id, str(quiz_data["id"]))
+            course_quiz = await self._course_quiz_for_quiz(user_id, quiz.id)
+            if course_quiz and not await self._answers_visible(user_id, course_quiz):
+                continue
             latest_attempt = (
                 await self.db.execute(
                     select(QuizAttempt)
@@ -571,6 +606,16 @@ class LearningService:
             )
         ).all()
 
+    async def _latest_attempt(self, user_id: str, quiz_id: str) -> QuizAttempt | None:
+        return (
+            await self.db.execute(
+                select(QuizAttempt)
+                .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz_id))
+                .order_by(desc(QuizAttempt.completed_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
     async def _get_flashcard(self, user_id: str, card_id: str) -> Flashcard:
         card = (
             await self.db.execute(
@@ -581,14 +626,17 @@ class LearningService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found")
         return card
 
-    def _quiz_out(self, quiz: Quiz) -> dict[str, Any]:
+    def _quiz_out(self, quiz: Quiz, include_answers: bool = True) -> dict[str, Any]:
+        questions = json.loads(quiz.questions)
+        if not include_answers:
+            questions = [_without_answers(question) for question in questions]
         return {
             "id": quiz.id,
             "title": quiz.title,
             "course_id": quiz.course_id,
             "doc_ids": json.loads(quiz.doc_ids),
             "config": json.loads(quiz.config),
-            "questions": json.loads(quiz.questions),
+            "questions": questions,
             "created_at": quiz.created_at,
         }
 
@@ -600,9 +648,70 @@ class LearningService:
             "title": course_quiz.title,
             "status": course_quiz.status,
             "due_at": course_quiz.due_at,
+            "available_from": course_quiz.available_from,
+            "answer_visible_at": course_quiz.answer_visible_at,
+            "attempt_limit": course_quiz.attempt_limit,
             "published_at": course_quiz.published_at,
             "created_by": course_quiz.created_by,
         }
+
+    async def _ensure_attempt_allowed(
+        self,
+        user_id: str,
+        course_quiz: CourseQuiz | None,
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        if course_quiz is None:
+            return {"is_course_quiz": False, "is_late": False, "attempt_number": None}
+        if course_quiz.available_from and _parse_datetime(course_quiz.available_from) > now:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Quiz is not available yet",
+            )
+        attempt_count = (
+            await self.db.execute(
+                select(QuizAttempt)
+                .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == course_quiz.quiz_id))
+            )
+        ).scalars().all()
+        if course_quiz.attempt_limit is not None and len(attempt_count) >= course_quiz.attempt_limit:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Attempt limit reached",
+            )
+        is_late = bool(course_quiz.due_at and _parse_datetime(course_quiz.due_at) < now)
+        return {
+            "is_course_quiz": True,
+            "is_late": is_late,
+            "attempt_number": len(attempt_count) + 1,
+            "attempt_limit": course_quiz.attempt_limit,
+            "due_at": course_quiz.due_at,
+        }
+
+    async def _answers_visible(self, user_id: str, course_quiz: CourseQuiz) -> bool:
+        if await self._can_manage_course_quiz(user_id, course_quiz):
+            return True
+        if not course_quiz.answer_visible_at:
+            return True
+        try:
+            return _parse_datetime(course_quiz.answer_visible_at) <= datetime.now(UTC)
+        except ValueError:
+            return True
+
+    async def _can_manage_course_quiz(self, user_id: str, course_quiz: CourseQuiz) -> bool:
+        from app.models.tables import Course, CourseMember
+
+        row = (
+            await self.db.execute(
+                select(Course, CourseMember)
+                .join(CourseMember, CourseMember.course_id == Course.id)
+                .where(and_(Course.id == course_quiz.course_id, CourseMember.user_id == user_id))
+            )
+        ).one_or_none()
+        if row is None:
+            return False
+        course, member = row
+        return course.owner_id == user_id or member.role in {"instructor", "ta"}
 
     def _attempt_summary_out(self, attempt: QuizAttempt) -> dict[str, Any]:
         return {
@@ -651,7 +760,11 @@ def _answers_match(actual: Any, expected: Any) -> bool:
     return str(actual).strip() == str(expected).strip()
 
 
-def _quiz_diagnostics(questions: list[dict[str, Any]], answers: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+def _quiz_diagnostics(
+    questions: list[dict[str, Any]],
+    answers: dict[str, Any] | list[Any],
+    include_answers: bool = True,
+) -> list[dict[str, Any]]:
     diagnostics = []
     for index, question in enumerate(questions):
         actual = _answer_for(answers, index)
@@ -662,13 +775,21 @@ def _quiz_diagnostics(questions: list[dict[str, Any]], answers: dict[str, Any] |
                 "question_index": index,
                 "question": question.get("question") or question.get("prompt"),
                 "submitted_answer": actual,
-                "answer": expected,
+                "answer": expected if include_answers else None,
                 "is_correct": is_correct,
-                "explanation": question.get("explanation"),
+                "explanation": question.get("explanation") if include_answers else None,
                 "source_page": _int_or_none(question.get("source_page")),
             }
         )
     return diagnostics
+
+
+def _without_answers(question: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in question.items()
+        if key not in {"answer", "correct_answer", "explanation", "rationale"}
+    }
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -676,3 +797,13 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_datetime(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)

@@ -135,7 +135,46 @@ class CourseQuiz(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="published")
     due_at: Mapped[str | None] = mapped_column(String)
+    available_from: Mapped[str | None] = mapped_column(String)
+    answer_visible_at: Mapped[str | None] = mapped_column(String)
+    attempt_limit: Mapped[int | None] = mapped_column(Integer)
     published_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseAssignment(Base):
+    __tablename__ = "course_assignments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="custom")
+    doc_id: Mapped[str | None] = mapped_column(String, ForeignKey("documents.id", ondelete="SET NULL"))
+    quiz_id: Mapped[str | None] = mapped_column(String, ForeignKey("quizzes.id", ondelete="SET NULL"))
+    due_at: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="published")
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseAssignmentSubmission(Base):
+    __tablename__ = "course_assignment_submissions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    assignment_id: Mapped[str] = mapped_column(
+        String, ForeignKey("course_assignments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="completed")
+    response: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[float | None] = mapped_column(Float)
+    submitted_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
 class LearningArtifact(Base):

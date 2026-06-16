@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   BookOpen,
   BrainCircuit,
+  CalendarClock,
+  CheckCircle2,
   Copy,
   FileText,
   ListChecks,
@@ -10,6 +12,7 @@ import {
   Network,
   NotebookPen,
   Plus,
+  Trash2,
   Users,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -17,6 +20,7 @@ import { LoadingButton } from "../components/app/LoadingButton";
 import {
   ApiError,
   apiFetch,
+  CourseAssignmentItem,
   CourseItem,
   CourseProgress,
   CourseProgressStudent,
@@ -47,6 +51,14 @@ export function CoursesPage() {
     CourseProgress["quiz_summary"]
   >([]);
   const [courseQuizzes, setCourseQuizzes] = useState<QuizItem[]>([]);
+  const [assignments, setAssignments] = useState<CourseAssignmentItem[]>([]);
+  const [assignmentTitle, setAssignmentTitle] = useState("");
+  const [assignmentDescription, setAssignmentDescription] = useState("");
+  const [assignmentKind, setAssignmentKind] =
+    useState<CourseAssignmentItem["kind"]>("custom");
+  const [assignmentDocId, setAssignmentDocId] = useState("");
+  const [assignmentQuizId, setAssignmentQuizId] = useState("");
+  const [assignmentDueAt, setAssignmentDueAt] = useState("");
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const user = useAuthStore((state) => state.user);
@@ -70,10 +82,13 @@ export function CoursesPage() {
 
   async function openCourse(id: string) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`);
-    const [nextMembers, nextCourseQuizzes] = await Promise.all([
-      apiFetch<CourseMember[]>(`/courses/${id}/members`),
-      apiFetch<QuizItem[]>(`/courses/${id}/quizzes`),
-    ]);
+    const [nextMembers, nextCourseQuizzes, nextAssignments] = await Promise.all(
+      [
+        apiFetch<CourseMember[]>(`/courses/${id}/members`),
+        apiFetch<QuizItem[]>(`/courses/${id}/quizzes`),
+        apiFetch<CourseAssignmentItem[]>(`/courses/${id}/assignments`),
+      ],
+    );
     setProgressError("");
     const nextProgress = await apiFetch<CourseProgress>(
       `/courses/${id}/progress`,
@@ -96,6 +111,7 @@ export function CoursesPage() {
     setCourseDescription(course.description ?? "");
     setMembers(nextMembers);
     setCourseQuizzes(nextCourseQuizzes);
+    setAssignments(nextAssignments);
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
   }
@@ -153,7 +169,7 @@ export function CoursesPage() {
   }
 
   async function saveCourse() {
-    if (!selected || !canManage || !courseTitle.trim()) return;
+    if (!selected || !canEditCourse || !courseTitle.trim()) return;
     setBusyAction("save-course");
     try {
       const updated = await apiFetch<CourseItem>(`/courses/${selected.id}`, {
@@ -220,6 +236,68 @@ export function CoursesPage() {
     setBusyAction(`remove-document-${id}`);
     try {
       await apiFetch(`/courses/${selected.id}/documents/${id}`, {
+        method: "DELETE",
+      });
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function createAssignment(event: FormEvent) {
+    event.preventDefault();
+    if (!selected || !canManage || !assignmentTitle.trim()) return;
+    const needsDoc = assignmentNeedsDocument(assignmentKind);
+    if (needsDoc && !assignmentDocId) return;
+    if (assignmentKind === "quiz" && !assignmentQuizId) return;
+    setBusyAction("create-assignment");
+    try {
+      await apiFetch<CourseAssignmentItem>(
+        `/courses/${selected.id}/assignments`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            title: assignmentTitle.trim(),
+            description: assignmentDescription.trim() || null,
+            kind: assignmentKind,
+            doc_id: needsDoc ? assignmentDocId : null,
+            quiz_id: assignmentKind === "quiz" ? assignmentQuizId : null,
+            due_at: normalizeDateTimeInput(assignmentDueAt),
+            status: "published",
+          }),
+        },
+      );
+      setAssignmentTitle("");
+      setAssignmentDescription("");
+      setAssignmentDueAt("");
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function submitAssignment(assignment: CourseAssignmentItem) {
+    if (!selected) return;
+    setBusyAction(`submit-assignment-${assignment.id}`);
+    try {
+      await apiFetch<CourseAssignmentItem>(
+        `/courses/${selected.id}/assignments/${assignment.id}/submit`,
+        {
+          method: "POST",
+          body: JSON.stringify({ response: "" }),
+        },
+      );
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteAssignment(assignment: CourseAssignmentItem) {
+    if (!selected || !canManage) return;
+    setBusyAction(`delete-assignment-${assignment.id}`);
+    try {
+      await apiFetch(`/courses/${selected.id}/assignments/${assignment.id}`, {
         method: "DELETE",
       });
       await openCourse(selected.id);
@@ -514,6 +592,258 @@ export function CoursesPage() {
                   <ListChecks size={16} className="text-zinc-500" />
                   課程任務
                 </div>
+                {canManage && (
+                  <form
+                    className="grid gap-3 border-b border-zinc-200 bg-zinc-50 px-3 py-3 md:grid-cols-[1.4fr_160px_1fr_180px_auto]"
+                    onSubmit={createAssignment}
+                  >
+                    <div>
+                      <label
+                        className="mb-1 block text-xs font-medium text-zinc-500"
+                        htmlFor="assignment-title"
+                      >
+                        任務名稱
+                      </label>
+                      <input
+                        id="assignment-title"
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentTitle}
+                        onChange={(event) =>
+                          setAssignmentTitle(event.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="mb-1 block text-xs font-medium text-zinc-500"
+                        htmlFor="assignment-kind"
+                      >
+                        類型
+                      </label>
+                      <select
+                        id="assignment-kind"
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentKind}
+                        onChange={(event) => {
+                          const nextKind = event.target
+                            .value as CourseAssignmentItem["kind"];
+                          setAssignmentKind(nextKind);
+                          if (!assignmentNeedsDocument(nextKind)) {
+                            setAssignmentDocId("");
+                          }
+                          if (nextKind !== "quiz") setAssignmentQuizId("");
+                        }}
+                      >
+                        <option value="custom">自訂</option>
+                        <option value="quiz">測驗</option>
+                        <option value="read_summary">閱讀摘要</option>
+                        <option value="note">筆記</option>
+                        <option value="flashcards">閃卡</option>
+                      </select>
+                    </div>
+                    {assignmentKind === "quiz" ? (
+                      <div>
+                        <label
+                          className="mb-1 block text-xs font-medium text-zinc-500"
+                          htmlFor="assignment-quiz"
+                        >
+                          測驗
+                        </label>
+                        <select
+                          id="assignment-quiz"
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={assignmentQuizId}
+                          onChange={(event) =>
+                            setAssignmentQuizId(event.target.value)
+                          }
+                        >
+                          <option value="">選擇測驗</option>
+                          {courseQuizzes.map((quiz) => (
+                            <option key={quiz.id} value={quiz.id}>
+                              {quiz.course_publication?.title ?? quiz.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label
+                          className="mb-1 block text-xs font-medium text-zinc-500"
+                          htmlFor="assignment-doc"
+                        >
+                          文件
+                        </label>
+                        <select
+                          id="assignment-doc"
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={assignmentDocId}
+                          onChange={(event) =>
+                            setAssignmentDocId(event.target.value)
+                          }
+                          disabled={!assignmentNeedsDocument(assignmentKind)}
+                        >
+                          <option value="">
+                            {assignmentNeedsDocument(assignmentKind)
+                              ? "選擇文件"
+                              : "不需文件"}
+                          </option>
+                          {(selected.documents ?? []).map((doc) => (
+                            <option key={doc.id} value={doc.id}>
+                              {doc.filename}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label
+                        className="mb-1 block text-xs font-medium text-zinc-500"
+                        htmlFor="assignment-due"
+                      >
+                        截止時間
+                      </label>
+                      <input
+                        id="assignment-due"
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        type="datetime-local"
+                        value={assignmentDueAt}
+                        onChange={(event) =>
+                          setAssignmentDueAt(event.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <LoadingButton
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                        loading={busyAction === "create-assignment"}
+                        loadingText="新增中"
+                        icon={<Plus size={16} />}
+                      >
+                        新增
+                      </LoadingButton>
+                    </div>
+                    <textarea
+                      className="md:col-span-5 min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                      value={assignmentDescription}
+                      onChange={(event) =>
+                        setAssignmentDescription(event.target.value)
+                      }
+                      placeholder="任務說明"
+                    />
+                  </form>
+                )}
+                <div className="divide-y divide-zinc-100">
+                  {assignments.map((assignment) => {
+                    const action = assignmentAction(assignment);
+                    return (
+                      <div
+                        key={assignment.id}
+                        className="flex flex-col gap-3 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate font-medium">
+                              {assignment.title}
+                            </span>
+                            <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
+                              {assignmentKindLabel(assignment.kind)}
+                            </span>
+                            <span
+                              className={assignmentCompletionClass(
+                                assignment.completion.status,
+                              )}
+                            >
+                              {assignmentCompletionLabel(
+                                assignment.completion.status,
+                              )}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                            {assignment.due_at && (
+                              <span className="inline-flex items-center gap-1">
+                                <CalendarClock size={13} />
+                                {formatDateTime(assignment.due_at)}
+                              </span>
+                            )}
+                            {assignment.doc_filename && (
+                              <span>{assignment.doc_filename}</span>
+                            )}
+                            {assignment.quiz_title && (
+                              <span>{assignment.quiz_title}</span>
+                            )}
+                            {assignment.completion.score !== null && (
+                              <span>
+                                分數{" "}
+                                {Math.round(
+                                  Number(assignment.completion.score) * 100,
+                                )}
+                                %
+                              </span>
+                            )}
+                          </div>
+                          {assignment.description && (
+                            <div className="mt-2 text-xs leading-5 text-zinc-600">
+                              {assignment.description}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {assignment.kind === "custom" ? (
+                            <LoadingButton
+                              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                              onClick={() => submitAssignment(assignment)}
+                              loading={
+                                busyAction ===
+                                `submit-assignment-${assignment.id}`
+                              }
+                              loadingText="完成中"
+                              icon={<CheckCircle2 size={14} />}
+                              disabled={
+                                assignment.completion.status === "completed" ||
+                                assignment.completion.status === "late"
+                              }
+                            >
+                              標記完成
+                            </LoadingButton>
+                          ) : action ? (
+                            <Link
+                              className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+                              to={action.href}
+                            >
+                              <ListChecks size={14} />
+                              {action.label}
+                            </Link>
+                          ) : null}
+                          {canManage && (
+                            <LoadingButton
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                              onClick={() => deleteAssignment(assignment)}
+                              loading={
+                                busyAction ===
+                                `delete-assignment-${assignment.id}`
+                              }
+                              loadingText="刪除中"
+                              icon={<Trash2 size={14} />}
+                            >
+                              刪除
+                            </LoadingButton>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {assignments.length === 0 && (
+                    <div className="px-3 py-8 text-sm text-zinc-500">
+                      目前沒有課程任務
+                    </div>
+                  )}
+                </div>
+              </section>
+              <section className="mb-5 rounded-lg border border-zinc-200">
+                <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                  <ListChecks size={16} className="text-zinc-500" />
+                  課程測驗
+                </div>
                 <div className="divide-y divide-zinc-100">
                   {courseQuizzes.map((quiz) => (
                     <div
@@ -526,9 +856,23 @@ export function CoursesPage() {
                         </div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
                           <span>{quiz.questions.length} 題</span>
+                          {quiz.course_publication?.available_from && (
+                            <span>
+                              開放{" "}
+                              {formatDateTime(
+                                quiz.course_publication.available_from,
+                              )}
+                            </span>
+                          )}
                           {quiz.course_publication?.due_at && (
                             <span>
-                              截止 {formatDate(quiz.course_publication.due_at)}
+                              截止{" "}
+                              {formatDateTime(quiz.course_publication.due_at)}
+                            </span>
+                          )}
+                          {quiz.course_publication?.attempt_limit && (
+                            <span>
+                              最多 {quiz.course_publication.attempt_limit} 次
                             </span>
                           )}
                           {quiz.latest_attempt ? (
@@ -698,6 +1042,61 @@ function riskClass(risk: string) {
   return `${base} bg-emerald-50 text-emerald-700`;
 }
 
-function formatDate(value: string) {
-  return value.slice(0, 10);
+function assignmentNeedsDocument(kind: string) {
+  return ["read_summary", "note", "flashcards"].includes(kind);
+}
+
+function normalizeDateTimeInput(value: string) {
+  if (!value) return null;
+  return new Date(value).toISOString();
+}
+
+function assignmentKindLabel(kind: string) {
+  if (kind === "quiz") return "測驗";
+  if (kind === "read_summary") return "閱讀摘要";
+  if (kind === "note") return "筆記";
+  if (kind === "flashcards") return "閃卡";
+  return "自訂";
+}
+
+function assignmentCompletionLabel(status: string) {
+  if (status === "completed") return "已完成";
+  if (status === "late") return "逾期完成";
+  if (status === "overdue") return "已逾期";
+  return "待完成";
+}
+
+function assignmentCompletionClass(status: string) {
+  const base = "rounded-md px-2 py-0.5 text-xs";
+  if (status === "completed") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "late") return `${base} bg-amber-50 text-amber-700`;
+  if (status === "overdue") return `${base} bg-red-50 text-red-600`;
+  return `${base} bg-zinc-100 text-zinc-600`;
+}
+
+function assignmentAction(assignment: CourseAssignmentItem) {
+  if (assignment.kind === "quiz" && assignment.quiz_id) {
+    return { href: `/quiz/${assignment.quiz_id}`, label: "開始測驗" };
+  }
+  if (assignment.kind === "read_summary" && assignment.doc_id) {
+    return { href: `/summary/${assignment.doc_id}`, label: "閱讀摘要" };
+  }
+  if (assignment.kind === "note" && assignment.doc_id) {
+    return { href: `/notes?doc=${assignment.doc_id}`, label: "寫筆記" };
+  }
+  if (assignment.kind === "flashcards" && assignment.doc_id) {
+    return { href: `/flashcards?doc=${assignment.doc_id}`, label: "練閃卡" };
+  }
+  return null;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

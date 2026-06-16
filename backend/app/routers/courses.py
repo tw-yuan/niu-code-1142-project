@@ -4,6 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db
 from app.models.tables import User
 from app.schemas import (
+    CourseAssignmentCreate,
+    CourseAssignmentSubmit,
+    CourseAssignmentUpdate,
     CourseCreate,
     CourseDocumentRequest,
     CourseJoinRequest,
@@ -205,6 +208,91 @@ async def course_quizzes(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).course_quizzes(current_user.id, course_id)
+
+
+@router.get("/{course_id}/assignments")
+async def course_assignments(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).assignments(current_user.id, course_id)
+
+
+@router.post("/{course_id}/assignments")
+async def create_course_assignment(
+    course_id: str,
+    body: CourseAssignmentCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await CoursesService(db).create_assignment(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.assignment_create",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:assignment:{assignment['id']}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return assignment
+
+
+@router.put("/{course_id}/assignments/{assignment_id}")
+async def update_course_assignment(
+    course_id: str,
+    assignment_id: str,
+    body: CourseAssignmentUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await CoursesService(db).update_assignment(current_user.id, course_id, assignment_id, body)
+    await AuditService(db).log(
+        "course.assignment_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:assignment:{assignment_id}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return assignment
+
+
+@router.delete("/{course_id}/assignments/{assignment_id}")
+async def delete_course_assignment(
+    course_id: str,
+    assignment_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await CoursesService(db).delete_assignment(current_user.id, course_id, assignment_id)
+    await AuditService(db).log(
+        "course.assignment_delete",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:assignment:{assignment_id}",
+        request=request,
+    )
+    return {"ok": True}
+
+
+@router.post("/{course_id}/assignments/{assignment_id}/submit")
+async def submit_course_assignment(
+    course_id: str,
+    assignment_id: str,
+    body: CourseAssignmentSubmit,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await CoursesService(db).submit_assignment(current_user.id, course_id, assignment_id, body)
+    await AuditService(db).log(
+        "course.assignment_submit",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:assignment:{assignment_id}",
+        request=request,
+    )
+    return assignment
 
 
 @router.post("/{course_id}/documents")

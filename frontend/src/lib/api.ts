@@ -168,6 +168,9 @@ export interface QuizItem {
     title: string;
     status: string;
     due_at: string | null;
+    available_from: string | null;
+    answer_visible_at: string | null;
+    attempt_limit: number | null;
     published_at: string;
     created_by: string;
   };
@@ -230,6 +233,29 @@ export interface CourseProgress {
   published_quizzes: number;
   students: CourseProgressStudent[];
   quiz_summary: CourseQuizSummary[];
+}
+
+export interface CourseAssignmentItem {
+  id: string;
+  course_id: string;
+  created_by: string;
+  title: string;
+  description: string | null;
+  kind: "custom" | "quiz" | "read_summary" | "note" | "flashcards" | string;
+  doc_id: string | null;
+  doc_filename: string | null;
+  quiz_id: string | null;
+  quiz_title: string | null;
+  due_at: string | null;
+  status: "published" | "draft" | "archived" | string;
+  created_at: string;
+  completion: {
+    status: "pending" | "completed" | "late" | "overdue" | string;
+    completed_at: string | null;
+    source: string | null;
+    is_late: boolean;
+    score: number | null;
+  };
 }
 
 export interface NoteItem {

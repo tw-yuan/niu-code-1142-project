@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 import string
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -13,11 +14,14 @@ from app.models.tables import (
     ChatMessage,
     ChatSession,
     Course,
+    CourseAssignment,
+    CourseAssignmentSubmission,
     CourseDocument,
     CourseMember,
     CourseQuiz,
     Document,
     Flashcard,
+    LearningArtifact,
     Note,
     Quiz,
     QuizAttempt,
@@ -25,6 +29,9 @@ from app.models.tables import (
     now_iso,
 )
 from app.schemas import (
+    CourseAssignmentCreate,
+    CourseAssignmentSubmit,
+    CourseAssignmentUpdate,
     CourseCreate,
     CourseDocumentRequest,
     CourseJoinRequest,
@@ -346,6 +353,109 @@ class CoursesService:
             "quiz_summary": await self._course_quiz_summary(course_id, course_quiz_rows, members),
         }
 
+    async def assignments(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
+        course = await self._get_course(course_id)
+        member = await self.require_member(user_id, course_id)
+        conditions = [CourseAssignment.course_id == course_id]
+        if course.owner_id != user_id and member.role not in {"instructor", "ta"}:
+            conditions.append(CourseAssignment.status == "published")
+        rows = (
+            await self.db.execute(
+                select(CourseAssignment)
+                .where(and_(*conditions))
+                .order_by(desc(CourseAssignment.created_at))
+            )
+        ).scalars().all()
+        return [await self._assignment_out(row, user_id) for row in rows]
+
+    async def create_assignment(
+        self,
+        user_id: str,
+        course_id: str,
+        body: CourseAssignmentCreate,
+    ) -> dict[str, Any]:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        await self._validate_assignment_refs(user_id, course_id, body.kind, body.doc_id, body.quiz_id)
+        assignment = CourseAssignment(
+            course_id=course_id,
+            created_by=user_id,
+            title=body.title,
+            description=body.description,
+            kind=body.kind,
+            doc_id=body.doc_id,
+            quiz_id=body.quiz_id,
+            due_at=body.due_at,
+            status=body.status,
+        )
+        self.db.add(assignment)
+        await self.db.commit()
+        await self.db.refresh(assignment)
+        return await self._assignment_out(assignment, user_id)
+
+    async def update_assignment(
+        self,
+        user_id: str,
+        course_id: str,
+        assignment_id: str,
+        body: CourseAssignmentUpdate,
+    ) -> dict[str, Any]:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        assignment = await self._get_assignment(course_id, assignment_id)
+        next_kind = body.kind if body.kind is not None else assignment.kind
+        next_doc_id = body.doc_id if "doc_id" in body.model_fields_set else assignment.doc_id
+        next_quiz_id = body.quiz_id if "quiz_id" in body.model_fields_set else assignment.quiz_id
+        await self._validate_assignment_refs(user_id, course_id, next_kind, next_doc_id, next_quiz_id)
+        for field in ("title", "description", "kind", "doc_id", "quiz_id", "due_at", "status"):
+            if field in body.model_fields_set:
+                setattr(assignment, field, getattr(body, field))
+        await self.db.commit()
+        await self.db.refresh(assignment)
+        return await self._assignment_out(assignment, user_id)
+
+    async def delete_assignment(self, user_id: str, course_id: str, assignment_id: str) -> None:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        assignment = await self._get_assignment(course_id, assignment_id)
+        await self.db.delete(assignment)
+        await self.db.commit()
+
+    async def submit_assignment(
+        self,
+        user_id: str,
+        course_id: str,
+        assignment_id: str,
+        body: CourseAssignmentSubmit,
+    ) -> dict[str, Any]:
+        await self.require_member(user_id, course_id)
+        assignment = await self._get_assignment(course_id, assignment_id)
+        if assignment.status != "published":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+        existing = (
+            await self.db.execute(
+                select(CourseAssignmentSubmission)
+                .where(
+                    and_(
+                        CourseAssignmentSubmission.assignment_id == assignment_id,
+                        CourseAssignmentSubmission.user_id == user_id,
+                    )
+                )
+                .order_by(desc(CourseAssignmentSubmission.submitted_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            submission = CourseAssignmentSubmission(
+                assignment_id=assignment_id,
+                user_id=user_id,
+                response=body.response,
+            )
+            self.db.add(submission)
+        else:
+            existing.response = body.response
+            existing.status = "completed"
+            existing.submitted_at = now_iso()
+        await self.db.commit()
+        return await self._assignment_out(assignment, user_id)
+
     async def course_document_ids(self, user_id: str, course_id: str) -> list[str]:
         await self._get_course(course_id)
         await self.require_member(user_id, course_id)
@@ -401,6 +511,193 @@ class CoursesService:
         if member is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found")
         return member
+
+    async def _get_assignment(self, course_id: str, assignment_id: str) -> CourseAssignment:
+        assignment = (
+            await self.db.execute(
+                select(CourseAssignment).where(
+                    and_(
+                        CourseAssignment.id == assignment_id,
+                        CourseAssignment.course_id == course_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if assignment is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+        return assignment
+
+    async def _validate_assignment_refs(
+        self,
+        user_id: str,
+        course_id: str,
+        kind: str,
+        doc_id: str | None,
+        quiz_id: str | None,
+    ) -> None:
+        if kind in {"read_summary", "note", "flashcards"} and not doc_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is required")
+        if kind == "quiz" and not quiz_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quiz is required")
+        if doc_id:
+            course_doc = (
+                await self.db.execute(
+                    select(CourseDocument)
+                    .join(Document, Document.id == CourseDocument.doc_id)
+                    .where(
+                        and_(
+                            CourseDocument.course_id == course_id,
+                            CourseDocument.doc_id == doc_id,
+                            Document.status == "ready",
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            if course_doc is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Document must be shared with this course first",
+                )
+        if quiz_id:
+            course_quiz = (
+                await self.db.execute(
+                    select(CourseQuiz).where(
+                        and_(
+                            CourseQuiz.course_id == course_id,
+                            CourseQuiz.quiz_id == quiz_id,
+                            CourseQuiz.status == "published",
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            if course_quiz is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Quiz must be published to this course first",
+                )
+
+    async def _assignment_out(self, assignment: CourseAssignment, user_id: str) -> dict[str, Any]:
+        doc_filename = None
+        quiz_title = None
+        if assignment.doc_id:
+            doc_filename = (
+                await self.db.execute(select(Document.filename).where(Document.id == assignment.doc_id))
+            ).scalar_one_or_none()
+        if assignment.quiz_id:
+            quiz_title = (
+                await self.db.execute(select(Quiz.title).where(Quiz.id == assignment.quiz_id))
+            ).scalar_one_or_none()
+        return {
+            "id": assignment.id,
+            "course_id": assignment.course_id,
+            "created_by": assignment.created_by,
+            "title": assignment.title,
+            "description": assignment.description,
+            "kind": assignment.kind,
+            "doc_id": assignment.doc_id,
+            "doc_filename": doc_filename,
+            "quiz_id": assignment.quiz_id,
+            "quiz_title": quiz_title,
+            "due_at": assignment.due_at,
+            "status": assignment.status,
+            "created_at": assignment.created_at,
+            "completion": await self._assignment_completion(assignment, user_id),
+        }
+
+    async def _assignment_completion(
+        self,
+        assignment: CourseAssignment,
+        user_id: str,
+    ) -> dict[str, Any]:
+        completed_at: str | None = None
+        source: str | None = None
+        score: float | None = None
+        manual = (
+            await self.db.execute(
+                select(CourseAssignmentSubmission)
+                .where(
+                    and_(
+                        CourseAssignmentSubmission.assignment_id == assignment.id,
+                        CourseAssignmentSubmission.user_id == user_id,
+                    )
+                )
+                .order_by(desc(CourseAssignmentSubmission.submitted_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if manual:
+            completed_at = manual.submitted_at
+            source = "manual"
+            score = manual.score
+        if assignment.kind == "quiz" and assignment.quiz_id:
+            attempt = (
+                await self.db.execute(
+                    select(QuizAttempt)
+                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == assignment.quiz_id))
+                    .order_by(desc(QuizAttempt.completed_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if attempt:
+                completed_at = attempt.completed_at
+                source = "quiz"
+                score = attempt.total_score
+        elif assignment.kind == "read_summary" and assignment.doc_id:
+            artifact = (
+                await self.db.execute(
+                    select(LearningArtifact)
+                    .where(
+                        and_(
+                            LearningArtifact.user_id == user_id,
+                            LearningArtifact.doc_id == assignment.doc_id,
+                            LearningArtifact.kind == "summary",
+                        )
+                    )
+                    .order_by(desc(LearningArtifact.created_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if artifact:
+                completed_at = artifact.created_at
+                source = "summary"
+        elif assignment.kind == "note" and assignment.doc_id:
+            note = (
+                await self.db.execute(
+                    select(Note)
+                    .where(and_(Note.user_id == user_id, Note.doc_id == assignment.doc_id))
+                    .order_by(desc(Note.created_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if note:
+                completed_at = note.created_at
+                source = "note"
+        elif assignment.kind == "flashcards" and assignment.doc_id:
+            card = (
+                await self.db.execute(
+                    select(Flashcard)
+                    .where(and_(Flashcard.user_id == user_id, Flashcard.doc_id == assignment.doc_id))
+                    .order_by(desc(Flashcard.created_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if card:
+                completed_at = card.created_at
+                source = "flashcards"
+        is_late = bool(completed_at and assignment.due_at and _is_after(completed_at, assignment.due_at))
+        if completed_at:
+            completion_status = "late" if is_late else "completed"
+        elif assignment.due_at and _is_past(assignment.due_at):
+            completion_status = "overdue"
+        else:
+            completion_status = "pending"
+        return {
+            "status": completion_status,
+            "completed_at": completed_at,
+            "source": source,
+            "is_late": is_late,
+            "score": score,
+        }
 
     async def _out_for_member(
         self,
@@ -567,3 +864,27 @@ def _risk_level(
     if chat_messages == 0 and not last_activity_at:
         return "medium"
     return "ok"
+
+
+def _parse_datetime(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _is_after(left: str, right: str) -> bool:
+    try:
+        return _parse_datetime(left) > _parse_datetime(right)
+    except ValueError:
+        return left > right
+
+
+def _is_past(value: str) -> bool:
+    try:
+        return _parse_datetime(value) < datetime.now(UTC)
+    except ValueError:
+        return value < now_iso()
