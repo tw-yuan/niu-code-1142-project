@@ -1,11 +1,26 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
-import { MessageSquarePlus, Send, StopCircle } from "lucide-react"
+import { Info, MessageSquarePlus, Send, StopCircle } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
 import { useAuthStore } from "../store/auth"
+
+const modeDescriptions: Record<string, { title: string; text: string }> = {
+  enhanced: {
+    title: "增強模式",
+    text: "優先根據教材回答，教材不足時會補充一般背景知識，適合探索與整理概念。",
+  },
+  strict: {
+    title: "嚴格模式",
+    text: "只根據引用教材回答；資料不足會直接說明找不到依據，適合考前複習與查證。",
+  },
+  socratic: {
+    title: "蘇格拉底模式",
+    text: "用反問與提示引導你自己推理答案，適合練習理解、口試或主動回想。",
+  },
+}
 
 export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -170,6 +185,13 @@ export function ChatPage() {
             <option value="strict">嚴格</option>
             <option value="socratic">蘇格拉底</option>
           </select>
+          <div className="mb-3 flex gap-2 rounded-md bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600">
+            <Info size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+            <div>
+              <div className="font-medium text-zinc-700">{modeDescriptions[mode].title}</div>
+              <div>{modeDescriptions[mode].text}</div>
+            </div>
+          </div>
           <label className="mb-2 block text-xs font-medium text-zinc-500">範圍</label>
           <select
             className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
