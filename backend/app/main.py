@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.dependencies import get_db, get_token_from_request
+from app.dependencies import get_db, get_token_from_request, rate_limit
 from app.models.database import SessionLocal, init_db
 from app.models.tables import User
 from app.routers import (
@@ -28,7 +28,11 @@ from app.services.health_service import health_report
 from app.services.security import decode_token
 from app.services.ws_manager import subscribe_user
 
-app = FastAPI(title="LearnAI API", version="0.1.0")
+app = FastAPI(
+    title="LearnAI API",
+    version="0.1.0",
+    dependencies=[rate_limit("global", 120, 60)],
+)
 
 app.add_middleware(
     CORSMiddleware,

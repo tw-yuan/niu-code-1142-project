@@ -41,6 +41,8 @@ export function AdminPage() {
   const [reliability, setReliability] = useState<ReliabilityStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [auditLogs, setAuditLogs] = useState<Array<Record<string, any>>>([])
+  const [configText, setConfigText] = useState("")
+  const [configMessage, setConfigMessage] = useState("")
 
   const featureRows = useMemo(
     () => Object.entries(cost?.this_month.by_feature ?? {}).map(([feature, total_usd]) => ({ feature, total_usd })),
@@ -48,18 +50,20 @@ export function AdminPage() {
   )
 
   async function load() {
-    const [nextStats, nextUsers, nextCost, nextReliability, logs] = await Promise.all([
+    const [nextStats, nextUsers, nextCost, nextReliability, logs, config] = await Promise.all([
       apiFetch<AdminStats>("/admin/stats"),
       apiFetch<AdminUser[]>("/admin/users"),
       apiFetch<CostStats>("/admin/stats/cost"),
       apiFetch<ReliabilityStats>("/admin/stats/reliability"),
       apiFetch<Array<Record<string, any>>>("/admin/audit-logs?limit=20"),
+      apiFetch<Record<string, unknown>>("/admin/config"),
     ])
     setStats(nextStats)
     setUsers(nextUsers)
     setCost(nextCost)
     setReliability(nextReliability)
     setAuditLogs(logs)
+    setConfigText(JSON.stringify(config, null, 2))
   }
 
   useEffect(() => {
@@ -71,6 +75,17 @@ export function AdminPage() {
       method: "PUT",
       body: JSON.stringify({ token_quota: value }),
     })
+    await load()
+  }
+
+  async function saveConfig() {
+    setConfigMessage("")
+    const payload = JSON.parse(configText) as Record<string, unknown>
+    await apiFetch("/admin/config", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    })
+    setConfigMessage("設定已更新")
     await load()
   }
 
@@ -154,6 +169,20 @@ export function AdminPage() {
           </div>
         </section>
       </div>
+      <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-3 font-semibold">LLM / Fallback 設定</h2>
+        <textarea
+          className="min-h-72 w-full rounded-lg border border-zinc-200 px-3 py-2 font-mono text-xs"
+          value={configText}
+          onChange={(event) => setConfigText(event.target.value)}
+        />
+        <div className="mt-3 flex items-center gap-3">
+          <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={saveConfig}>
+            儲存設定
+          </button>
+          {configMessage && <span className="text-sm text-indigo-700">{configMessage}</span>}
+        </div>
+      </section>
       <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
           <h2 className="font-semibold">Audit logs</h2>

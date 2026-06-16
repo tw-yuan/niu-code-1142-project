@@ -87,8 +87,15 @@ async def get_coverage(
 async def get_page_image(
     doc_id: str,
     page_num: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     path = await DocumentService(db).page_path(current_user.id, doc_id, page_num)
+    await AuditService(db).log(
+        "document.download",
+        user_id=current_user.id,
+        resource=f"document:{doc_id}:page:{page_num}",
+        request=request,
+    )
     return FileResponse(path, media_type="image/png")
