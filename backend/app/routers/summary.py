@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import SummaryRequest
+from app.services.cost_service import check_quota
+from app.services.document_service import DocumentService
 from app.services.learning_service import LearningService
 
 router = APIRouter(prefix="/summary", tags=["summary"])
@@ -19,6 +21,8 @@ async def stream_summary(
     db: AsyncSession = Depends(get_db),
 ):
     svc = LearningService(db)
+    await DocumentService(db).get_document(current_user.id, body.doc_id)
+    await check_quota(db, current_user.id)
 
     async def event_stream():
         full = ""

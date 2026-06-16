@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { CheckCircle2, ListChecks, Wand2 } from "lucide-react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useLocation, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { apiFetch, DocumentItem, QuizItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
@@ -15,40 +15,58 @@ export function QuizPage() {
   const [difficulty, setDifficulty] = useState("medium")
   const [count, setCount] = useState(5)
   const [preview, setPreview] = useState("")
+  const [error, setError] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [score, setScore] = useState<number | null>(null)
+  const [wrongbook, setWrongbook] = useState<Array<Record<string, unknown>>>([])
+  const location = useLocation()
+  const isWrongbook = location.pathname.endsWith("/wrongbook")
 
   const activeQuiz = useMemo(() => quizzes.find((quiz) => quiz.id === id), [id, quizzes])
 
   async function load() {
-    const [docs, nextQuizzes] = await Promise.all([
+    const [docs, nextQuizzes, wrongbookRows] = await Promise.all([
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<QuizItem[]>("/quiz"),
+      isWrongbook ? apiFetch<Array<Record<string, unknown>>>("/quiz/wrongbook") : Promise.resolve([]),
     ])
     const ready = docs.filter((doc) => doc.status === "ready")
     setDocuments(ready)
     setQuizzes(nextQuizzes)
+    setWrongbook(wrongbookRows)
     if (!docId && ready[0]) setDocId(ready[0].id)
   }
 
   useEffect(() => {
     load().catch(() => undefined)
-  }, [])
+  }, [isWrongbook])
+
+  useEffect(() => {
+    setAnswers({})
+    setScore(null)
+  }, [id])
 
   async function generate() {
     if (!docId || user?.quota_status === "exceeded") return
     setPreview("")
+    setError("")
     setStreaming(true)
     let next = ""
+    let failed = false
     try {
       for await (const event of streamFetch("/quiz/stream", { doc_ids: [docId], types: ["MC"], count, difficulty })) {
         if (event.type === "chunk") {
           next += event.content
           setPreview(next)
+        } else if (event.type === "error") {
+          failed = true
+          setError(event.message)
         }
       }
-      await load()
+      if (!failed) await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "測驗生成失敗")
     } finally {
       setStreaming(false)
     }
@@ -91,6 +109,7 @@ export function QuizPage() {
             <Wand2 size={16} />
             {streaming ? "生成中" : "生成測驗"}
           </button>
+          {error && <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           {preview && <pre className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}
           <h2 className="mb-3 mt-6 font-semibold">測驗列表</h2>
           <div className="space-y-2">
@@ -103,7 +122,21 @@ export function QuizPage() {
           </div>
         </aside>
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          {activeQuiz ? (
+          {isWrongbook ? (
+            <div className="space-y-3">
+              <h2 className="font-semibold">錯題本</h2>
+              {wrongbook.map((item, index) => (
+                <article key={index} className="rounded-lg border border-zinc-200 p-4 text-sm">
+                  <div className="font-medium">{String(item.question ?? "")}</div>
+                  <div className="mt-2 text-zinc-600">答案：{String(item.answer ?? "")}</div>
+                  {item.explanation !== undefined && item.explanation !== null && (
+                    <div className="mt-1 text-zinc-500">{String(item.explanation)}</div>
+                  )}
+                </article>
+              ))}
+              {wrongbook.length === 0 && <div className="text-sm text-zinc-500">尚無錯題紀錄</div>}
+            </div>
+          ) : activeQuiz ? (
             <form onSubmit={submit} className="space-y-5">
               <h2 className="font-semibold">{activeQuiz.title}</h2>
               {activeQuiz.questions.map((question, index) => (

@@ -15,6 +15,7 @@ from app.config import settings
 from app.models.tables import (
     ChatMessage,
     ChatSession,
+    Course,
     Document,
     Flashcard,
     Note,
@@ -97,6 +98,7 @@ class PrivacyService:
         await ChromaService().delete_user_chunks(user.id)
         shutil.rmtree(settings.upload_path / user.id, ignore_errors=True)
         shutil.rmtree(settings.data_path / "exports" / user.id, ignore_errors=True)
+        await self.db.execute(delete(Course).where(Course.owner_id == user.id))
         await self.db.execute(delete(User).where(User.id == user.id))
         await AuditService(self.db).log(
             "data.purge_complete",

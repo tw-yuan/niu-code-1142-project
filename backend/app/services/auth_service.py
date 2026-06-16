@@ -76,7 +76,7 @@ def issue_tokens(response: Response, user: User) -> str:
         refresh_token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.COOKIE_SECURE,
         max_age=int(timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS).total_seconds()),
         path="/",
     )
@@ -84,4 +84,4 @@ def issue_tokens(response: Response, user: User) -> str:
 
 
 def clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie("refresh_token", path="/", secure=settings.COOKIE_SECURE, samesite="lax")

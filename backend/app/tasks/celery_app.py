@@ -9,6 +9,10 @@ celery_app.conf.update(
     accept_content=["json"],
     result_serializer="json",
     timezone="UTC",
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
+    result_expires=3600,
     imports=("app.tasks.document_tasks", "app.tasks.maintenance_tasks"),
     beat_schedule={
         "quota-warning-hourly": {

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react"
 import { Download, NotebookPen, Plus } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import { BASE_URL, apiFetch, DocumentItem, NoteItem } from "../lib/api"
+import { BASE_URL, apiFetch, DocumentItem, NoteItem, refreshToken } from "../lib/api"
 
 export function NotesPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([])
@@ -39,9 +39,10 @@ export function NotesPage() {
     await load()
   }
 
-  function exportHref() {
-    const token = encodeURIComponent(localStorage.getItem("access_token") ?? "")
-    return docId ? `${BASE_URL}/notes/export/${docId}?token=${token}` : "#"
+  async function exportMarkdown() {
+    if (!docId) return
+    const blob = await loadAuthorizedBlob(`/notes/export/${docId}`)
+    downloadBlob(blob, `learnai-notes-${docId}.md`)
   }
 
   return (
@@ -51,10 +52,17 @@ export function NotesPage() {
           <h1 className="text-2xl font-semibold">筆記</h1>
           <p className="mt-1 text-sm text-zinc-500">保存 AI 回應、摘要與自己的理解</p>
         </div>
-        <a className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 aria-disabled:pointer-events-none aria-disabled:opacity-50" href={exportHref()} aria-disabled={!docId}>
-          <Download size={16} />
-          匯出 Markdown
-        </a>
+        {docId ? (
+          <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" onClick={exportMarkdown}>
+            <Download size={16} />
+            匯出 Markdown
+          </button>
+        ) : (
+          <button className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-400" disabled>
+            <Download size={16} />
+            匯出 Markdown
+          </button>
+        )}
       </div>
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -93,6 +101,29 @@ export function NotesPage() {
       </div>
     </div>
   )
+}
+
+async function loadAuthorizedBlob(path: string): Promise<Blob> {
+  let res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  if (res.status === 401 && (await refreshToken())) {
+    res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  }
+  if (!res.ok) throw new Error("Failed to load file")
+  return res.blob()
+}
+
+function authHeaders() {
+  const token = localStorage.getItem("access_token")
+  return token ? { Authorization: `Bearer ${token}` } : undefined
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 function queryString(params: Record<string, string>) {

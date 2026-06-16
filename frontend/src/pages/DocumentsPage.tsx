@@ -1,13 +1,14 @@
 import { ChangeEvent, useEffect, useState } from "react"
 import { BookOpenCheck, FileText, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { BASE_URL, apiFetch, apiUpload, DocumentItem } from "../lib/api"
+import { BASE_URL, apiFetch, apiUpload, DocumentItem, refreshToken } from "../lib/api"
 import { wsManager } from "../lib/ws"
 
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({ chapters: [] })
+  const [previewUrl, setPreviewUrl] = useState("")
   const [consented, setConsented] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
@@ -43,6 +44,26 @@ export function DocumentsPage() {
       .then(setCoverage)
       .catch(() => setCoverage({ chapters: [] }))
   }, [selected])
+
+  useEffect(() => {
+    if (!selected?.page_count) {
+      setPreviewUrl("")
+      return
+    }
+    let objectUrl = ""
+    let active = true
+    loadAuthorizedBlob(`/documents/${selected.id}/pages/1`)
+      .then((blob) => {
+        if (!active) return
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => setPreviewUrl(""))
+    return () => {
+      active = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [selected?.id, selected?.page_count])
 
   async function uploadFile(file: File) {
     setLoading(true)
@@ -174,10 +195,10 @@ export function DocumentsPage() {
               {selected.status === "error" && selected.error_msg && (
                 <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{selected.error_msg}</div>
               )}
-              {selected.page_count ? (
+              {previewUrl ? (
                 <img
                   className="aspect-[3/4] w-full rounded-md border border-zinc-200 object-contain"
-                  src={`${BASE_URL}/documents/${selected.id}/pages/1?token=${encodeURIComponent(localStorage.getItem("access_token") ?? "")}`}
+                  src={previewUrl}
                   alt="文件第一頁預覽"
                 />
               ) : (
@@ -253,4 +274,18 @@ function statusClass(status: string) {
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function loadAuthorizedBlob(path: string): Promise<Blob> {
+  let res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  if (res.status === 401 && (await refreshToken())) {
+    res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  }
+  if (!res.ok) throw new Error("Failed to load file")
+  return res.blob()
+}
+
+function authHeaders() {
+  const token = localStorage.getItem("access_token")
+  return token ? { Authorization: `Bearer ${token}` } : undefined
 }

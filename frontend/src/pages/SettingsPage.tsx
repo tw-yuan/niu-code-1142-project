@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Download, Trash2 } from "lucide-react"
-import { BASE_URL, apiFetch } from "../lib/api"
+import { BASE_URL, apiFetch, refreshToken } from "../lib/api"
 import { useAuthStore } from "../store/auth"
 
 export function SettingsPage() {
@@ -32,7 +32,10 @@ export function SettingsPage() {
     window.location.href = "/login"
   }
 
-  const token = encodeURIComponent(localStorage.getItem("access_token") ?? "")
+  async function downloadExport() {
+    const blob = await loadAuthorizedBlob("/auth/me/export-download")
+    downloadBlob(blob, "learnai-export.zip")
+  }
 
   return (
     <div className="max-w-3xl">
@@ -50,9 +53,9 @@ export function SettingsPage() {
             產生匯出檔
           </button>
           {exportReady && (
-            <a className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" href={`${BASE_URL}/auth/me/export-download?token=${token}`}>
+            <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={downloadExport}>
               下載 ZIP
-            </a>
+            </button>
           )}
         </div>
       </section>
@@ -77,4 +80,27 @@ export function SettingsPage() {
       </section>
     </div>
   )
+}
+
+async function loadAuthorizedBlob(path: string): Promise<Blob> {
+  let res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  if (res.status === 401 && (await refreshToken())) {
+    res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
+  }
+  if (!res.ok) throw new Error("Failed to load file")
+  return res.blob()
+}
+
+function authHeaders() {
+  const token = localStorage.getItem("access_token")
+  return token ? { Authorization: `Bearer ${token}` } : undefined
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }

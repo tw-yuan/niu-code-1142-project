@@ -11,10 +11,19 @@ function wsUrl(path: string) {
 
 class WSManager {
   private ws: WebSocket | null = null
+  private token: string | null = null
   private handlers = new Map<string, Set<(data: any) => void>>()
 
   connect(token: string) {
-    if (this.ws?.readyState === WebSocket.OPEN) return
+    if (
+      this.ws &&
+      this.token === token &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
+    this.disconnect()
+    this.token = token
     this.ws = new WebSocket(wsUrl(`?token=${encodeURIComponent(token)}`))
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data)
@@ -22,10 +31,20 @@ class WSManager {
     }
     this.ws.onclose = () => {
       this.ws = null
+      this.token = null
       window.setTimeout(() => {
         const latest = localStorage.getItem("access_token")
         if (latest) this.connect(latest)
       }, 3000)
+    }
+  }
+
+  disconnect() {
+    const current = this.ws
+    this.ws = null
+    this.token = null
+    if (current && current.readyState !== WebSocket.CLOSED) {
+      current.close()
     }
   }
 

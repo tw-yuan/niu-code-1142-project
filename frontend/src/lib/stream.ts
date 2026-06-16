@@ -1,4 +1,4 @@
-import { BASE_URL, Citation } from "./api"
+import { BASE_URL, Citation, refreshToken } from "./api"
 
 export type StreamEvent =
   | { type: "chunk"; content: string }
@@ -14,17 +14,11 @@ export async function* streamFetch(
   body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  const token = localStorage.getItem("access_token")
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-    body: JSON.stringify(body),
-    signal,
-  })
+  let res = await startStream(path, body, signal)
+  if (res.status === 401) {
+    const refreshed = await refreshToken()
+    if (refreshed) res = await startStream(path, body, signal)
+  }
   if (!res.ok || !res.body) {
     const err = await res.json().catch(() => ({}))
     throw new Error(
@@ -49,4 +43,18 @@ export async function* streamFetch(
       yield JSON.parse(raw) as StreamEvent
     }
   }
+}
+
+function startStream(path: string, body: unknown, signal?: AbortSignal) {
+  const token = localStorage.getItem("access_token")
+  return fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+    body: JSON.stringify(body),
+    signal,
+  })
 }

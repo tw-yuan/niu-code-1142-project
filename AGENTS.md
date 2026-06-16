@@ -52,7 +52,7 @@
 ```
 learnai/
 ├── docker-compose.yml
-├── docker-compose.override.yml    # 開發：hot reload
+├── docker-compose.dev.yml         # 開發：hot reload（需明確 -f 套用）
 ├── docker-compose.prod.yml        # 生產：Nginx
 ├── .env.example
 ├── data/                          # 執行時生成（gitignore）
@@ -1008,6 +1008,9 @@ cp .env.example .env
 docker compose up -d
 docker compose logs -f backend worker
 
+# 開發 hot reload
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
 # 建立 admin
 docker compose exec backend python scripts/create_admin.py
 ```
@@ -1016,8 +1019,8 @@ docker compose exec backend python scripts/create_admin.py
 
 | 服務 | Port |
 |------|------|
-| 前端 | 3000 |
-| 後端 API | 8000 |
+| 前端 | 8081（預設 Nginx） / 3000（dev compose） |
+| 後端 API | `/api`（預設經 Nginx） / 8000（dev compose） |
 | API Docs | 8000/docs |
 | Redis | 6379 |
 

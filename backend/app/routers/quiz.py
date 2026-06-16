@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import QuizAttemptRequest, QuizStreamRequest
+from app.services.cost_service import check_quota
 from app.services.learning_service import LearningService
 
 router = APIRouter(prefix="/quiz", tags=["quiz"])
@@ -19,6 +20,8 @@ async def stream_quiz(
     db: AsyncSession = Depends(get_db),
 ):
     svc = LearningService(db)
+    await svc._validate_documents(current_user.id, body.doc_ids)
+    await check_quota(db, current_user.id)
 
     async def event_stream():
         full = ""

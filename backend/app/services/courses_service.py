@@ -33,7 +33,7 @@ class CoursesService:
             await self.db.execute(
                 select(Course)
                 .join(CourseMember, CourseMember.course_id == Course.id)
-                .where(CourseMember.user_id == user_id)
+                .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
                 .order_by(desc(Course.created_at))
             )
         ).scalars().all()
@@ -127,6 +127,7 @@ class CoursesService:
         ]
 
     async def course_document_ids(self, user_id: str, course_id: str) -> list[str]:
+        await self._get_course(course_id)
         await self.require_member(user_id, course_id)
         rows = (
             await self.db.execute(
@@ -136,6 +137,7 @@ class CoursesService:
         return list(rows)
 
     async def require_member(self, user_id: str, course_id: str) -> CourseMember:
+        await self._get_course(course_id)
         member = (
             await self.db.execute(
                 select(CourseMember).where(

@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     SECRET_KEY: str = Field(default="dev-secret-change-me")
+    ENVIRONMENT: str = "development"
+    COOKIE_SECURE: bool = False
     DATA_DIR: str = "./data"
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/db/learnai.db"
     CHROMA_PATH: str = "./data/chroma"
@@ -52,3 +54,6 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "dev-secret-change-me":
+    raise RuntimeError("SECRET_KEY must be configured in production")

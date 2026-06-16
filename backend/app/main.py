@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.dependencies import get_db, get_token_from_request, rate_limit
+from app.dependencies import get_db, get_token_from_request, rate_limit, require_admin
 from app.models.database import SessionLocal, init_db
 from app.models.tables import User
 from app.routers import (
@@ -68,9 +68,26 @@ async def health(db: AsyncSession = Depends(get_db)):
     return JSONResponse(report, status_code=status_code)
 
 
+@app.get("/health/ready")
+async def readiness(db: AsyncSession = Depends(get_db)):
+    report = await health_report(db)
+    status_code = 503 if report["status"] == "down" else 200
+    return JSONResponse(report, status_code=status_code)
+
+
 @app.get("/health/live")
 async def liveness():
     return {"status": "ok", "version": "3.0.0"}
+
+
+@app.get("/health/deep")
+async def deep_health(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    report = await health_report(db, include_llm=True)
+    status_code = 503 if report["status"] == "down" else 200
+    return JSONResponse(report, status_code=status_code)
 
 
 @app.websocket("/ws")

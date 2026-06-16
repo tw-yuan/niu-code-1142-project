@@ -13,6 +13,7 @@ export function FlashcardsPage() {
   const [front, setFront] = useState("")
   const [back, setBack] = useState("")
   const [preview, setPreview] = useState("")
+  const [error, setError] = useState("")
   const [streaming, setStreaming] = useState(false)
 
   const dueCards = useMemo(() => {
@@ -25,9 +26,10 @@ export function FlashcardsPage() {
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<FlashcardItem[]>("/flashcards"),
     ])
-    setDocuments(docs.filter((doc) => doc.status === "ready"))
+    const ready = docs.filter((doc) => doc.status === "ready")
+    setDocuments(ready)
     setCards(nextCards)
-    if (!docId && docs[0]) setDocId(docs[0].id)
+    if (!docId && ready[0]) setDocId(ready[0].id)
   }
 
   useEffect(() => {
@@ -37,16 +39,23 @@ export function FlashcardsPage() {
   async function generate() {
     if (!docId || user?.quota_status === "exceeded") return
     setStreaming(true)
+    setError("")
     setPreview("")
     let next = ""
+    let failed = false
     try {
       for await (const event of streamFetch("/flashcards/stream", { doc_id: docId, count: 10 })) {
         if (event.type === "chunk") {
           next += event.content
           setPreview(next)
+        } else if (event.type === "error") {
+          failed = true
+          setError(event.message)
         }
       }
-      await load()
+      if (!failed) await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "閃卡生成失敗")
     } finally {
       setStreaming(false)
     }
@@ -107,6 +116,7 @@ export function FlashcardsPage() {
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <AIGeneratedBadge />
           {preview && <pre className="max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs text-zinc-700">{preview}</pre>}
+          {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           <div className="grid gap-3 sm:grid-cols-2">
             {cards.map((card) => (
               <article key={card.id} className="rounded-lg border border-zinc-200 p-4">

@@ -21,10 +21,10 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-注意：`docker compose up` 會自動套用 `docker-compose.override.yml`，適合開發 hot reload。線上展示建議使用 production compose，避免啟動 Vite dev server：
+預設 compose 會啟動 production-safe 的 Nginx 前端。開發 hot reload 請明確套用 dev compose：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 服務對外使用 `http://localhost:8081`。前端預設使用相對路徑 `/api` 與 `/ws`，所以透過網域進入時不會打到瀏覽器端的 localhost。你的 reverse proxy 可指向：

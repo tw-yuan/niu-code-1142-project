@@ -84,13 +84,19 @@ class RAGService:
         rewritten = await self._rewrite_question(question, history, user_id)
         llm = LLMClient(self.db)
         query_embedding = (await llm.embed([rewritten], user_id=user_id))[0]
-        chunks = await ChromaService().query_chunks(
-            user_id,
-            query_embedding,
-            doc_ids=doc_ids,
-            shared_doc_ids=shared_doc_ids,
-            n_results=5,
-        )
+        query_doc_ids = doc_ids
+        if session.course_id and not query_doc_ids:
+            query_doc_ids = shared_doc_ids
+        if session.course_id and not query_doc_ids:
+            chunks = []
+        else:
+            chunks = await ChromaService().query_chunks(
+                user_id,
+                query_embedding,
+                doc_ids=query_doc_ids,
+                shared_doc_ids=shared_doc_ids,
+                n_results=5,
+            )
         context, citations = self._build_context(chunks, set(shared_doc_ids))
         self._last_citations = citations
 

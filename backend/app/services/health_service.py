@@ -10,14 +10,15 @@ from app.services.llm_client import LLMClient
 from app.tasks.celery_app import celery_app
 
 
-async def health_report(db: AsyncSession) -> dict[str, Any]:
+async def health_report(db: AsyncSession, include_llm: bool = False) -> dict[str, Any]:
     checks = {
         "database": await _timed(_check_database(db)),
         "redis": await _timed(_check_redis()),
         "chroma": await _timed(_check_chroma()),
         "celery": await _timed(_check_celery()),
-        "llm_api": await _timed(_check_llm(db)),
     }
+    if include_llm:
+        checks["llm_api"] = await _timed(_check_llm(db), down_on_error=False)
     statuses = [item["status"] for item in checks.values()]
     if "down" in statuses:
         status = "down"
@@ -28,7 +29,7 @@ async def health_report(db: AsyncSession) -> dict[str, Any]:
     return {"status": status, "version": "3.0.0", "checks": checks}
 
 
-async def _timed(coro) -> dict[str, Any]:
+async def _timed(coro, down_on_error: bool = True) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         data = await asyncio.wait_for(coro, timeout=3)
@@ -38,7 +39,11 @@ async def _timed(coro) -> dict[str, Any]:
         return {"status": "degraded", "latency_ms": 3000, "error": "timeout"}
     except Exception as exc:
         latency = int((time.perf_counter() - started) * 1000)
-        return {"status": "down", "latency_ms": latency, "error": exc.__class__.__name__}
+        return {
+            "status": "down" if down_on_error else "degraded",
+            "latency_ms": latency,
+            "error": exc.__class__.__name__,
+        }
 
 
 async def _check_database(db: AsyncSession) -> dict[str, Any]:

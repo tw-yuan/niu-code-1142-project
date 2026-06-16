@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { apiFetch, AuthResponse, User } from "../lib/api"
+import { wsManager } from "../lib/ws"
 
 interface AuthState {
   user: User | null
@@ -46,6 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await apiFetch("/auth/logout", { method: "POST" }).catch(() => undefined)
     localStorage.removeItem("access_token")
+    wsManager.disconnect()
     set({ user: null })
   },
 }))

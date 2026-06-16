@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { MessageSquarePlus, Send, StopCircle } from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
@@ -18,6 +19,10 @@ export function ChatPage() {
   const [mode, setMode] = useState("enhanced")
   const [streaming, setStreaming] = useState(false)
   const [aborter, setAborter] = useState<AbortController | null>(null)
+  const user = useAuthStore((state) => state.user)
+  const aiDisabled = user?.quota_status === "exceeded"
+  const { sessionId: routeSessionId } = useParams()
+  const navigate = useNavigate()
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId),
@@ -30,18 +35,25 @@ export function ChatPage() {
     apiFetch<CourseItem[]>("/courses").then(setCourses).catch(() => setCourses([]))
   }, [])
 
+  useEffect(() => {
+    if (routeSessionId && routeSessionId !== activeId) {
+      openSession(routeSessionId, false).catch(() => undefined)
+    }
+  }, [routeSessionId])
+
   async function loadSessions() {
     const data = await apiFetch<ChatSession[]>("/chat/sessions")
     setSessions(data)
-    if (!activeId && data[0]) {
+    if (!activeId && !routeSessionId && data[0]) {
       await openSession(data[0].id)
     }
   }
 
-  async function openSession(id: string) {
+  async function openSession(id: string, pushUrl = true) {
     const detail = await apiFetch<ChatSession>(`/chat/sessions/${id}`)
     setActiveId(id)
     setMessages(detail.messages ?? [])
+    if (pushUrl) navigate(`/chat/${id}`)
   }
 
   async function createSession() {
@@ -52,6 +64,7 @@ export function ChatPage() {
     setSessions((prev) => [session, ...prev])
     setActiveId(session.id)
     setMessages([])
+    navigate(`/chat/${session.id}`)
   }
 
   async function sendMessage(event: FormEvent) {
@@ -66,6 +79,7 @@ export function ChatPage() {
       setSessions((prev) => [session, ...prev])
       sessionId = session.id
       setActiveId(session.id)
+      navigate(`/chat/${session.id}`)
     }
     const question = input
     setInput("")
@@ -218,14 +232,14 @@ export function ChatPage() {
               {message.citations && message.citations.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
                   {message.citations.map((citation) => (
-                    <a
+                    <Link
                       key={`${citation.doc_id}-${citation.chunk_index}`}
-                      href={`/documents/${citation.doc_id}`}
+                      to={`/documents/${citation.doc_id}`}
                       className="rounded-lg bg-zinc-100 px-2 py-1 hover:bg-zinc-200"
                     >
                       [{citation.index}] {citation.filename} p.{citation.page}
                       {citation.scope === "course" ? " · 課程" : ""}
-                    </a>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -265,5 +279,3 @@ export function ChatPage() {
     </div>
   )
 }
-  const user = useAuthStore((state) => state.user)
-  const aiDisabled = user?.quota_status === "exceeded"

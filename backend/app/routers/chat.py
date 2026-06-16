@@ -8,6 +8,7 @@ from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import ChatSessionCreate, ChatSessionDetail, ChatSessionOut, MessageRequest
 from app.services.audit_service import AuditService
+from app.services.cost_service import check_quota
 from app.services.rag_service import RAGService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -73,6 +74,8 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
 ):
     rag = RAGService(db)
+    await rag.get_session_detail(current_user.id, session_id)
+    await check_quota(db, current_user.id)
 
     async def event_stream():
         full_content = ""
