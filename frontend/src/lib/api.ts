@@ -87,6 +87,9 @@ export interface Citation {
   chunk_index: number
   scope?: "personal" | "course"
   distance: number
+  snippet?: string
+  retrieval_score?: number | null
+  support_status?: "supported" | "partial" | "unverified" | string
 }
 
 export interface FlashcardItem {
@@ -105,10 +108,73 @@ export interface FlashcardItem {
 export interface QuizItem {
   id: string
   title: string
+  course_id?: string | null
   doc_ids: string[]
   config: Record<string, unknown>
   questions: Array<Record<string, any>>
   created_at: string
+  course_publication?: {
+    id: string
+    course_id: string
+    quiz_id: string
+    title: string
+    status: string
+    due_at: string | null
+    published_at: string
+    created_by: string
+  }
+}
+
+export interface QuizDiagnostic {
+  question_index: number
+  question: string | null
+  submitted_answer: unknown
+  answer: unknown
+  is_correct: boolean
+  explanation?: string | null
+  source_page?: number | null
+}
+
+export interface CourseProgressStudent {
+  user_id: string
+  username: string
+  email: string | null
+  role: string
+  chat_sessions: number
+  chat_messages: number
+  notes: number
+  flashcards: number
+  flashcards_due: number
+  flashcards_mastered: number
+  quizzes: number
+  assigned_quizzes: number
+  quiz_attempts: number
+  quiz_avg_score: number
+  last_activity_at: string | null
+  risk_level: "ok" | "medium" | "high" | string
+}
+
+export interface CourseQuizSummary {
+  course_quiz_id: string
+  quiz_id: string
+  course_id: string
+  title: string
+  due_at: string | null
+  published_at: string
+  student_count: number
+  submission_count: number
+  attempt_count: number
+  score_avg: number
+  weak_items: Array<Record<string, any>>
+  items: Array<Record<string, any>>
+}
+
+export interface CourseProgress {
+  course_id: string
+  document_count: number
+  published_quizzes: number
+  students: CourseProgressStudent[]
+  quiz_summary: CourseQuizSummary[]
 }
 
 export interface NoteItem {

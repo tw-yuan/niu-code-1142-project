@@ -212,6 +212,10 @@ export function DocumentsPage() {
             <div className="space-y-3 p-5">
               {selected.status === "ready" && (
                 <div className="flex flex-wrap gap-2">
+                  <Link className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" to={`/chat?doc=${selected.id}`}>
+                    <MessageSquareText size={16} />
+                    開始對話
+                  </Link>
                   <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/summary/${selected.id}`}>
                     <BookOpenCheck size={16} />
                     摘要
@@ -219,9 +223,11 @@ export function DocumentsPage() {
                   <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/mindmap/${selected.id}`}>
                     心智圖
                   </Link>
-                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to="/chat">
-                    <MessageSquareText size={16} />
-                    對話
+                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/quiz/generate?doc=${selected.id}`}>
+                    生成測驗
+                  </Link>
+                  <Link className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" to={`/flashcards?doc=${selected.id}`}>
+                    建立閃卡
                   </Link>
                   <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50" onClick={loadContent}>
                     <Eye size={16} />

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Info, MessageSquarePlus, Send, StopCircle } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { MarkdownContent } from "../components/app/MarkdownContent"
 import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
@@ -39,6 +39,7 @@ export function ChatPage() {
   const aiDisabled = user?.quota_status === "exceeded"
   const { sessionId: routeSessionId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId),
@@ -53,6 +54,16 @@ export function ChatPage() {
     apiFetch<DocumentItem[]>("/documents").then(setDocuments).catch(() => setDocuments([]))
     apiFetch<CourseItem[]>("/courses").then(setCourses).catch(() => setCourses([]))
   }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const doc = params.get("doc")
+    const course = params.get("course")
+    const nextMode = params.get("mode")
+    if (course) setCourseId(course)
+    if (doc) setSelectedDocs([doc])
+    if (nextMode && modeDescriptions[nextMode]) setMode(nextMode)
+  }, [location.search])
 
   useEffect(() => {
     if (routeSessionId && routeSessionId !== activeId) {
@@ -284,15 +295,25 @@ export function ChatPage() {
                 />
               )}
               {message.citations && message.citations.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+                <div className="mt-2 grid gap-2 text-xs text-zinc-500 sm:grid-cols-2">
                   {message.citations.map((citation) => (
                     <Link
                       key={`${citation.doc_id}-${citation.chunk_index}`}
                       to={`/documents/${citation.doc_id}`}
-                      className="rounded-lg bg-zinc-100 px-2 py-1 hover:bg-zinc-200"
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 hover:bg-zinc-50"
                     >
-                      [{citation.index}] {citation.filename} p.{citation.page}
-                      {citation.scope === "course" ? " · 課程" : ""}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-zinc-700">
+                          [{citation.index}] {citation.filename} p.{citation.page}
+                          {citation.scope === "course" ? " · 課程" : ""}
+                        </span>
+                        <span className={supportClass(citation.support_status)}>
+                          {supportLabel(citation.support_status)}
+                        </span>
+                      </div>
+                      {citation.snippet && (
+                        <div className="mt-1 line-clamp-2 leading-5 text-zinc-500">{citation.snippet}</div>
+                      )}
                     </Link>
                   ))}
                 </div>
@@ -332,4 +353,17 @@ export function ChatPage() {
       </section>
     </div>
   )
+}
+
+function supportLabel(status?: string) {
+  if (status === "supported") return "已支持"
+  if (status === "partial") return "部分"
+  return "待驗證"
+}
+
+function supportClass(status?: string) {
+  const base = "shrink-0 rounded-md px-1.5 py-0.5 text-[11px]"
+  if (status === "supported") return `${base} bg-emerald-50 text-emerald-700`
+  if (status === "partial") return `${base} bg-amber-50 text-amber-700`
+  return `${base} bg-zinc-100 text-zinc-600`
 }

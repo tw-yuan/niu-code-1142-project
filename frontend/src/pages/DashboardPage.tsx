@@ -1,6 +1,7 @@
 import { BrainCircuit, FileText, ListTodo, MessageSquareText, TrendingUp } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api"
 
 export function DashboardPage() {
@@ -37,12 +38,16 @@ export function DashboardPage() {
         </div>
         <div className="divide-y divide-zinc-100">
           {tasks.map((task, index) => (
-            <div key={index} className="px-5 py-3 text-sm">
+            <Link key={index} className="block px-5 py-3 text-sm hover:bg-zinc-50" to={taskHref(task)}>
               <div className="font-medium">{taskLabel(task)}</div>
               <div className="text-xs text-zinc-500">{String(task.doc_title ?? task.type)}</div>
-            </div>
+            </Link>
           ))}
-          {tasks.length === 0 && <div className="px-5 py-8 text-sm text-zinc-500">尚無任務，可先建立學習目標或產生閃卡。</div>}
+          {tasks.length === 0 && (
+            <div className="px-5 py-8 text-sm text-zinc-500">
+              尚無任務。可先從 ready 文件開始對話、生成測驗或建立閃卡。
+            </div>
+          )}
         </div>
       </section>
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -51,12 +56,26 @@ export function DashboardPage() {
         </div>
         <div className="divide-y divide-zinc-100">
           {documents.slice(0, 6).map((doc) => (
-            <div key={doc.id} className="flex items-center justify-between px-5 py-3">
+            <div key={doc.id} className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-sm font-medium">{doc.filename}</div>
                 <div className="text-xs text-zinc-500">{doc.file_type}</div>
               </div>
-              <span className="rounded-lg bg-zinc-100 px-2 py-1 text-xs text-zinc-600">{doc.status}</span>
+              {doc.status === "ready" ? (
+                <div className="flex flex-wrap gap-2">
+                  <Link className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700" to={`/chat?doc=${doc.id}`}>
+                    對話
+                  </Link>
+                  <Link className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50" to={`/quiz/generate?doc=${doc.id}`}>
+                    測驗
+                  </Link>
+                  <Link className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50" to={`/documents/${doc.id}`}>
+                    查看
+                  </Link>
+                </div>
+              ) : (
+                <span className="w-fit rounded-lg bg-zinc-100 px-2 py-1 text-xs text-zinc-600">{doc.status}</span>
+              )}
             </div>
           ))}
           {documents.length === 0 && <div className="px-5 py-8 text-sm text-zinc-500">尚無文件</div>}
@@ -71,6 +90,13 @@ function taskLabel(task: Record<string, any>) {
   if (task.type === "read_summary") return "閱讀或生成摘要"
   if (task.type === "take_quiz") return `完成 ${task.suggested_count ?? 5} 題測驗`
   return String(task.type)
+}
+
+function taskHref(task: Record<string, any>) {
+  if (task.type === "flashcard_review") return "/flashcards?review=1"
+  if (task.type === "read_summary" && task.doc_id) return `/summary/${task.doc_id}`
+  if (task.type === "take_quiz" && task.doc_id) return `/quiz/generate?doc=${task.doc_id}`
+  return "/documents"
 }
 
 function Metric({

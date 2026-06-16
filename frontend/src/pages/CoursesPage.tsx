@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from "react"
 import { BookOpen, Copy, LogOut, Plus, Users } from "lucide-react"
-import { ApiError, apiFetch, CourseItem, DocumentItem } from "../lib/api"
+import { Link } from "react-router-dom"
+import { ApiError, apiFetch, CourseItem, CourseProgress, CourseProgressStudent, DocumentItem } from "../lib/api"
 import { useAuthStore } from "../store/auth"
 
 export function CoursesPage() {
   type CourseMember = { user_id: string; username: string; email: string | null; role: string; joined_at: string }
-  type CourseProgress = { user_id: string; username: string; email: string | null; role: string; chat_sessions: number; chat_messages: number; notes: number; flashcards: number; quizzes: number; last_activity_at: string | null }
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [selected, setSelected] = useState<CourseItem | null>(null)
@@ -15,7 +15,8 @@ export function CoursesPage() {
   const [joinCode, setJoinCode] = useState("")
   const [docId, setDocId] = useState("")
   const [members, setMembers] = useState<CourseMember[]>([])
-  const [progress, setProgress] = useState<CourseProgress[]>([])
+  const [progress, setProgress] = useState<CourseProgressStudent[]>([])
+  const [quizSummary, setQuizSummary] = useState<CourseProgress["quiz_summary"]>([])
   const [progressError, setProgressError] = useState("")
   const user = useAuthStore((state) => state.user)
   const canManage = selected?.role === "instructor"
@@ -35,19 +36,20 @@ export function CoursesPage() {
     const course = await apiFetch<CourseItem>(`/courses/${id}`)
     const nextMembers = await apiFetch<CourseMember[]>(`/courses/${id}/members`)
     setProgressError("")
-    const nextProgress = await apiFetch<{ students: CourseProgress[] }>(`/courses/${id}/progress`).catch((err) => {
+    const nextProgress = await apiFetch<CourseProgress>(`/courses/${id}/progress`).catch((err) => {
       if (err instanceof ApiError && err.status === 403) {
         setProgressError("僅教師可查看")
       } else {
         setProgressError("進度載入失敗")
       }
-      return { students: [] }
+      return { course_id: id, document_count: 0, published_quizzes: 0, students: [], quiz_summary: [] }
     })
     setSelected(course)
     setCourseTitle(course.title)
     setCourseDescription(course.description ?? "")
     setMembers(nextMembers)
     setProgress(nextProgress.students)
+    setQuizSummary(nextProgress.quiz_summary)
   }
 
   useEffect(() => {
@@ -244,9 +246,11 @@ export function CoursesPage() {
                           </div>
                         </div>
                         <div className="text-right text-xs text-zinc-500">
-                          測驗 {item.quizzes}
+                          <span className={riskClass(item.risk_level)}>{riskLabel(item.risk_level)}</span>
                           <br />
-                          閃卡 {item.flashcards}
+                          測驗 {item.quizzes}/{item.assigned_quizzes} · {Math.round(item.quiz_avg_score * 100)}%
+                          <br />
+                          閃卡 {item.flashcards_mastered}/{item.flashcards}
                         </div>
                       </div>
                     ))}
@@ -267,18 +271,44 @@ export function CoursesPage() {
               )}
               <div className="divide-y divide-zinc-100">
                 {(selected.documents ?? []).map((doc) => (
-                  <div key={doc.id} className="flex items-center justify-between py-3 text-sm">
+                  <div key={doc.id} className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="font-medium">{doc.filename}</div>
                       <div className="text-xs text-zinc-500">{doc.status}</div>
                     </div>
-                    {canManage && (
-                      <button className="text-xs text-red-600" onClick={() => removeDocument(doc.id)}>移除</button>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Link className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50" to={`/chat?course=${selected.id}&doc=${doc.id}`}>對話</Link>
+                      {canManage && (
+                        <Link className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50" to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}>發布測驗</Link>
+                      )}
+                      {canManage && (
+                        <button className="text-xs text-red-600" onClick={() => removeDocument(doc.id)}>移除</button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {(selected.documents ?? []).length === 0 && <div className="py-8 text-sm text-zinc-500">尚無課程文件</div>}
               </div>
+              {quizSummary.length > 0 && (
+                <section className="mt-5 rounded-lg border border-zinc-200">
+                  <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">測驗弱點</div>
+                  <div className="divide-y divide-zinc-100">
+                    {quizSummary.map((quiz) => (
+                      <div key={quiz.course_quiz_id} className="px-3 py-3 text-sm">
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <div className="font-medium">{quiz.title}</div>
+                          <div className="text-xs text-zinc-500">提交 {quiz.submission_count}/{quiz.student_count} · 平均 {Math.round(quiz.score_avg * 100)}%</div>
+                        </div>
+                        {quiz.weak_items.slice(0, 3).map((item) => (
+                          <div key={String(item.question_index)} className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            第 {Number(item.question_index) + 1} 題答對率 {Math.round(Number(item.correct_rate ?? 0) * 100)}%：{String(item.question ?? "")}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           ) : (
             <div className="text-sm text-zinc-500">選擇或建立課程</div>
@@ -287,4 +317,17 @@ export function CoursesPage() {
       </div>
     </div>
   )
+}
+
+function riskLabel(risk: string) {
+  if (risk === "high") return "高風險"
+  if (risk === "medium") return "待關注"
+  return "正常"
+}
+
+function riskClass(risk: string) {
+  const base = "rounded-md px-1.5 py-0.5"
+  if (risk === "high") return `${base} bg-red-50 text-red-600`
+  if (risk === "medium") return `${base} bg-amber-50 text-amber-700`
+  return `${base} bg-emerald-50 text-emerald-700`
 }

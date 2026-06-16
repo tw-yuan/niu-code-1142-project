@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { BrainCircuit, Plus, Wand2 } from "lucide-react"
+import { useLocation } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
 import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
@@ -15,6 +16,11 @@ export function FlashcardsPage() {
   const [preview, setPreview] = useState("")
   const [error, setError] = useState("")
   const [streaming, setStreaming] = useState(false)
+  const [reviewMode, setReviewMode] = useState(false)
+  const [reviewIndex, setReviewIndex] = useState(0)
+  const [reviewed, setReviewed] = useState(0)
+  const [remembered, setRemembered] = useState(0)
+  const location = useLocation()
 
   const dueCards = useMemo(() => {
     const now = new Date().toISOString()
@@ -35,6 +41,13 @@ export function FlashcardsPage() {
   useEffect(() => {
     load().catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const doc = params.get("doc")
+    if (doc) setDocId(doc)
+    if (params.get("review") === "1") setReviewMode(true)
+  }, [location.search])
 
   async function generate() {
     if (!docId || user?.quota_status === "exceeded") return
@@ -78,8 +91,13 @@ export function FlashcardsPage() {
       method: "POST",
       body: JSON.stringify({ quality }),
     })
+    setReviewed((prev) => prev + 1)
+    if (quality >= 3) setRemembered((prev) => prev + 1)
+    setReviewIndex((prev) => prev + 1)
     await load()
   }
+
+  const activeReviewCard = dueCards[reviewIndex]
 
   return (
     <div>
@@ -87,6 +105,44 @@ export function FlashcardsPage() {
         <h1 className="text-2xl font-semibold">閃卡</h1>
         <p className="mt-1 text-sm text-zinc-500">待複習 {dueCards.length} 張</p>
       </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-zinc-300" onClick={() => {
+          setReviewMode(true)
+          setReviewIndex(0)
+          setReviewed(0)
+          setRemembered(0)
+        }} disabled={dueCards.length === 0}>
+          開始今日複習
+        </button>
+        {reviewMode && (
+          <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => setReviewMode(false)}>
+            回到列表
+          </button>
+        )}
+      </div>
+      {reviewMode && (
+        <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          {activeReviewCard ? (
+            <div>
+              <div className="mb-2 text-xs text-zinc-500">第 {reviewIndex + 1} / {dueCards.length} 張</div>
+              <div className="text-lg font-semibold">{activeReviewCard.front}</div>
+              <div className="mt-4 whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-6 text-zinc-700">{activeReviewCard.back}</div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {[1, 3, 5].map((quality) => (
+                  <button key={quality} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => review(activeReviewCard.id, quality)}>
+                    {quality === 1 ? "忘記" : quality === 3 ? "普通" : "熟悉"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="text-lg font-semibold">今日複習完成</div>
+              <div className="mt-2 text-sm text-zinc-600">已複習 {reviewed} 張，熟悉 {remembered} 張。</div>
+            </div>
+          )}
+        </section>
+      )}
       <div className="mb-6 grid gap-4 lg:grid-cols-[360px_1fr]">
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">生成與新增</h2>

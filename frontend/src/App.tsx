@@ -37,8 +37,8 @@ export default function App() {
         <Route path="/chat/:sessionId" element={<ChatPage />} />
         <Route path="/quiz" element={<QuizPage />} />
         <Route path="/quiz/generate" element={<QuizPage />} />
-        <Route path="/quiz/:id" element={<QuizPage />} />
         <Route path="/quiz/wrongbook" element={<QuizPage />} />
+        <Route path="/quiz/:id" element={<QuizPage />} />
         <Route path="/flashcards" element={<FlashcardsPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/courses" element={<CoursesPage />} />
