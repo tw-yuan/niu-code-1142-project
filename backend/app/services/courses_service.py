@@ -165,6 +165,11 @@ class CoursesService:
         if existing is None:
             self.db.add(CourseDocument(course_id=course_id, doc_id=body.doc_id))
             await self.db.commit()
+        elif not existing.is_active:
+            existing.is_active = 1
+            existing.removed_at = None
+            existing.removed_by = None
+            await self.db.commit()
         return {"ok": True}
 
     async def remove_document(self, user_id: str, course_id: str, doc_id: str) -> None:
@@ -178,7 +183,9 @@ class CoursesService:
         ).scalar_one_or_none()
         if item is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found")
-        await self.db.delete(item)
+        item.is_active = 0
+        item.removed_at = now_iso()
+        item.removed_by = user_id
         await self.db.commit()
 
     async def update_member_role(
@@ -726,7 +733,13 @@ class CoursesService:
             await self.db.execute(
                 select(CourseDocument.doc_id)
                 .join(Document, Document.id == CourseDocument.doc_id)
-                .where(and_(CourseDocument.course_id == course_id, Document.status == "ready"))
+                .where(
+                    and_(
+                        CourseDocument.course_id == course_id,
+                        CourseDocument.is_active == 1,
+                        Document.status == "ready",
+                    )
+                )
             )
         ).scalars().all()
         return list(rows)
@@ -841,6 +854,7 @@ class CoursesService:
                         and_(
                             CourseDocument.course_id == course_id,
                             CourseDocument.doc_id == doc_id,
+                            CourseDocument.is_active == 1,
                             Document.status == "ready",
                         )
                     )
@@ -1058,24 +1072,30 @@ class CoursesService:
             "created_at": course.created_at,
         }
         if include_detail:
+            doc_conditions = [CourseDocument.course_id == course.id]
+            if course.owner_id != user_id and member.role not in {"instructor", "ta"}:
+                doc_conditions.extend([CourseDocument.is_active == 1, Document.status == "ready"])
             docs = (
                 await self.db.execute(
-                    select(Document)
+                    select(Document, CourseDocument)
                     .join(CourseDocument, CourseDocument.doc_id == Document.id)
-                    .where(CourseDocument.course_id == course.id)
+                    .where(and_(*doc_conditions))
                     .order_by(desc(CourseDocument.added_at))
                 )
-            ).scalars().all()
+            ).all()
             data["documents"] = [
                 {
                     "id": doc.id,
                     "filename": doc.filename,
                     "status": doc.status,
+                    "course_status": "active" if course_doc.is_active else "removed",
                     "page_count": doc.page_count,
                     "chunk_count": doc.chunk_count,
                     "created_at": doc.created_at,
+                    "added_at": course_doc.added_at,
+                    "removed_at": course_doc.removed_at,
                 }
-                for doc in docs
+                for doc, course_doc in docs
             ]
         return data
 

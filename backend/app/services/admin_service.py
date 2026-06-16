@@ -464,7 +464,10 @@ class AdminService:
             )
             .join(User, User.id == Course.owner_id)
             .outerjoin(CourseMember, CourseMember.course_id == Course.id)
-            .outerjoin(CourseDocument, CourseDocument.course_id == Course.id)
+            .outerjoin(
+                CourseDocument,
+                and_(CourseDocument.course_id == Course.id, CourseDocument.is_active == 1),
+            )
             .group_by(Course.id, User.username)
         )
         count_stmt = select(func.count(Course.id))
@@ -519,7 +522,7 @@ class AdminService:
         ).all()
         docs = (
             await self.db.execute(
-                select(Document, User.username)
+                select(Document, User.username, CourseDocument)
                 .join(CourseDocument, CourseDocument.doc_id == Document.id)
                 .join(User, User.id == Document.user_id)
                 .where(CourseDocument.course_id == course_id)
@@ -552,11 +555,14 @@ class AdminService:
                     "username": username,
                     "filename": doc.filename,
                     "status": doc.status,
+                    "course_status": "active" if course_doc.is_active else "removed",
                     "page_count": doc.page_count,
                     "chunk_count": doc.chunk_count,
                     "created_at": doc.created_at,
+                    "added_at": course_doc.added_at,
+                    "removed_at": course_doc.removed_at,
                 }
-                for doc, username in docs
+                for doc, username, course_doc in docs
             ],
         }
 
@@ -708,6 +714,11 @@ class AdminService:
         if existing is None:
             self.db.add(CourseDocument(course_id=course_id, doc_id=body.doc_id))
             await self.db.commit()
+        elif not existing.is_active:
+            existing.is_active = 1
+            existing.removed_at = None
+            existing.removed_by = None
+            await self.db.commit()
         await AuditService(self.db).log(
             "admin.course_document_add",
             user_id=actor_id,
@@ -733,7 +744,9 @@ class AdminService:
         ).scalar_one_or_none()
         if item is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found")
-        await self.db.delete(item)
+        item.is_active = 0
+        item.removed_at = now_iso()
+        item.removed_by = actor_id
         await self.db.commit()
         await AuditService(self.db).log(
             "admin.course_document_remove",

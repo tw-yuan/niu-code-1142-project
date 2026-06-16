@@ -35,6 +35,7 @@ export function DocumentsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [consentLoading, setConsentLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const [consented, setConsented] = useState(false);
@@ -206,6 +207,26 @@ export function DocumentsPage() {
     }
   }
 
+  async function archiveDocument(docId: string) {
+    setArchivingId(docId);
+    try {
+      await apiFetch(`/documents/${docId}/archive`, { method: "POST" });
+      await loadDocuments();
+    } finally {
+      setArchivingId(null);
+    }
+  }
+
+  async function restoreDocument(docId: string) {
+    setArchivingId(docId);
+    try {
+      await apiFetch(`/documents/${docId}/restore`, { method: "POST" });
+      await loadDocuments();
+    } finally {
+      setArchivingId(null);
+    }
+  }
+
   async function deleteSelectedDocuments() {
     if (selectedOwnedDocs.length === 0) return;
     setBatchDeleting(true);
@@ -345,10 +366,13 @@ export function DocumentsPage() {
                   <div className="text-xs text-zinc-500">
                     {doc.page_count ?? 0} 頁 · {doc.chunk_count ?? 0} chunks
                     {doc.user_id !== user?.id ? " · 課程共享" : ""}
+                    {doc.course_status === "removed" ? " · 已移出課程" : ""}
                   </div>
                 </div>
               </button>
-              <span className={statusClass(doc.status)}>{doc.status}</span>
+              <span className={statusClass(doc.status)}>
+                {statusLabel(doc.status)}
+              </span>
               <div className="text-right text-zinc-500">
                 {formatBytes(doc.file_size)}
               </div>
@@ -486,7 +510,9 @@ export function DocumentsPage() {
                 </div>
                 {selected.user_id !== user?.id && (
                   <div className="mt-2 inline-flex rounded-md bg-indigo-50 px-2 py-1 text-xs text-indigo-700">
-                    課程共享文件
+                    {selected.course_status === "removed"
+                      ? "已移出課程"
+                      : "課程共享文件"}
                   </div>
                 )}
               </div>
@@ -591,15 +617,39 @@ export function DocumentsPage() {
                   </div>
                 )}
                 {selected.user_id === user?.id && (
-                  <LoadingButton
-                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-                    onClick={() => deleteDocument(selected.id)}
-                    loading={deletingId === selected.id}
-                    loadingText="刪除中"
-                    icon={<Trash2 size={16} />}
-                  >
-                    刪除文件
-                  </LoadingButton>
+                  <div className="flex flex-wrap gap-2">
+                    {selected.status === "archived" ? (
+                      <LoadingButton
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => restoreDocument(selected.id)}
+                        loading={archivingId === selected.id}
+                        loadingText="還原中"
+                        icon={<RefreshCw size={16} />}
+                      >
+                        還原文件
+                      </LoadingButton>
+                    ) : (
+                      <LoadingButton
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => archiveDocument(selected.id)}
+                        loading={archivingId === selected.id}
+                        loadingText="封存中"
+                        icon={<RefreshCw size={16} />}
+                        disabled={selected.status !== "ready"}
+                      >
+                        封存文件
+                      </LoadingButton>
+                    )}
+                    <LoadingButton
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                      onClick={() => deleteDocument(selected.id)}
+                      loading={deletingId === selected.id}
+                      loadingText="刪除中"
+                      icon={<Trash2 size={16} />}
+                    >
+                      刪除文件
+                    </LoadingButton>
+                  </div>
                 )}
               </div>
             </div>
@@ -654,8 +704,16 @@ interface CoverageChapter {
 function statusClass(status: string) {
   const base = "inline-flex w-fit rounded-lg px-2 py-1 text-xs";
   if (status === "ready") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "archived") return `${base} bg-zinc-100 text-zinc-600`;
   if (status === "error") return `${base} bg-red-50 text-red-600`;
   return `${base} bg-indigo-50 text-indigo-700`;
+}
+
+function statusLabel(status: string) {
+  if (status === "ready") return "可用";
+  if (status === "archived") return "封存";
+  if (status === "error") return "錯誤";
+  return status;
 }
 
 function formatBytes(bytes: number) {

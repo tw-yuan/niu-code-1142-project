@@ -1265,53 +1265,61 @@ export function CoursesPage() {
                         <div className="font-medium">{doc.filename}</div>
                         <div className="text-xs text-zinc-500">
                           {doc.status}
+                          {doc.course_status === "removed" ? " · 已移除" : ""}
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                          to={`/chat?course=${selected.id}&doc=${doc.id}`}
-                        >
-                          <MessageSquareText size={13} />
-                          對話
-                        </Link>
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                          to={`/summary/${doc.id}`}
-                        >
-                          <BookOpen size={13} />
-                          摘要
-                        </Link>
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                          to={`/mindmap/${doc.id}`}
-                        >
-                          <Network size={13} />
-                          心智圖
-                        </Link>
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                          to={`/flashcards?doc=${doc.id}`}
-                        >
-                          <BrainCircuit size={13} />
-                          閃卡
-                        </Link>
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                          to={`/notes?doc=${doc.id}`}
-                        >
-                          <NotebookPen size={13} />
-                          筆記
-                        </Link>
-                        {canManage && (
-                          <Link
-                            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                            to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}
-                          >
-                            發布測驗
-                          </Link>
-                        )}
-                        {canManage && (
+                        {doc.course_status !== "removed" &&
+                          doc.status === "ready" && (
+                            <>
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/chat?course=${selected.id}&doc=${doc.id}`}
+                              >
+                                <MessageSquareText size={13} />
+                                對話
+                              </Link>
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/summary/${doc.id}`}
+                              >
+                                <BookOpen size={13} />
+                                摘要
+                              </Link>
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/mindmap/${doc.id}`}
+                              >
+                                <Network size={13} />
+                                心智圖
+                              </Link>
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/flashcards?doc=${doc.id}`}
+                              >
+                                <BrainCircuit size={13} />
+                                閃卡
+                              </Link>
+                              <Link
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/notes?doc=${doc.id}`}
+                              >
+                                <NotebookPen size={13} />
+                                筆記
+                              </Link>
+                            </>
+                          )}
+                        {canManage &&
+                          doc.course_status !== "removed" &&
+                          doc.status === "ready" && (
+                            <Link
+                              className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                              to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}
+                            >
+                              發布測驗
+                            </Link>
+                          )}
+                        {canManage && doc.course_status !== "removed" && (
                           <LoadingButton
                             className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400"
                             onClick={() => removeDocument(doc.id)}

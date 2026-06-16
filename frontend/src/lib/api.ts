@@ -39,6 +39,7 @@ export interface DocumentItem {
   page_count: number | null;
   chunk_count: number | null;
   error_msg: string | null;
+  course_status?: "active" | "removed" | string;
   created_at: string;
   updated_at: string;
 }
@@ -328,7 +329,13 @@ export interface CourseItem {
   documents?: Array<
     Pick<
       DocumentItem,
-      "id" | "filename" | "status" | "page_count" | "chunk_count" | "created_at"
+      | "id"
+      | "filename"
+      | "status"
+      | "course_status"
+      | "page_count"
+      | "chunk_count"
+      | "created_at"
     >
   >;
 }

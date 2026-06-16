@@ -424,7 +424,10 @@ class CourseDocument(Base):
     doc_id: Mapped[str] = mapped_column(
         String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
     )
+    is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     added_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    removed_at: Mapped[str | None] = mapped_column(String)
+    removed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class LegalConsent(Base):

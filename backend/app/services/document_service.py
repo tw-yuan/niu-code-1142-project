@@ -6,7 +6,16 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import ChatMessage, ChatSession, Document, Flashcard, Quiz, QuizAttempt
+from app.models.tables import (
+    ChatMessage,
+    ChatSession,
+    CourseDocument,
+    Document,
+    Flashcard,
+    Quiz,
+    QuizAttempt,
+    now_iso,
+)
 from app.services.chroma_service import ChromaService
 from app.services.document_access import DocumentAccessService
 from app.services.storage import (
@@ -97,6 +106,40 @@ class DocumentService:
         await self.db.delete(doc)
         await self.db.commit()
         remove_document_dir(user_id, doc_id)
+
+    async def archive_document(self, user_id: str, doc_id: str) -> Document:
+        doc = await self.get_owned_document(user_id, doc_id)
+        if doc.status in {"uploading", "converting", "ocr_processing", "embedding"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is processing")
+        if doc.status not in {"ready", "archived"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only ready documents can be archived",
+            )
+        if doc.status != "archived":
+            doc.status = "archived"
+            doc.updated_at = now_iso()
+            removed_at = now_iso()
+            course_docs = (
+                await self.db.execute(select(CourseDocument).where(CourseDocument.doc_id == doc_id))
+            ).scalars().all()
+            for course_doc in course_docs:
+                course_doc.is_active = 0
+                course_doc.removed_at = removed_at
+                course_doc.removed_by = user_id
+            await self.db.commit()
+            await self.db.refresh(doc)
+        return doc
+
+    async def restore_document(self, user_id: str, doc_id: str) -> Document:
+        doc = await self.get_owned_document(user_id, doc_id)
+        if doc.status != "archived":
+            return doc
+        doc.status = "ready"
+        doc.updated_at = now_iso()
+        await self.db.commit()
+        await self.db.refresh(doc)
+        return doc
 
     async def page_path(self, user_id: str, doc_id: str, page_num: int) -> Path:
         doc = await self.get_document(user_id, doc_id)

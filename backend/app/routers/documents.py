@@ -110,6 +110,40 @@ async def delete_document(
     return {"ok": True}
 
 
+@router.post("/{doc_id}/archive", response_model=DocumentOut)
+async def archive_document(
+    doc_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await DocumentService(db).archive_document(current_user.id, doc_id)
+    await AuditService(db).log(
+        "document.archive",
+        user_id=current_user.id,
+        resource=f"document:{doc_id}",
+        request=request,
+    )
+    return doc
+
+
+@router.post("/{doc_id}/restore", response_model=DocumentOut)
+async def restore_document(
+    doc_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await DocumentService(db).restore_document(current_user.id, doc_id)
+    await AuditService(db).log(
+        "document.restore",
+        user_id=current_user.id,
+        resource=f"document:{doc_id}",
+        request=request,
+    )
+    return doc
+
+
 @router.get("/{doc_id}/status", response_model=DocumentOut)
 async def get_status(
     doc_id: str,
