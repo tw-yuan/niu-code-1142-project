@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Citation } from "../../lib/api"
 import { StreamEvent } from "../../lib/stream"
+import { MarkdownContent } from "./MarkdownContent"
 
 interface Props {
   stream: AsyncGenerator<StreamEvent>
@@ -36,10 +37,9 @@ export function StreamingText({ stream, onCitations, onComplete }: Props) {
   }, [stream, onCitations, onComplete])
 
   return (
-    <div className="prose prose-zinc max-w-none whitespace-pre-wrap text-sm leading-7">
-      {content}
+    <div className="text-sm leading-7">
+      <MarkdownContent className="text-sm leading-7">{content}</MarkdownContent>
       {isStreaming && <span className="animate-pulse">|</span>}
     </div>
   )
 }
-

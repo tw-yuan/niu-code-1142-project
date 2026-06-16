@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react"
 import { Download, NotebookPen, Plus } from "lucide-react"
-import ReactMarkdown from "react-markdown"
+import { MarkdownContent } from "../components/app/MarkdownContent"
 import { BASE_URL, apiFetch, DocumentItem, NoteItem, refreshToken } from "../lib/api"
 
 export function NotesPage() {
@@ -91,9 +91,7 @@ export function NotesPage() {
                 </div>
                 <button className="text-xs text-red-600" onClick={() => deleteNote(note.id)}>刪除</button>
               </div>
-              <div className="prose prose-zinc max-w-none text-sm">
-                <ReactMarkdown>{note.content}</ReactMarkdown>
-              </div>
+              <MarkdownContent className="text-sm">{note.content}</MarkdownContent>
             </article>
           ))}
           {notes.length === 0 && <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">尚無筆記</div>}

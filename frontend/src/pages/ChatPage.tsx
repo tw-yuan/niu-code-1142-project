@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { MessageSquarePlus, Send, StopCircle } from "lucide-react"
-import ReactMarkdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { MarkdownContent } from "../components/app/MarkdownContent"
 import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
 import { useAuthStore } from "../store/auth"
@@ -216,9 +216,7 @@ export function ChatPage() {
                 ].join(" ")}
               >
                 {message.role === "assistant" ? (
-                  <div className="prose prose-zinc max-w-none text-sm">
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
-                  </div>
+                  <MarkdownContent className="text-sm">{message.content}</MarkdownContent>
                 ) : (
                   <div className="whitespace-pre-wrap">{message.content}</div>
                 )}
