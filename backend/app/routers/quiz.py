@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import QuizAttemptRequest, QuizStreamRequest
 from app.services.learning_service import LearningService
@@ -12,7 +12,7 @@ from app.services.learning_service import LearningService
 router = APIRouter(prefix="/quiz", tags=["quiz"])
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[rate_limit("quiz_stream", 5, 3600)])
 async def stream_quiz(
     body: QuizStreamRequest,
     current_user: User = Depends(get_current_user),
@@ -95,4 +95,3 @@ async def get_attempts(
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, require_admin
@@ -21,10 +21,10 @@ async def list_users(
 async def update_user(
     user_id: str,
     body: AdminUserUpdate,
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).update_user(user_id, body)
+    return await AdminService(db).update_user(user_id, body, actor_id=current_user.id)
 
 
 @router.get("/stats")
@@ -46,8 +46,45 @@ async def get_config(
 @router.put("/config")
 async def update_config(
     body: AdminConfigUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).update_llm_config(body, actor_id=current_user.id)
+
+
+@router.get("/stats/cost")
+async def cost_stats(
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).update_llm_config(body)
+    return await AdminService(db).cost_stats()
 
+
+@router.get("/stats/reliability")
+async def reliability_stats(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).reliability_stats()
+
+
+@router.get("/audit-logs")
+async def audit_logs(
+    user_id: str | None = None,
+    action: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).audit_logs(user_id, action, from_date, to_date, limit, offset)
+
+
+@router.get("/deletions")
+async def deletion_status(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).deletion_status()

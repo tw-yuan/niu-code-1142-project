@@ -1,22 +1,32 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import DocumentOut
+from app.services.audit_service import AuditService
 from app.services.document_service import DocumentService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-@router.post("/upload", response_model=DocumentOut)
+@router.post("/upload", response_model=DocumentOut, dependencies=[rate_limit("documents_upload", 10, 3600)])
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await DocumentService(db).upload(current_user.id, file)
+    doc = await DocumentService(db).upload(current_user.id, file)
+    await AuditService(db).log(
+        "document.upload",
+        user_id=current_user.id,
+        resource=f"document:{doc.id}",
+        request=request,
+        detail={"filename": doc.filename, "file_size": doc.file_size, "file_type": doc.file_type},
+    )
+    return doc
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -39,10 +49,17 @@ async def get_document(
 @router.delete("/{doc_id}")
 async def delete_document(
     doc_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await DocumentService(db).delete_document(current_user.id, doc_id)
+    await AuditService(db).log(
+        "document.delete",
+        user_id=current_user.id,
+        resource=f"document:{doc_id}",
+        request=request,
+    )
     return {"ok": True}
 
 
@@ -64,4 +81,3 @@ async def get_page_image(
 ):
     path = await DocumentService(db).page_path(current_user.id, doc_id, page_num)
     return FileResponse(path, media_type="image/png")
-

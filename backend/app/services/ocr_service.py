@@ -3,6 +3,8 @@ import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.tables import now_iso
 from app.services.llm_client import LLMClient
 from app.services.prompt_loader import load_ocr_prompt
@@ -13,11 +15,12 @@ async def ocr_document(
     cache_path: str,
     user_id: str,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+    db: AsyncSession | None = None,
 ) -> str:
     cache_file = Path(cache_path)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     cache = _load_cache(cache_file)
-    llm = LLMClient()
+    llm = LLMClient(db)
     prompt = load_ocr_prompt()
     texts: list[str] = []
 
@@ -43,4 +46,3 @@ def _load_cache(path: Path) -> dict[str, dict[str, str]]:
 
 def _save_cache(path: Path, cache: dict[str, dict[str, str]]) -> None:
     path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
-

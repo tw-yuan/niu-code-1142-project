@@ -63,7 +63,7 @@ async def _process_async(doc_id: str, user_id: str) -> None:
                 )
 
             full_text = await ocr_service.ocr_document(
-                image_paths, str(cache_path), user_id, on_progress
+                image_paths, str(cache_path), user_id, on_progress, db=db
             )
 
             await _update_status(db, doc, "embedding")

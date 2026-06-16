@@ -1,14 +1,17 @@
 import asyncio
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.dependencies import get_token_from_request
+from app.dependencies import get_db, get_token_from_request
 from app.models.database import SessionLocal, init_db
 from app.models.tables import User
 from app.routers import admin, auth, chat, documents, flashcards, mindmap, quiz, summary
+from app.services.health_service import health_report
 from app.services.security import decode_token
 from app.services.ws_manager import subscribe_user
 
@@ -38,8 +41,15 @@ async def on_startup() -> None:
 
 
 @app.get("/health")
-async def health():
-    return {"ok": True}
+async def health(db: AsyncSession = Depends(get_db)):
+    report = await health_report(db)
+    status_code = 503 if report["status"] == "down" else 200
+    return JSONResponse(report, status_code=status_code)
+
+
+@app.get("/health/live")
+async def liveness():
+    return {"status": "ok", "version": "3.0.0"}
 
 
 @app.websocket("/ws")

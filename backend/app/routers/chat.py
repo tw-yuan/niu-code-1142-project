@@ -1,12 +1,13 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
 from app.schemas import ChatSessionCreate, ChatSessionDetail, ChatSessionOut, MessageRequest
+from app.services.audit_service import AuditService
 from app.services.rag_service import RAGService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -15,10 +16,19 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("/sessions", response_model=ChatSessionOut)
 async def create_session(
     body: ChatSessionCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await RAGService(db).create_session(current_user.id, body)
+    session = await RAGService(db).create_session(current_user.id, body)
+    await AuditService(db).log(
+        "chat.session.create",
+        user_id=current_user.id,
+        resource=f"chat_session:{session['id']}",
+        request=request,
+        detail={"doc_ids": body.doc_ids, "course_id": body.course_id, "mode": body.mode},
+    )
+    return session
 
 
 @router.get("/sessions", response_model=list[ChatSessionOut])
@@ -41,14 +51,21 @@ async def get_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await RAGService(db).delete_session(current_user.id, session_id)
+    await AuditService(db).log(
+        "chat.session.delete",
+        user_id=current_user.id,
+        resource=f"chat_session:{session_id}",
+        request=request,
+    )
     return {"ok": True}
 
 
-@router.post("/sessions/{session_id}/message")
+@router.post("/sessions/{session_id}/message", dependencies=[rate_limit("chat_message", 30, 600)])
 async def send_message(
     session_id: str,
     body: MessageRequest,
@@ -82,4 +99,3 @@ async def send_message(
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-

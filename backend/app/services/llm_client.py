@@ -3,12 +3,14 @@ import json
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from openai import AsyncOpenAI
+from fastapi import HTTPException
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.tables import AdminConfig, TokenUsage
+from app.models.tables import AdminConfig, SystemEvent, TokenUsage
+from app.services.cost_service import check_quota
 
 
 class LLMClient:
@@ -29,15 +31,25 @@ class LLMClient:
         feature: str = "chat",
         user_id: str | None = None,
     ) -> str:
-        config = await self._get_config("chat")
-        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        kwargs = self._chat_kwargs(config, temperature, max_tokens, response_format)
-        response = await self._with_retry(
-            lambda: client.chat.completions.create(model=config["model"], messages=messages, **kwargs)
+        await check_quota(self.db, user_id)
+        providers = await self._get_providers("chat")
+        response, provider = await self._call_with_fallback(
+            "chat",
+            providers,
+            lambda cfg: AsyncOpenAI(
+                base_url=cfg["base_url"],
+                api_key=cfg["api_key"],
+                timeout=cfg.get("timeout", 10),
+            )
+            .chat.completions.create(
+                model=cfg["model"],
+                messages=messages,
+                **self._chat_kwargs(cfg, temperature, max_tokens, response_format),
+            ),
         )
         content = response.choices[0].message.content or ""
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
-        await self._record_usage(user_id, feature, tokens, config["model"])
+        await self._record_usage(user_id, feature, tokens, provider["model"])
         return content
 
     async def stream_chat(
@@ -49,13 +61,22 @@ class LLMClient:
         feature: str = "chat",
         user_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        config = await self._get_config("chat")
-        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        kwargs = self._chat_kwargs(config, temperature, max_tokens, response_format)
-        stream = await self._with_retry(
-            lambda: client.chat.completions.create(
-                model=config["model"], messages=messages, stream=True, **kwargs
+        await check_quota(self.db, user_id)
+        providers = await self._get_providers("chat")
+        stream, provider = await self._call_with_fallback(
+            "chat",
+            providers,
+            lambda cfg: AsyncOpenAI(
+                base_url=cfg["base_url"],
+                api_key=cfg["api_key"],
+                timeout=cfg.get("timeout", 10),
             )
+            .chat.completions.create(
+                model=cfg["model"],
+                messages=messages,
+                stream=True,
+                **self._chat_kwargs(cfg, temperature, max_tokens, response_format),
+            ),
         )
 
         token_count = 0
@@ -64,7 +85,7 @@ class LLMClient:
             if delta:
                 token_count += self._estimate_tokens(delta)
                 yield delta
-        await self._record_usage(user_id, feature, token_count, config["model"])
+        await self._record_usage(user_id, feature, token_count, provider["model"])
 
     async def vision(
         self,
@@ -72,11 +93,18 @@ class LLMClient:
         prompt: str,
         user_id: str | None = None,
     ) -> str:
-        config = await self._get_config("vision")
-        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        response = await self._with_retry(
-            lambda: client.chat.completions.create(
-                model=config["model"],
+        await check_quota(self.db, user_id)
+        providers = await self._get_providers("vision")
+        response, provider = await self._call_with_fallback(
+            "vision",
+            providers,
+            lambda cfg: AsyncOpenAI(
+                base_url=cfg["base_url"],
+                api_key=cfg["api_key"],
+                timeout=cfg.get("timeout", 10),
+            )
+            .chat.completions.create(
+                model=cfg["model"],
                 messages=[
                     {
                         "role": "user",
@@ -89,12 +117,12 @@ class LLMClient:
                         ],
                     }
                 ],
-                max_tokens=config.get("max_tokens", 2048),
-            )
+                max_tokens=cfg.get("max_tokens", 2048),
+            ),
         )
         content = response.choices[0].message.content or ""
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
-        await self._record_usage(user_id, "vision_ocr", tokens, config["model"])
+        await self._record_usage(user_id, "ocr", tokens, provider["model"])
         return content
 
     async def embed(
@@ -104,21 +132,28 @@ class LLMClient:
     ) -> list[list[float]]:
         if not texts:
             return []
-        config = await self._get_config("embedding")
-        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
-        kwargs: dict[str, Any] = {}
-        if config.get("dimensions"):
-            kwargs["dimensions"] = config["dimensions"]
-        response = await self._with_retry(
-            lambda: client.embeddings.create(input=texts, model=config["model"], **kwargs)
+        await check_quota(self.db, user_id)
+        providers = await self._get_providers("embedding")
+        response, provider = await self._call_with_fallback(
+            "embedding",
+            providers,
+            lambda cfg: AsyncOpenAI(
+                base_url=cfg["base_url"],
+                api_key=cfg["api_key"],
+                timeout=cfg.get("timeout", 10),
+            )
+            .embeddings.create(input=texts, model=cfg["model"], **self._embed_kwargs(cfg)),
         )
         tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
         if tokens is None:
             tokens = sum(self._estimate_tokens(text) for text in texts)
-        await self._record_usage(user_id, "embedding", tokens, config["model"])
+        await self._record_usage(user_id, "embedding", tokens, provider["model"])
         return [item.embedding for item in response.data]
 
     async def _get_config(self, feature: str) -> dict[str, Any]:
+        return (await self._load_config())[feature]
+
+    async def _load_config(self) -> dict[str, Any]:
         defaults = {
             "chat": {
                 "base_url": settings.LLM_BASE_URL,
@@ -140,17 +175,79 @@ class LLMClient:
                 "dimensions": 1536,
             },
         }
-        config = defaults[feature].copy()
         if self.db is not None:
             row = (
                 await self.db.execute(select(AdminConfig).where(AdminConfig.key == "llm_config"))
             ).scalar_one_or_none()
             if row:
                 saved = json.loads(row.value)
-                config.update(saved.get(feature, {}))
-        if not config.get("api_key"):
-            raise RuntimeError("LLM_API_KEY is not configured")
-        return config
+                for key, value in saved.items():
+                    if isinstance(value, dict) and key in defaults:
+                        defaults[key].update(value)
+                    else:
+                        defaults[key] = value
+        return defaults
+
+    async def _get_providers(self, feature: str) -> list[dict[str, Any]]:
+        full_config = await self._load_config()
+        config = full_config[feature].copy()
+        fallback_config = full_config.get("fallback_providers", {}).get(feature, {})
+        providers: list[dict[str, Any]] = []
+        primary = fallback_config.get("primary") if isinstance(fallback_config, dict) else None
+        if primary:
+            merged = config.copy()
+            merged.update(primary)
+            providers.append(merged)
+        else:
+            providers.append(config)
+        fallback = fallback_config.get("fallback", []) if isinstance(fallback_config, dict) else []
+        for item in fallback:
+            merged = config.copy()
+            merged.update(item)
+            providers.append(merged)
+        for provider in providers:
+            if not provider.get("api_key"):
+                raise RuntimeError("LLM_API_KEY is not configured")
+        return providers
+
+    async def _call_with_fallback(self, feature: str, providers: list[dict[str, Any]], call_fn):
+        last_exc: Exception | None = None
+        for index, provider in enumerate(providers):
+            try:
+                return await self._with_retry(
+                    lambda provider=provider: call_fn(provider),
+                    retry_fallback_errors=False,
+                ), provider
+            except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+                last_exc = exc
+                await self._record_system_event(
+                    "llm_fallback",
+                    {
+                        "feature": feature,
+                        "model": provider.get("model"),
+                        "reason": exc.__class__.__name__,
+                        "fallback_available": index < len(providers) - 1,
+                    },
+                )
+                if index == len(providers) - 1:
+                    raise
+                continue
+            except HTTPException:
+                raise
+        assert last_exc is not None
+        raise last_exc
+
+    def _embed_kwargs(self, config: dict[str, Any]) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if config.get("dimensions"):
+            kwargs["dimensions"] = config["dimensions"]
+        return kwargs
+
+    async def _record_system_event(self, event_type: str, detail: dict[str, Any]) -> None:
+        if self.db is None:
+            return
+        self.db.add(SystemEvent(event_type=event_type, severity="warning", detail=json.dumps(detail)))
+        await self.db.commit()
 
     def _chat_kwargs(
         self,
@@ -179,14 +276,22 @@ class LLMClient:
         self.db.add(TokenUsage(user_id=user_id, feature=feature, tokens_used=tokens, model=model))
         await self.db.commit()
 
-    async def _with_retry(self, factory):
+    async def _with_retry(self, factory, retry_fallback_errors: bool = True):
         delay = 1
         last_exc: Exception | None = None
         for _ in range(5):
             try:
                 return await factory()
+            except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+                last_exc = exc
+                if not retry_fallback_errors:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2
             except Exception as exc:  # SDK exception classes vary across compatible providers.
                 last_exc = exc
+                if not retry_fallback_errors:
+                    raise
                 await asyncio.sleep(delay)
                 delay *= 2
         assert last_exc is not None
@@ -198,4 +303,3 @@ class LLMClient:
 
     def _estimate_tokens(self, text: str) -> int:
         return max(1, len(text) // 4)
-

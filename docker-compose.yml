@@ -26,6 +26,20 @@ services:
       - backend
     restart: unless-stopped
 
+  beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    command: celery -A app.tasks.celery_app.celery_app beat --loglevel=info
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes

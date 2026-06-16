@@ -11,6 +11,9 @@ class UserOut(BaseModel):
     quota_mb: int
     token_quota: int
     is_active: int
+    token_used_this_month: int = 0
+    quota_percent: int = 0
+    quota_status: Literal["ok", "warning", "exceeded"] = "ok"
     created_at: str
 
     model_config = {"from_attributes": True}
@@ -51,6 +54,7 @@ class DocumentOut(BaseModel):
 class ChatSessionCreate(BaseModel):
     title: str | None = None
     doc_ids: list[str] = Field(default_factory=list)
+    course_id: str | None = None
     mode: Literal["enhanced", "strict", "socratic"] = "enhanced"
 
 
@@ -58,6 +62,7 @@ class ChatSessionOut(BaseModel):
     id: str
     title: str | None
     doc_ids: list[str]
+    course_id: str | None = None
     mode: str
     created_at: str
     updated_at: str
@@ -135,3 +140,52 @@ class AdminConfigUpdate(BaseModel):
     chat: dict[str, Any] | None = None
     vision: dict[str, Any] | None = None
     embedding: dict[str, Any] | None = None
+    cost_per_1k_tokens: dict[str, Any] | None = None
+    fallback_providers: dict[str, Any] | None = None
+
+
+class NoteCreate(BaseModel):
+    content: str = Field(min_length=1)
+    doc_id: str | None = None
+    session_id: str | None = None
+    source_page: int | None = Field(default=None, ge=1)
+    source_type: Literal["chat", "summary", "manual"] = "manual"
+
+
+class NoteUpdate(BaseModel):
+    content: str = Field(min_length=1)
+
+
+class GoalCreate(BaseModel):
+    doc_id: str
+    title: str = Field(min_length=1)
+    target_date: str
+    focus_hint: str | None = None
+
+
+class GoalUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    target_date: str | None = None
+    focus_hint: str | None = None
+    status: Literal["active", "completed", "abandoned"] | None = None
+
+
+class CourseCreate(BaseModel):
+    title: str = Field(min_length=1)
+    description: str | None = None
+
+
+class CourseJoinRequest(BaseModel):
+    join_code: str = Field(min_length=4, max_length=12)
+
+
+class CourseDocumentRequest(BaseModel):
+    doc_id: str
+
+
+class LegalConsentRequest(BaseModel):
+    consent_type: Literal["copyright_declaration"]
+
+
+class DeleteConfirmRequest(BaseModel):
+    confirmation_code: str
