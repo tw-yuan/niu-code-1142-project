@@ -268,7 +268,7 @@ export function ChatPage() {
             <div className="mt-1 text-xs text-zinc-500">課程對話：{courses.find((course) => course.id === activeSession.course_id)?.title ?? activeSession.course_id}</div>
           )}
         </div>
-        <div className="flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin">
+        <div className="flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin" aria-live="polite" aria-busy={streaming}>
           {messages.map((message, index) => (
             <div
               key={index}
@@ -323,7 +323,9 @@ export function ChatPage() {
         </div>
         <form onSubmit={sendMessage} className="border-t border-zinc-200 p-4">
           <div className="flex gap-2">
+            <label className="sr-only" htmlFor="chat-message-input">輸入問題</label>
             <input
+              id="chat-message-input"
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-indigo-600"
               value={input}
               onChange={(event) => setInput(event.target.value)}

@@ -146,7 +146,8 @@ export function FlashcardsPage() {
       <div className="mb-6 grid gap-4 lg:grid-cols-[360px_1fr]">
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">生成與新增</h2>
-          <select className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
+          <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="flashcard-doc">文件</label>
+          <select id="flashcard-doc" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
             <option value="">不綁定文件</option>
             {documents.map((doc) => (
               <option key={doc.id} value={doc.id}>
@@ -163,8 +164,10 @@ export function FlashcardsPage() {
             {streaming ? "生成中" : "從文件生成 10 張"}
           </button>
           <form className="space-y-3" onSubmit={createManual}>
-            <input className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={front} onChange={(event) => setFront(event.target.value)} placeholder="正面" />
-            <textarea className="min-h-24 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={back} onChange={(event) => setBack(event.target.value)} placeholder="背面" />
+            <label className="block text-xs font-medium text-zinc-500" htmlFor="flashcard-front">正面</label>
+            <input id="flashcard-front" className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={front} onChange={(event) => setFront(event.target.value)} />
+            <label className="block text-xs font-medium text-zinc-500" htmlFor="flashcard-back">背面</label>
+            <textarea id="flashcard-back" className="min-h-24 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={back} onChange={(event) => setBack(event.target.value)} />
             <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50">
               <Plus size={16} />
               新增閃卡
@@ -173,8 +176,8 @@ export function FlashcardsPage() {
         </section>
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <AIGeneratedBadge />
-          {preview && <pre className="max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs text-zinc-700">{preview}</pre>}
-          {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+          {preview && <pre aria-live="polite" className="max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs text-zinc-700">{preview}</pre>}
+          {error && <div role="alert" className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           <div className="grid gap-3 sm:grid-cols-2">
             {cards.map((card) => (
               <article key={card.id} className="rounded-lg border border-zinc-200 p-4">

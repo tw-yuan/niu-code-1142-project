@@ -130,8 +130,10 @@ export function QuizPage() {
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">生成測驗</h2>
-          <input className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="測驗標題（選填）" />
-          <select className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
+          <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="quiz-title">測驗標題</label>
+          <input id="quiz-title" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="選填" />
+          <label className="mb-1 block text-xs font-medium text-zinc-500" htmlFor="quiz-doc">文件</label>
+          <select id="quiz-doc" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
             {documents.map((doc) => (
               <option key={doc.id} value={doc.id}>
                 {doc.filename}{doc.user_id !== user?.id ? "（課程共享）" : ""}
@@ -151,7 +153,7 @@ export function QuizPage() {
             發布到課程
           </label>
           {publishToCourse && (
-            <select className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
+            <select aria-label="發布課程" className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={courseId} onChange={(event) => setCourseId(event.target.value)}>
               <option value="">選擇課程</option>
               {courses.filter((course) => course.role === "instructor").map((course) => (
                 <option key={course.id} value={course.id}>{course.title}</option>
@@ -162,8 +164,8 @@ export function QuizPage() {
             <Wand2 size={16} />
             {streaming ? "生成中" : "生成測驗"}
           </button>
-          {error && <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-          {preview && <pre className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}
+          {error && <div role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+          {preview && <pre aria-live="polite" className="mt-4 max-h-64 overflow-auto rounded-md bg-zinc-50 p-3 text-xs">{preview}</pre>}
           <h2 className="mb-3 mt-6 font-semibold">測驗列表</h2>
           <div className="space-y-2">
             {quizzes.map((quiz) => (

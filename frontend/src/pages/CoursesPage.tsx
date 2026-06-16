@@ -148,14 +148,16 @@ export function CoursesPage() {
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <form className="mb-5 space-y-3" onSubmit={create}>
-            <input className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="課程名稱" />
+            <label className="block text-xs font-medium text-zinc-500" htmlFor="new-course-title">課程名稱</label>
+            <input id="new-course-title" className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={title} onChange={(event) => setTitle(event.target.value)} />
             <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
               <Plus size={16} />
               建立課程
             </button>
           </form>
           <form className="mb-5 flex gap-2" onSubmit={join}>
-            <input className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder="邀請碼" />
+            <label className="sr-only" htmlFor="course-join-code">邀請碼</label>
+            <input id="course-join-code" className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} placeholder="邀請碼" />
             <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50">加入</button>
           </form>
           <div className="space-y-2">

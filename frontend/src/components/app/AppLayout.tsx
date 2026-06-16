@@ -5,12 +5,13 @@ import {
   FileText,
   Layers3,
   LogOut,
+  Menu,
   MessageSquareText,
   NotebookPen,
   Settings,
   Shield,
 } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import { wsManager } from "../../lib/ws"
 import { useAuthStore } from "../../store/auth"
@@ -29,6 +30,7 @@ const navItems = [
 export function AppLayout() {
   const { user, logout, loadMe } = useAuthStore()
   const navigate = useNavigate()
+  const [moreOpen, setMoreOpen] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
@@ -119,7 +121,7 @@ export function AppLayout() {
         </div>
       </main>
       <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-zinc-200 bg-white md:hidden">
-        {navItems.slice(0, 5).map((item) => (
+        {navItems.slice(0, 4).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -134,7 +136,36 @@ export function AppLayout() {
             {item.label}
           </NavLink>
         ))}
+        <button
+          className={["flex flex-col items-center gap-1 px-2 py-2 text-[11px]", moreOpen ? "text-indigo-700" : "text-zinc-500"].join(" ")}
+          onClick={() => setMoreOpen((value) => !value)}
+          aria-expanded={moreOpen}
+          aria-controls="mobile-more-menu"
+        >
+          <Menu size={18} />
+          更多
+        </button>
       </nav>
+      {moreOpen && (
+        <div id="mobile-more-menu" className="fixed inset-x-3 bottom-16 z-30 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg md:hidden">
+          {[...navItems.slice(4), ...(user?.role === "admin" ? [{ to: "/admin", label: "管理", icon: Shield }] : [])].map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                [
+                  "flex items-center gap-3 rounded-lg px-3 py-3 text-sm",
+                  isActive ? "bg-indigo-50 text-indigo-700" : "text-zinc-700 hover:bg-zinc-50",
+                ].join(" ")
+              }
+              onClick={() => setMoreOpen(false)}
+            >
+              <item.icon size={18} />
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
