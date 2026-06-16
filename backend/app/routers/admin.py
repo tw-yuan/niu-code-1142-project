@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, require_admin
 from app.models.tables import User
-from app.schemas import AdminConfigUpdate, AdminUserUpdate
+from app.schemas import AdminConfigUpdate, AdminPasswordReset, AdminUserCreate, AdminUserUpdate
 from app.services.admin_service import AdminService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -11,10 +11,42 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/users")
 async def list_users(
+    q: str | None = None,
+    role: str | None = Query(default=None, pattern="^(student|admin)$"),
+    is_active: int | None = Query(default=None, ge=0, le=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).list_users()
+    return await AdminService(db).list_users(q, role, is_active, limit, offset)
+
+
+@router.post("/users")
+async def create_user(
+    body: AdminUserCreate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).create_user(body, actor_id=current_user.id)
+
+
+@router.get("/users/{user_id}")
+async def get_user(
+    user_id: str,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).user_detail(user_id)
+
+
+@router.get("/users/{user_id}/usage")
+async def user_usage(
+    user_id: str,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).user_usage(user_id)
 
 
 @router.put("/users/{user_id}")
@@ -25,6 +57,16 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminService(db).update_user(user_id, body, actor_id=current_user.id)
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: str,
+    body: AdminPasswordReset,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).reset_user_password(user_id, body, actor_id=current_user.id)
 
 
 @router.get("/stats")

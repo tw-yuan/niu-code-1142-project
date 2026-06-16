@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +7,8 @@ from filelock import FileLock
 
 from app.config import settings
 from app.dependencies import get_chroma, get_documents_collection
+
+logger = logging.getLogger(__name__)
 
 
 class ChromaService:
@@ -73,12 +76,18 @@ class ChromaService:
         n_results: int,
     ) -> list[dict[str, Any]]:
         where = _where_for(user_id, doc_ids, shared_doc_ids)
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as exc:
+            if _is_recoverable_chroma_read_error(exc):
+                logger.warning("Chroma index read failed during query; returning no chunks", exc_info=True)
+                return []
+            raise
         documents = results.get("documents", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
@@ -91,10 +100,16 @@ class ChromaService:
         return await asyncio.to_thread(self._get_document_chunks_sync, user_id, doc_ids)
 
     def _get_document_chunks_sync(self, user_id: str, doc_ids: list[str]) -> list[dict[str, Any]]:
-        results = self.collection.get(
-            where=_where_for(user_id, doc_ids),
-            include=["documents", "metadatas"],
-        )
+        try:
+            results = self.collection.get(
+                where=_where_for(user_id, doc_ids),
+                include=["documents", "metadatas"],
+            )
+        except Exception as exc:
+            if _is_recoverable_chroma_read_error(exc):
+                logger.warning("Chroma index read failed during get; returning no chunks", exc_info=True)
+                return []
+            raise
         items = [
             {"text": doc, "metadata": meta}
             for doc, meta in zip(results.get("documents", []), results.get("metadatas", []), strict=False)
@@ -143,3 +158,13 @@ def _where_for(
             doc_filter = {"doc_id": {"$in": doc_ids}}
         where = {"$and": [access_filter, doc_filter]}
     return where
+
+
+def _is_recoverable_chroma_read_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "hnsw segment reader" in message
+        and "nothing found on disk" in message
+        or "error executing plan" in message
+        and "nothing found on disk" in message
+    )

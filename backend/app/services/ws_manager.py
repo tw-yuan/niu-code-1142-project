@@ -14,7 +14,6 @@ class ConnectionManager:
         self.active: dict[str, set[WebSocket]] = defaultdict(set)
 
     async def connect(self, user_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
         self.active[user_id].add(websocket)
 
     def disconnect(self, user_id: str, websocket: WebSocket) -> None:
@@ -65,4 +64,3 @@ async def subscribe_user(user_id: str, websocket: WebSocket) -> None:
 
 def _channel(user_id: str) -> str:
     return f"user:{user_id}:events"
-

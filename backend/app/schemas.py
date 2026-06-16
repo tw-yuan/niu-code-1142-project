@@ -129,11 +129,27 @@ class FlashcardReviewRequest(BaseModel):
     quality: int = Field(ge=0, le=5)
 
 
+class AdminUserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    role: Literal["student", "admin"] = "student"
+    quota_mb: int = Field(default=500, ge=1)
+    token_quota: int = Field(default=1_000_000, ge=1)
+    is_active: int = Field(default=1, ge=0, le=1)
+
+
 class AdminUserUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    email: EmailStr | None = None
     quota_mb: int | None = Field(default=None, ge=1)
     token_quota: int | None = Field(default=None, ge=1)
     is_active: int | None = Field(default=None, ge=0, le=1)
     role: Literal["student", "admin"] | None = None
+
+
+class AdminPasswordReset(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 
 class AdminConfigUpdate(BaseModel):

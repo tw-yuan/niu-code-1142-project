@@ -3,36 +3,93 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.tables import AdminConfig, Document, SystemEvent, TokenUsage, User, now_iso
-from app.schemas import AdminConfigUpdate, AdminUserUpdate
+from app.schemas import AdminConfigUpdate, AdminPasswordReset, AdminUserCreate, AdminUserUpdate
 from app.services.audit_service import AuditService
 from app.services.cost_service import cost_stats
 from app.services.privacy_service import PrivacyService
+from app.services.security import hash_password
 
 
 class AdminService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def list_users(self) -> list[dict[str, Any]]:
-        users = (await self.db.execute(select(User).order_by(User.created_at))).scalars().all()
-        return [
-            {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "role": user.role,
-                "quota_mb": user.quota_mb,
-                "token_quota": user.token_quota,
-                "is_active": user.is_active,
-                "created_at": user.created_at,
-            }
-            for user in users
-        ]
+    async def list_users(
+        self,
+        q: str | None = None,
+        role: str | None = None,
+        is_active: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        conditions = []
+        if q:
+            like = f"%{q}%"
+            conditions.append(or_(User.username.ilike(like), User.email.ilike(like)))
+        if role:
+            conditions.append(User.role == role)
+        if is_active is not None:
+            conditions.append(User.is_active == is_active)
+
+        stmt = select(User)
+        count_stmt = select(func.count(User.id))
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+        users = (
+            await self.db.execute(
+                stmt.order_by(desc(User.created_at)).limit(limit).offset(offset)
+            )
+        ).scalars().all()
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        usage_by_user = await self._usage_by_user([user.id for user in users])
+        document_stats = await self._document_stats([user.id for user in users])
+        return {
+            "items": [
+                self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+                for user in users
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def create_user(
+        self,
+        body: AdminUserCreate,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        existing = (
+            await self.db.execute(
+                select(User).where(or_(User.username == body.username, User.email == body.email))
+            )
+        ).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        user = User(
+            username=body.username,
+            email=body.email,
+            password_hash=hash_password(body.password),
+            role=body.role,
+            quota_mb=body.quota_mb,
+            token_quota=body.token_quota,
+            is_active=body.is_active,
+        )
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        await AuditService(self.db).log(
+            "admin.user_create",
+            user_id=actor_id,
+            resource=f"user:{user.id}",
+            detail=body.model_dump(exclude={"password"}),
+        )
+        return self._user_summary(user, 0, {})
 
     async def update_user(self, user_id: str, body: AdminUserUpdate, actor_id: str | None = None) -> dict[str, Any]:
         user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
@@ -40,20 +97,124 @@ class AdminService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         next_role = body.role if body.role is not None else user.role
         next_active = body.is_active if body.is_active is not None else user.is_active
+        if actor_id == user.id and user.role == "admin" and (next_role != "admin" or not next_active):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot disable or demote your own admin account",
+            )
         if user.role == "admin" and (next_role != "admin" or not next_active):
             await self._ensure_another_active_admin(user.id)
-        for field in ("quota_mb", "token_quota", "is_active", "role"):
+        conflict_filters = []
+        if body.username and body.username != user.username:
+            conflict_filters.append(User.username == body.username)
+        if body.email and body.email != user.email:
+            conflict_filters.append(User.email == body.email)
+        if conflict_filters:
+            existing = (
+                await self.db.execute(
+                    select(User).where(and_(User.id != user_id, or_(*conflict_filters)))
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        for field in ("username", "email", "quota_mb", "token_quota", "is_active", "role"):
             value = getattr(body, field)
             if value is not None:
                 setattr(user, field, value)
         await self.db.commit()
+        await self.db.refresh(user)
         await AuditService(self.db).log(
             "admin.user_update",
             user_id=actor_id,
             resource=f"user:{user_id}",
             detail=body.model_dump(exclude_none=True),
         )
+        usage_by_user = await self._usage_by_user([user.id])
+        document_stats = await self._document_stats([user.id])
+        return self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+
+    async def reset_user_password(
+        self,
+        user_id: str,
+        body: AdminPasswordReset,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        user.password_hash = hash_password(body.password)
+        await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.user_password_reset",
+            user_id=actor_id,
+            resource=f"user:{user_id}",
+        )
         return {"ok": True}
+
+    async def user_detail(self, user_id: str) -> dict[str, Any]:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        usage_by_user = await self._usage_by_user([user.id])
+        document_stats = await self._document_stats([user.id])
+        data = self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+        data["usage"] = await self.user_usage(user_id)
+        data["recent_audit_logs"] = await AuditService(self.db).list_logs(user_id=user_id, limit=20)
+        data["deletion"] = {
+            "requested_at": user.deletion_requested_at,
+            "scheduled_at": user.deletion_scheduled_at,
+            "export_expires_at": user.export_expires_at,
+        }
+        return data
+
+    async def user_usage(self, user_id: str) -> dict[str, Any]:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        now = datetime.now(UTC)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        since_30 = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
+        rows = (
+            await self.db.execute(
+                select(TokenUsage)
+                .where(and_(TokenUsage.user_id == user_id, TokenUsage.created_at >= since_30.isoformat()))
+                .order_by(desc(TokenUsage.created_at))
+            )
+        ).scalars().all()
+        by_feature: dict[str, int] = {}
+        by_model: dict[str, int] = {}
+        daily: dict[str, int] = {}
+        month_total = 0
+        for row in rows:
+            created = datetime.fromisoformat(row.created_at)
+            if created >= month_start:
+                month_total += row.tokens_used
+                by_feature[row.feature] = by_feature.get(row.feature, 0) + row.tokens_used
+                by_model[row.model] = by_model.get(row.model, 0) + row.tokens_used
+            day = row.created_at[:10]
+            daily[day] = daily.get(day, 0) + row.tokens_used
+        series = []
+        for i in range(30):
+            day = (since_30 + timedelta(days=i)).date().isoformat()
+            series.append({"date": day, "tokens": daily.get(day, 0)})
+        return {
+            "token_used_this_month": month_total,
+            "token_quota": user.token_quota,
+            "quota_percent": int(month_total / user.token_quota * 100) if user.token_quota else 100,
+            "by_feature": by_feature,
+            "by_model": by_model,
+            "daily_series": series,
+            "recent_events": [
+                {
+                    "id": row.id,
+                    "feature": row.feature,
+                    "model": row.model,
+                    "tokens_used": row.tokens_used,
+                    "created_at": row.created_at,
+                }
+                for row in rows[:30]
+            ],
+        }
 
     async def stats(self) -> dict[str, Any]:
         users = (await self.db.execute(select(func.count(User.id)))).scalar_one()
@@ -174,6 +335,76 @@ class AdminService:
 
     async def force_purge_user(self, user_id: str, actor_id: str) -> dict[str, Any]:
         return await PrivacyService(self.db).force_purge(user_id, actor_id=actor_id)
+
+    async def _usage_by_user(self, user_ids: list[str]) -> dict[str, int]:
+        if not user_ids:
+            return {}
+        month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        rows = (
+            await self.db.execute(
+                select(TokenUsage.user_id, func.coalesce(func.sum(TokenUsage.tokens_used), 0))
+                .where(and_(TokenUsage.user_id.in_(user_ids), TokenUsage.created_at >= month_start.isoformat()))
+                .group_by(TokenUsage.user_id)
+            )
+        ).all()
+        return {user_id: int(total) for user_id, total in rows}
+
+    async def _document_stats(self, user_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not user_ids:
+            return {}
+        aggregate_rows = (
+            await self.db.execute(
+                select(
+                    Document.user_id,
+                    func.count(Document.id),
+                    func.coalesce(func.sum(Document.file_size), 0),
+                )
+                .where(Document.user_id.in_(user_ids))
+                .group_by(Document.user_id)
+            )
+        ).all()
+        stats = {
+            user_id: {"document_count": int(count), "storage_bytes": int(storage)}
+            for user_id, count, storage in aggregate_rows
+        }
+        status_rows = (
+            await self.db.execute(
+                select(Document.user_id, Document.status, func.count(Document.id))
+                .where(Document.user_id.in_(user_ids))
+                .group_by(Document.user_id, Document.status)
+            )
+        ).all()
+        for user_id, status_value, count in status_rows:
+            stats.setdefault(user_id, {"document_count": 0, "storage_bytes": 0})
+            stats[user_id].setdefault("documents_by_status", {})
+            stats[user_id]["documents_by_status"][status_value] = int(count)
+        return stats
+
+    def _user_summary(
+        self,
+        user: User,
+        token_used_this_month: int,
+        document_stats: dict[str, Any],
+    ) -> dict[str, Any]:
+        quota_percent = int(token_used_this_month / user.token_quota * 100) if user.token_quota else 100
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "quota_mb": user.quota_mb,
+            "token_quota": user.token_quota,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "deletion_requested_at": user.deletion_requested_at,
+            "deletion_scheduled_at": user.deletion_scheduled_at,
+            "token_used_this_month": token_used_this_month,
+            "quota_percent": quota_percent,
+            "quota_status": "exceeded" if quota_percent >= 100 else "warning" if quota_percent >= 80 else "ok",
+            "document_count": document_stats.get("document_count", 0),
+            "storage_bytes": document_stats.get("storage_bytes", 0),
+            "documents_by_status": document_stats.get("documents_by_status", {}),
+        }
 
     async def _load_config(self) -> dict[str, Any]:
         default = default_llm_config()
