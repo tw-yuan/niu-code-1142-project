@@ -2,9 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   HelpCircle,
   Info,
+  Loader2,
   MessageSquarePlus,
   Send,
   StopCircle,
+  Trash2,
 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
@@ -50,6 +52,9 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [sending, setSending] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
+    null,
+  );
   const [helpLoading, setHelpLoading] = useState(false);
   const [helpMessage, setHelpMessage] = useState("");
   const [aborter, setAborter] = useState<AbortController | null>(null);
@@ -172,6 +177,25 @@ export function ChatPage() {
       navigate(`/chat/${session.id}`);
     } finally {
       setCreatingSession(false);
+    }
+  }
+
+  async function deleteSession(sessionId: string) {
+    if (deletingSessionId) return;
+    setDeletingSessionId(sessionId);
+    try {
+      if (sessionId === activeId) {
+        aborter?.abort();
+      }
+      await apiFetch(`/chat/sessions/${sessionId}`, { method: "DELETE" });
+      setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+      if (sessionId === activeId) {
+        setActiveId(null);
+        setMessages([]);
+        navigate("/chat");
+      }
+    } finally {
+      setDeletingSessionId(null);
     }
   }
 
@@ -364,18 +388,37 @@ export function ChatPage() {
         </div>
         <div className="max-h-[55vh] overflow-y-auto p-2 scrollbar-thin">
           {sessions.map((session) => (
-            <button
+            <div
               key={session.id}
               className={[
-                "mb-1 block w-full truncate rounded-lg px-3 py-2 text-left text-sm",
+                "mb-1 flex items-center rounded-lg",
                 session.id === activeId
                   ? "bg-indigo-50 text-indigo-700"
                   : "hover:bg-zinc-100",
               ].join(" ")}
-              onClick={() => openSession(session.id)}
             >
-              {session.title || "新的對話"}
-            </button>
+              <button
+                className="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm"
+                onClick={() => openSession(session.id)}
+              >
+                {session.title || "新的對話"}
+              </button>
+              <button
+                type="button"
+                className="mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:text-zinc-300"
+                onClick={() => deleteSession(session.id)}
+                disabled={deletingSessionId !== null}
+                aria-label={`刪除對話 ${session.title || "新的對話"}`}
+                aria-busy={deletingSessionId === session.id}
+                title="刪除對話"
+              >
+                {deletingSessionId === session.id ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
+              </button>
+            </div>
           ))}
         </div>
       </aside>
