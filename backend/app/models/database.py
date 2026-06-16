@@ -55,3 +55,26 @@ async def _ensure_sqlite_columns(conn) -> None:
     }
     if "course_id" not in existing_sessions:
         await conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN course_id TEXT"))
+
+    existing_quizzes = {
+        row[1] for row in (await conn.execute(text("PRAGMA table_info(quizzes)"))).fetchall()
+    }
+    if "course_id" not in existing_quizzes:
+        await conn.execute(text("ALTER TABLE quizzes ADD COLUMN course_id TEXT"))
+
+    existing_usage = {
+        row[1] for row in (await conn.execute(text("PRAGMA table_info(token_usage)"))).fetchall()
+    }
+    usage_columns = {
+        "input_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "output_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "image_count": "INTEGER NOT NULL DEFAULT 0",
+        "page_count": "INTEGER NOT NULL DEFAULT 0",
+        "provider": "TEXT",
+        "request_id": "TEXT",
+        "unit_price_snapshot": "TEXT NOT NULL DEFAULT '{}'",
+        "cost_usd": "FLOAT NOT NULL DEFAULT 0.0",
+    }
+    for column, column_type in usage_columns.items():
+        if column not in existing_usage:
+            await conn.execute(text(f"ALTER TABLE token_usage ADD COLUMN {column} {column_type}"))

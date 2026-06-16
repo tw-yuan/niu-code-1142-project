@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets
 import string
 from typing import Any
@@ -14,9 +15,14 @@ from app.models.tables import (
     Course,
     CourseDocument,
     CourseMember,
+    CourseQuiz,
     Document,
+    Flashcard,
     Note,
+    Quiz,
+    QuizAttempt,
     User,
+    now_iso,
 )
 from app.schemas import (
     CourseCreate,
@@ -220,6 +226,15 @@ class CoursesService:
         await self.require_role(user_id, course_id, {"instructor"})
         doc_ids = await self.course_document_ids(user_id, course_id)
         members = await self.members(user_id, course_id)
+        course_quiz_rows = (
+            await self.db.execute(
+                select(CourseQuiz, Quiz)
+                .join(Quiz, Quiz.id == CourseQuiz.quiz_id)
+                .where(and_(CourseQuiz.course_id == course_id, CourseQuiz.status == "published"))
+                .order_by(desc(CourseQuiz.published_at))
+            )
+        ).all()
+        course_quiz_ids = [quiz.id for _, quiz in course_quiz_rows]
         rows = []
         for member in members:
             member_id = member["user_id"]
@@ -247,18 +262,78 @@ class CoursesService:
                         )
                     )
                 ).scalar_one()
+            flashcards = []
+            if doc_ids:
+                flashcards = (
+                    await self.db.execute(
+                        select(Flashcard).where(
+                            and_(Flashcard.user_id == member_id, Flashcard.doc_id.in_(doc_ids))
+                        )
+                    )
+                ).scalars().all()
+            attempts = []
+            if course_quiz_ids:
+                attempts = (
+                    await self.db.execute(
+                        select(QuizAttempt)
+                        .where(
+                            and_(
+                                QuizAttempt.user_id == member_id,
+                                QuizAttempt.quiz_id.in_(course_quiz_ids),
+                            )
+                        )
+                        .order_by(desc(QuizAttempt.completed_at))
+                    )
+                ).scalars().all()
+            attempted_quiz_ids = {attempt.quiz_id for attempt in attempts}
+            avg_score = (
+                sum(float(attempt.total_score or 0) for attempt in attempts) / len(attempts)
+                if attempts
+                else 0.0
+            )
+            last_activity = max(
+                [
+                    value
+                    for value in [
+                        chat_sessions[0].updated_at if chat_sessions else None,
+                        attempts[0].completed_at if attempts else None,
+                    ]
+                    if value
+                ],
+                default=None,
+            )
+            due_flashcards = sum(1 for card in flashcards if card.next_review <= now_iso())
+            mastered_flashcards = sum(1 for card in flashcards if card.repetition >= 2)
             rows.append(
                 {
                     **member,
                     "chat_sessions": len(chat_sessions),
                     "chat_messages": int(message_count),
                     "notes": int(note_count),
-                    "flashcards": 0,
-                    "quizzes": 0,
-                    "last_activity_at": chat_sessions[0].updated_at if chat_sessions else None,
+                    "flashcards": len(flashcards),
+                    "flashcards_due": due_flashcards,
+                    "flashcards_mastered": mastered_flashcards,
+                    "quizzes": len(attempted_quiz_ids),
+                    "assigned_quizzes": len(course_quiz_ids),
+                    "quiz_attempts": len(attempts),
+                    "quiz_avg_score": round(avg_score, 4),
+                    "last_activity_at": last_activity,
+                    "risk_level": _risk_level(
+                        assigned_quizzes=len(course_quiz_ids),
+                        completed_quizzes=len(attempted_quiz_ids),
+                        avg_score=avg_score,
+                        chat_messages=int(message_count),
+                        last_activity_at=last_activity,
+                    ),
                 }
             )
-        return {"course_id": course_id, "document_count": len(doc_ids), "students": rows}
+        return {
+            "course_id": course_id,
+            "document_count": len(doc_ids),
+            "published_quizzes": len(course_quiz_ids),
+            "students": rows,
+            "quiz_summary": await self._course_quiz_summary(course_id, course_quiz_rows, members),
+        }
 
     async def course_document_ids(self, user_id: str, course_id: str) -> list[str]:
         await self._get_course(course_id)
@@ -365,3 +440,119 @@ class CoursesService:
             if exists is None:
                 return code
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create join code")
+
+    async def _course_quiz_summary(
+        self,
+        course_id: str,
+        course_quiz_rows: list[tuple[CourseQuiz, Quiz]],
+        members: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        student_ids = [member["user_id"] for member in members if member["role"] == "student"]
+        summaries: list[dict[str, Any]] = []
+        for course_quiz, quiz in course_quiz_rows:
+            attempts = (
+                await self.db.execute(
+                    select(QuizAttempt).where(
+                        and_(QuizAttempt.quiz_id == quiz.id, QuizAttempt.user_id.in_(student_ids))
+                    )
+                )
+            ).scalars().all() if student_ids else []
+            questions = _safe_json_list(quiz.questions)
+            item_stats = _item_analysis(questions, attempts)
+            score_avg = (
+                sum(float(attempt.total_score or 0) for attempt in attempts) / len(attempts)
+                if attempts
+                else 0.0
+            )
+            summaries.append(
+                {
+                    "course_quiz_id": course_quiz.id,
+                    "quiz_id": quiz.id,
+                    "course_id": course_id,
+                    "title": course_quiz.title,
+                    "due_at": course_quiz.due_at,
+                    "published_at": course_quiz.published_at,
+                    "student_count": len(student_ids),
+                    "submission_count": len({attempt.user_id for attempt in attempts}),
+                    "attempt_count": len(attempts),
+                    "score_avg": round(score_avg, 4),
+                    "weak_items": [item for item in item_stats if item["correct_rate"] < 0.6],
+                    "items": item_stats,
+                }
+            )
+        return summaries
+
+
+def _safe_json_list(value: str) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _answer_for(answers: dict[str, Any] | list[Any], index: int) -> Any:
+    if isinstance(answers, dict):
+        return answers.get(str(index), answers.get(index))
+    return answers[index] if index < len(answers) else None
+
+
+def _answers_match(actual: Any, expected: Any) -> bool:
+    if actual is None:
+        return False
+    return str(actual).strip() == str(expected).strip()
+
+
+def _item_analysis(questions: list[dict[str, Any]], attempts: list[QuizAttempt]) -> list[dict[str, Any]]:
+    stats: list[dict[str, Any]] = []
+    parsed_attempts = []
+    for attempt in attempts:
+        try:
+            parsed_attempts.append(json.loads(attempt.answers))
+        except json.JSONDecodeError:
+            parsed_attempts.append({})
+    for index, question in enumerate(questions):
+        distribution: dict[str, int] = {}
+        correct = 0
+        answered = 0
+        for answers in parsed_attempts:
+            actual = _answer_for(answers, index)
+            if actual is None:
+                continue
+            answered += 1
+            key = str(actual).strip()
+            distribution[key] = distribution.get(key, 0) + 1
+            if _answers_match(actual, question.get("answer")):
+                correct += 1
+        stats.append(
+            {
+                "question_index": index,
+                "question": question.get("question") or question.get("prompt"),
+                "answer": question.get("answer"),
+                "source_page": question.get("source_page"),
+                "answered": answered,
+                "correct": correct,
+                "correct_rate": round(correct / answered, 4) if answered else 0.0,
+                "distribution": distribution,
+                "explanation": question.get("explanation"),
+            }
+        )
+    return stats
+
+
+def _risk_level(
+    assigned_quizzes: int,
+    completed_quizzes: int,
+    avg_score: float,
+    chat_messages: int,
+    last_activity_at: str | None,
+) -> str:
+    if assigned_quizzes and completed_quizzes == 0:
+        return "high"
+    if avg_score and avg_score < 0.6:
+        return "high"
+    if assigned_quizzes and completed_quizzes < assigned_quizzes:
+        return "medium"
+    if chat_messages == 0 and not last_activity_at:
+        return "medium"
+    return "ok"

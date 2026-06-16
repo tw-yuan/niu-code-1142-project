@@ -7,6 +7,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
+    CourseQuiz,
     Document,
     Flashcard,
     LearningArtifact,
@@ -100,8 +101,17 @@ class LearningService:
         types: list[str],
         count: int,
         difficulty: str,
+        course_id: str | None = None,
     ):
-        await self._validate_documents(user_id, doc_ids)
+        if course_id:
+            from app.services.courses_service import CoursesService
+
+            await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
+            course_doc_ids = set(await CoursesService(self.db).course_document_ids(user_id, course_id))
+            if not set(doc_ids).issubset(course_doc_ids):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        else:
+            await self._validate_documents(user_id, doc_ids)
         context = await self._context(user_id, doc_ids)
         system, cfg = load_prompt(
             "quiz_generate",
@@ -127,34 +137,129 @@ class LearningService:
         doc_ids: list[str],
         config: dict[str, Any],
         json_text: str,
+        title: str | None = None,
+        course_id: str | None = None,
+        publish_to_course: bool = False,
+        due_at: str | None = None,
     ) -> Quiz:
         parsed = parse_json_llm(json_text)
         questions = parsed.get("questions", [])
         if not isinstance(questions, list):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid quiz JSON")
+        if course_id:
+            from app.services.courses_service import CoursesService
+
+            await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
         quiz = Quiz(
             user_id=user_id,
-            title="AI 生成測驗",
+            course_id=course_id if publish_to_course else None,
+            title=title or "AI 生成測驗",
             doc_ids=to_json(doc_ids),
             config=to_json(config),
             questions=to_json(questions),
         )
         self.db.add(quiz)
+        await self.db.flush()
+        if course_id and publish_to_course:
+            self.db.add(
+                CourseQuiz(
+                    course_id=course_id,
+                    quiz_id=quiz.id,
+                    created_by=user_id,
+                    title=title or quiz.title,
+                    due_at=due_at,
+                    status="published",
+                )
+            )
         await self.db.commit()
         await self.db.refresh(quiz)
         return quiz
 
     async def list_quizzes(self, user_id: str) -> list[dict[str, Any]]:
-        rows = (
+        owned = (
             await self.db.execute(
                 select(Quiz).where(Quiz.user_id == user_id).order_by(desc(Quiz.created_at))
             )
         ).scalars().all()
-        return [self._quiz_out(row) for row in rows]
+        course_quizzes = await self._visible_course_quizzes(user_id)
+        by_id: dict[str, dict[str, Any]] = {row.id: self._quiz_out(row) for row in owned}
+        for course_quiz, quiz in course_quizzes:
+            item = self._quiz_out(quiz)
+            item["course_publication"] = self._course_quiz_out(course_quiz)
+            by_id[quiz.id] = item
+        return sorted(by_id.values(), key=lambda item: str(item["created_at"]), reverse=True)
 
     async def get_quiz(self, user_id: str, quiz_id: str) -> dict[str, Any]:
         quiz = await self._get_quiz(user_id, quiz_id)
-        return self._quiz_out(quiz)
+        data = self._quiz_out(quiz)
+        course_quiz = await self._course_quiz_for_quiz(user_id, quiz_id)
+        if course_quiz:
+            data["course_publication"] = self._course_quiz_out(course_quiz)
+        return data
+
+    async def publish_quiz_to_course(
+        self,
+        user_id: str,
+        course_id: str,
+        quiz_id: str,
+        title: str | None = None,
+        due_at: str | None = None,
+        status_value: str = "published",
+    ) -> dict[str, Any]:
+        from app.services.courses_service import CoursesService
+
+        await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
+        quiz = (
+            await self.db.execute(select(Quiz).where(and_(Quiz.id == quiz_id, Quiz.user_id == user_id)))
+        ).scalar_one_or_none()
+        if quiz is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        course_doc_ids = set(await CoursesService(self.db).course_document_ids(user_id, course_id))
+        if not set(json.loads(quiz.doc_ids)).issubset(course_doc_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Quiz documents must be shared with this course first",
+            )
+        existing = (
+            await self.db.execute(
+                select(CourseQuiz).where(and_(CourseQuiz.course_id == course_id, CourseQuiz.quiz_id == quiz_id))
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.title = title or existing.title
+            existing.due_at = due_at
+            existing.status = status_value
+            course_quiz = existing
+        else:
+            course_quiz = CourseQuiz(
+                course_id=course_id,
+                quiz_id=quiz.id,
+                created_by=user_id,
+                title=title or quiz.title,
+                due_at=due_at,
+                status=status_value,
+            )
+            self.db.add(course_quiz)
+        quiz.course_id = course_id
+        await self.db.commit()
+        return self._course_quiz_out(course_quiz)
+
+    async def course_quizzes(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
+        from app.services.courses_service import CoursesService
+
+        await CoursesService(self.db).require_member(user_id, course_id)
+        rows = (
+            await self.db.execute(
+                select(CourseQuiz, Quiz)
+                .join(Quiz, Quiz.id == CourseQuiz.quiz_id)
+                .where(and_(CourseQuiz.course_id == course_id, CourseQuiz.status == "published"))
+                .order_by(desc(CourseQuiz.published_at))
+            )
+        ).all()
+        return [
+            {**self._quiz_out(quiz), "course_publication": self._course_quiz_out(course_quiz)}
+            for course_quiz, quiz in rows
+        ]
 
     async def submit_quiz_attempt(
         self, user_id: str, quiz_id: str, body: QuizAttemptRequest
@@ -172,11 +277,13 @@ class LearningService:
         self.db.add(attempt)
         await self.db.commit()
         await self.db.refresh(attempt)
+        diagnostics = _quiz_diagnostics(questions, body.answers)
         return {
             "id": attempt.id,
             "quiz_id": quiz.id,
             "total_score": attempt.total_score,
             "completed_at": attempt.completed_at,
+            "diagnostics": diagnostics,
         }
 
     async def quiz_attempts(self, user_id: str, quiz_id: str) -> list[dict[str, Any]]:
@@ -201,11 +308,10 @@ class LearningService:
         ]
 
     async def wrongbook(self, user_id: str) -> list[dict[str, Any]]:
-        quizzes = (
-            await self.db.execute(select(Quiz).where(Quiz.user_id == user_id).order_by(desc(Quiz.created_at)))
-        ).scalars().all()
+        quizzes = [quiz for quiz in (await self.list_quizzes(user_id)) if quiz.get("id")]
         result: list[dict[str, Any]] = []
-        for quiz in quizzes:
+        for quiz_data in quizzes:
+            quiz = await self._get_quiz(user_id, str(quiz_data["id"]))
             latest_attempt = (
                 await self.db.execute(
                     select(QuizAttempt)
@@ -218,6 +324,7 @@ class LearningService:
                 continue
             questions = json.loads(quiz.questions)
             answers = json.loads(latest_attempt.answers)
+            doc_ids = json.loads(quiz.doc_ids)
             for idx, question in enumerate(questions):
                 actual = _answer_for(answers, idx)
                 if _answers_match(actual, question.get("answer")):
@@ -231,10 +338,45 @@ class LearningService:
                         "answer": question.get("answer"),
                         "submitted_answer": actual,
                         "explanation": question.get("explanation"),
+                        "doc_id": doc_ids[0] if doc_ids else None,
+                        "source_page": _int_or_none(question.get("source_page")),
                         "completed_at": latest_attempt.completed_at,
                     }
                 )
         return result[:50]
+
+    async def create_flashcards_from_wrongbook(
+        self,
+        user_id: str,
+        limit: int = 10,
+        quiz_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        wrong_items = await self.wrongbook(user_id)
+        if quiz_id:
+            wrong_items = [item for item in wrong_items if item.get("quiz_id") == quiz_id]
+        cards: list[Flashcard] = []
+        for item in wrong_items[:limit]:
+            question = str(item.get("question") or "").strip()
+            answer = str(item.get("answer") or "").strip()
+            if not question or not answer:
+                continue
+            back = answer
+            explanation = str(item.get("explanation") or "").strip()
+            if explanation:
+                back = f"{answer}\n\n解析：{explanation}"
+            card = Flashcard(
+                user_id=user_id,
+                doc_id=item.get("doc_id"),
+                front=question,
+                back=back,
+                source_page=_int_or_none(item.get("source_page")),
+            )
+            self.db.add(card)
+            cards.append(card)
+        await self.db.commit()
+        for card in cards:
+            await self.db.refresh(card)
+        return [self._flashcard_out(card) for card in cards]
 
     async def stream_flashcards(self, user_id: str, doc_id: str, count: int):
         doc = await self._get_document(user_id, doc_id)
@@ -378,11 +520,46 @@ class LearningService:
 
     async def _get_quiz(self, user_id: str, quiz_id: str) -> Quiz:
         quiz = (
-            await self.db.execute(select(Quiz).where(and_(Quiz.user_id == user_id, Quiz.id == quiz_id)))
+            await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))
         ).scalar_one_or_none()
         if quiz is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
-        return quiz
+        if quiz.user_id == user_id:
+            return quiz
+        visible = await self._course_quiz_for_quiz(user_id, quiz_id)
+        if visible:
+            return quiz
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+
+    async def _course_quiz_for_quiz(self, user_id: str, quiz_id: str) -> CourseQuiz | None:
+        from app.models.tables import CourseMember
+
+        return (
+            await self.db.execute(
+                select(CourseQuiz)
+                .join(CourseMember, CourseMember.course_id == CourseQuiz.course_id)
+                .where(
+                    and_(
+                        CourseQuiz.quiz_id == quiz_id,
+                        CourseQuiz.status == "published",
+                        CourseMember.user_id == user_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _visible_course_quizzes(self, user_id: str) -> list[tuple[CourseQuiz, Quiz]]:
+        from app.models.tables import CourseMember
+
+        return (
+            await self.db.execute(
+                select(CourseQuiz, Quiz)
+                .join(Quiz, Quiz.id == CourseQuiz.quiz_id)
+                .join(CourseMember, CourseMember.course_id == CourseQuiz.course_id)
+                .where(and_(CourseMember.user_id == user_id, CourseQuiz.status == "published"))
+                .order_by(desc(CourseQuiz.published_at))
+            )
+        ).all()
 
     async def _get_flashcard(self, user_id: str, card_id: str) -> Flashcard:
         card = (
@@ -398,10 +575,23 @@ class LearningService:
         return {
             "id": quiz.id,
             "title": quiz.title,
+            "course_id": quiz.course_id,
             "doc_ids": json.loads(quiz.doc_ids),
             "config": json.loads(quiz.config),
             "questions": json.loads(quiz.questions),
             "created_at": quiz.created_at,
+        }
+
+    def _course_quiz_out(self, course_quiz: CourseQuiz) -> dict[str, Any]:
+        return {
+            "id": course_quiz.id,
+            "course_id": course_quiz.course_id,
+            "quiz_id": course_quiz.quiz_id,
+            "title": course_quiz.title,
+            "status": course_quiz.status,
+            "due_at": course_quiz.due_at,
+            "published_at": course_quiz.published_at,
+            "created_by": course_quiz.created_by,
         }
 
     def _flashcard_out(self, card: Flashcard) -> dict[str, Any]:
@@ -440,3 +630,30 @@ def _answers_match(actual: Any, expected: Any) -> bool:
     if actual is None:
         return False
     return str(actual).strip() == str(expected).strip()
+
+
+def _quiz_diagnostics(questions: list[dict[str, Any]], answers: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+    diagnostics = []
+    for index, question in enumerate(questions):
+        actual = _answer_for(answers, index)
+        expected = question.get("answer")
+        is_correct = _answers_match(actual, expected)
+        diagnostics.append(
+            {
+                "question_index": index,
+                "question": question.get("question") or question.get("prompt"),
+                "submitted_answer": actual,
+                "answer": expected,
+                "is_correct": is_correct,
+                "explanation": question.get("explanation"),
+                "source_page": _int_or_none(question.get("source_page")),
+            }
+        )
+    return diagnostics
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

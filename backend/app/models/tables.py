@@ -95,6 +95,7 @@ class Quiz(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    course_id: Mapped[str | None] = mapped_column(String, ForeignKey("courses.id", ondelete="SET NULL"), index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     doc_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     config: Mapped[str] = mapped_column(Text, nullable=False)
@@ -116,6 +117,25 @@ class QuizAttempt(Base):
     total_score: Mapped[float | None] = mapped_column(Float)
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     completed_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseQuiz(Base):
+    __tablename__ = "course_quizzes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    quiz_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="published")
+    due_at: Mapped[str | None] = mapped_column(String)
+    published_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
 class LearningArtifact(Base):
@@ -161,7 +181,57 @@ class TokenUsage(Base):
     )
     feature: Mapped[str] = mapped_column(String, nullable=False)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     model: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String)
+    request_id: Mapped[str | None] = mapped_column(String, index=True)
+    unit_price_snapshot: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class RAGRun(Base):
+    __tablename__ = "rag_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    rewritten_question: Mapped[str] = mapped_column(Text, nullable=False)
+    doc_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_name: Mapped[str] = mapped_column(String, nullable=False)
+    context_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    citation_support_rate: Mapped[float | None] = mapped_column(Float)
+    answer_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running")
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    completed_at: Mapped[str | None] = mapped_column(String)
+
+
+class RAGRetrievedChunk(Base):
+    __tablename__ = "rag_retrieved_chunks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String, ForeignKey("rag_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    doc_id: Mapped[str | None] = mapped_column(String, index=True)
+    filename: Mapped[str | None] = mapped_column(String)
+    page_num: Mapped[int | None] = mapped_column(Integer)
+    chunk_index: Mapped[int | None] = mapped_column(Integer)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    distance: Mapped[float | None] = mapped_column(Float)
+    snippet: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    support_status: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 

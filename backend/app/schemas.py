@@ -129,6 +129,10 @@ class QuizStreamRequest(BaseModel):
     types: list[str] = Field(default_factory=lambda: ["MC"])
     count: int = Field(default=10, ge=1, le=50)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    course_id: str | None = None
+    publish_to_course: bool = False
+    due_at: str | None = None
 
 
 class MindmapRequest(BaseModel):
@@ -143,6 +147,17 @@ class FlashcardStreamRequest(BaseModel):
 class QuizAttemptRequest(BaseModel):
     answers: dict[str, Any] | list[Any]
     duration_sec: int | None = Field(default=None, ge=0)
+
+
+class CourseQuizPublishRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    due_at: str | None = None
+    status: Literal["published", "draft"] = "published"
+
+
+class WrongbookFlashcardRequest(BaseModel):
+    limit: int = Field(default=10, ge=1, le=50)
+    quiz_id: str | None = None
 
 
 class FlashcardCreate(BaseModel):

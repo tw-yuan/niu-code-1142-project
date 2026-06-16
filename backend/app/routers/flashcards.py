@@ -11,6 +11,7 @@ from app.schemas import (
     FlashcardReviewRequest,
     FlashcardStreamRequest,
     FlashcardUpdate,
+    WrongbookFlashcardRequest,
 )
 from app.services.cost_service import check_quota
 from app.services.document_service import DocumentService
@@ -64,6 +65,19 @@ async def create_flashcard(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).create_flashcard(current_user.id, body)
+
+
+@router.post("/from-wrongbook")
+async def create_from_wrongbook(
+    body: WrongbookFlashcardRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await LearningService(db).create_flashcards_from_wrongbook(
+        current_user.id,
+        limit=body.limit,
+        quiz_id=body.quiz_id,
+    )
 
 
 @router.put("/{card_id}")

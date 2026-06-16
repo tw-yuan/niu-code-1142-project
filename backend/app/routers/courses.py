@@ -12,6 +12,7 @@ from app.schemas import (
 )
 from app.services.audit_service import AuditService
 from app.services.courses_service import CoursesService
+from app.services.learning_service import LearningService
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -197,22 +198,46 @@ async def course_progress(
     return await CoursesService(db).progress(current_user.id, course_id)
 
 
+@router.get("/{course_id}/quizzes")
+async def course_quizzes(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await LearningService(db).course_quizzes(current_user.id, course_id)
+
+
 @router.post("/{course_id}/documents")
 async def add_course_document(
     course_id: str,
     body: CourseDocumentRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await CoursesService(db).add_document(current_user.id, course_id, body)
+    result = await CoursesService(db).add_document(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.document_add",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:document:{body.doc_id}",
+        request=request,
+    )
+    return result
 
 
 @router.delete("/{course_id}/documents/{doc_id}")
 async def remove_course_document(
     course_id: str,
     doc_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await CoursesService(db).remove_document(current_user.id, course_id, doc_id)
+    await AuditService(db).log(
+        "course.document_remove",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:document:{doc_id}",
+        request=request,
+    )
     return {"ok": True}

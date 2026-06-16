@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import QuizAttemptRequest, QuizStreamRequest
+from app.schemas import CourseQuizPublishRequest, QuizAttemptRequest, QuizStreamRequest
 from app.services.cost_service import check_quota
 from app.services.learning_service import LearningService
 
@@ -20,22 +20,36 @@ async def stream_quiz(
     db: AsyncSession = Depends(get_db),
 ):
     svc = LearningService(db)
-    await svc._validate_documents(current_user.id, body.doc_ids)
     await check_quota(db, current_user.id)
 
     async def event_stream():
         full = ""
         try:
             async for chunk in svc.stream_quiz(
-                current_user.id, body.doc_ids, body.types, body.count, body.difficulty
+                current_user.id,
+                body.doc_ids,
+                body.types,
+                body.count,
+                body.difficulty,
+                course_id=body.course_id if body.publish_to_course else None,
             ):
                 full += chunk
                 yield _sse({"type": "chunk", "content": chunk})
             quiz = await svc.save_quiz(
                 current_user.id,
                 body.doc_ids,
-                {"types": body.types, "count": body.count, "difficulty": body.difficulty},
+                {
+                    "types": body.types,
+                    "count": body.count,
+                    "difficulty": body.difficulty,
+                    "course_id": body.course_id,
+                    "published": body.publish_to_course,
+                },
                 full,
+                title=body.title,
+                course_id=body.course_id,
+                publish_to_course=body.publish_to_course,
+                due_at=body.due_at,
             )
             yield _sse(
                 {"type": "quiz_meta", "data": {"quiz_id": quiz.id, "question_count": body.count}}
@@ -66,6 +80,24 @@ async def wrongbook(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).wrongbook(current_user.id)
+
+
+@router.post("/{quiz_id}/publish/{course_id}")
+async def publish_quiz(
+    quiz_id: str,
+    course_id: str,
+    body: CourseQuizPublishRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await LearningService(db).publish_quiz_to_course(
+        current_user.id,
+        course_id,
+        quiz_id,
+        title=body.title,
+        due_at=body.due_at,
+        status_value=body.status,
+    )
 
 
 @router.get("/{quiz_id}")
