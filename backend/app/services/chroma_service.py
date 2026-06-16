@@ -96,13 +96,25 @@ class ChromaService:
             for i in range(len(documents))
         ]
 
-    async def get_document_chunks(self, user_id: str, doc_ids: list[str]) -> list[dict[str, Any]]:
-        return await asyncio.to_thread(self._get_document_chunks_sync, user_id, doc_ids)
+    async def get_document_chunks(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        shared_doc_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._get_document_chunks_sync, user_id, doc_ids, shared_doc_ids
+        )
 
-    def _get_document_chunks_sync(self, user_id: str, doc_ids: list[str]) -> list[dict[str, Any]]:
+    def _get_document_chunks_sync(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        shared_doc_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             results = self.collection.get(
-                where=_where_for(user_id, doc_ids),
+                where=_where_for(user_id, doc_ids, shared_doc_ids),
                 include=["documents", "metadatas"],
             )
         except Exception as exc:

@@ -171,6 +171,23 @@ async def remove_member(
     return {"ok": True}
 
 
+@router.post("/{course_id}/leave")
+async def leave_course(
+    course_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await CoursesService(db).leave(current_user.id, course_id)
+    await AuditService(db).log(
+        "course.leave",
+        user_id=current_user.id,
+        resource=f"course:{course_id}",
+        request=request,
+    )
+    return {"ok": True}
+
+
 @router.get("/{course_id}/progress")
 async def course_progress(
     course_id: str,

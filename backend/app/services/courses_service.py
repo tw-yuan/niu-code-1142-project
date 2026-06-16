@@ -182,6 +182,17 @@ class CoursesService:
         await self.db.delete(member)
         await self.db.commit()
 
+    async def leave(self, user_id: str, course_id: str) -> None:
+        course = await self._get_course(course_id)
+        if course.owner_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Course owner cannot leave the course",
+            )
+        member = await self._get_member(course_id, user_id)
+        await self.db.delete(member)
+        await self.db.commit()
+
     async def members(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
         course = await self._get_course(course_id)
         requester = await self.require_member(user_id, course_id)

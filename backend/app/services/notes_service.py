@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import ChatSession, Document, Note, now_iso
 from app.schemas import NoteCreate, NoteUpdate
+from app.services.document_access import DocumentAccessService
 
 
 class NotesService:
@@ -111,7 +112,12 @@ class NotesService:
     async def _validate_doc(self, user_id: str, doc_id: str) -> None:
         doc = (
             await self.db.execute(
-                select(Document).where(and_(Document.id == doc_id, Document.user_id == user_id))
+                select(Document).where(
+                    and_(
+                        Document.id == doc_id,
+                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+                    )
+                )
             )
         ).scalar_one_or_none()
         if doc is None:

@@ -3,11 +3,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import ChatMessage, ChatSession, Document, Flashcard, Quiz, QuizAttempt
 from app.services.chroma_service import ChromaService
+from app.services.document_access import DocumentAccessService
 from app.services.storage import (
     ensure_user_quota,
     page_image_path,
@@ -63,14 +64,24 @@ class DocumentService:
         return doc
 
     async def list_documents(self, user_id: str) -> list[Document]:
-        stmt = (
-            select(Document)
-            .where(Document.user_id == user_id)
-            .order_by(desc(Document.created_at))
-        )
-        return list((await self.db.execute(stmt)).scalars().all())
+        return await DocumentAccessService(self.db).list_accessible_documents(user_id)
 
     async def get_document(self, user_id: str, doc_id: str) -> Document:
+        doc = (
+            await self.db.execute(
+                select(Document).where(
+                    and_(
+                        Document.id == doc_id,
+                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        return doc
+
+    async def get_owned_document(self, user_id: str, doc_id: str) -> Document:
         doc = (
             await self.db.execute(
                 select(Document).where(and_(Document.id == doc_id, Document.user_id == user_id))
@@ -81,7 +92,7 @@ class DocumentService:
         return doc
 
     async def delete_document(self, user_id: str, doc_id: str) -> None:
-        doc = await self.get_document(user_id, doc_id)
+        doc = await self.get_owned_document(user_id, doc_id)
         await ChromaService().delete_doc_chunks(user_id, doc_id)
         await self.db.delete(doc)
         await self.db.commit()

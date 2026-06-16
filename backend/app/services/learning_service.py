@@ -19,6 +19,7 @@ from app.schemas import (
     QuizAttemptRequest,
 )
 from app.services.chroma_service import ChromaService
+from app.services.document_access import DocumentAccessService
 from app.services.json_utils import parse_json_llm, to_json
 from app.services.llm_client import LLMClient
 from app.services.prompt_loader import load_prompt
@@ -337,7 +338,8 @@ class LearningService:
         return self._flashcard_out(card)
 
     async def _context(self, user_id: str, doc_ids: list[str]) -> str:
-        chunks = await ChromaService().get_document_chunks(user_id, doc_ids)
+        shared_doc_ids = await DocumentAccessService(self.db).shared_doc_ids(user_id, doc_ids)
+        chunks = await ChromaService().get_document_chunks(user_id, doc_ids, shared_doc_ids)
         text = "\n\n".join(
             f"[{idx}] {item['metadata'].get('filename')} 第 {item['metadata'].get('page_num')} 頁\n{item['text']}"
             for idx, item in enumerate(chunks, 1)
@@ -347,7 +349,12 @@ class LearningService:
     async def _validate_documents(self, user_id: str, doc_ids: list[str]) -> list[Document]:
         docs = (
             await self.db.execute(
-                select(Document).where(and_(Document.user_id == user_id, Document.id.in_(doc_ids)))
+                select(Document).where(
+                    and_(
+                        Document.id.in_(doc_ids),
+                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+                    )
+                )
             )
         ).scalars().all()
         if set(doc.id for doc in docs) != set(doc_ids):
@@ -357,7 +364,12 @@ class LearningService:
     async def _get_document(self, user_id: str, doc_id: str) -> Document:
         doc = (
             await self.db.execute(
-                select(Document).where(and_(Document.user_id == user_id, Document.id == doc_id))
+                select(Document).where(
+                    and_(
+                        Document.id == doc_id,
+                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+                    )
+                )
             )
         ).scalar_one_or_none()
         if doc is None:
