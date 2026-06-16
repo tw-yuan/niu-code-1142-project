@@ -5,12 +5,14 @@ import {
   CheckCircle2,
   FileText,
   KeyRound,
+  LayoutDashboard,
   MessageSquare,
   Plus,
   RefreshCw,
   Save,
   Search,
   Shield,
+  SlidersHorizontal,
   Trash2,
   Users,
   UserPlus,
@@ -161,6 +163,8 @@ const emptyForm: UserForm = {
   is_active: 1,
 }
 
+type AdminTab = "overview" | "users" | "resources" | "courses" | "settings" | "audit"
+
 export function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [cost, setCost] = useState<CostStats | null>(null)
@@ -182,6 +186,7 @@ export function AdminPage() {
   const [q, setQ] = useState("")
   const [role, setRole] = useState("")
   const [active, setActive] = useState("")
+  const [adminTab, setAdminTab] = useState<AdminTab>("overview")
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<UserForm>(emptyForm)
   const [password, setPassword] = useState("")
@@ -442,7 +447,10 @@ export function AdminPage() {
           <p className="mt-1 text-sm text-zinc-500">使用者、配額、成本、可靠性與稽核紀錄</p>
         </div>
         <div className="flex gap-2">
-          <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => setCreateOpen((value) => !value)}>
+          <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => {
+            setAdminTab("users")
+            setCreateOpen((value) => !value)
+          }}>
             <UserPlus size={16} />
             新增使用者
           </button>
@@ -456,6 +464,11 @@ export function AdminPage() {
       {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
       {message && <div className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">{message}</div>}
 
+      <div className="grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <AdminNav active={adminTab} onChange={setAdminTab} />
+        <div className="min-w-0">
+      {adminTab === "overview" && (
+        <>
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="使用者" value={stats?.users ?? 0} />
         <Stat label="文件" value={stats?.documents ?? 0} />
@@ -463,8 +476,37 @@ export function AdminPage() {
         <Stat label="今日 USD" value={cost?.today.total_usd ?? 0} />
         <Stat label="本月 USD" value={cost?.this_month.total_usd ?? 0} />
       </div>
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 font-semibold">Feature 成本</h2>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={featureRows}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="feature" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="total_usd" fill="#4f46e5" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-3 font-semibold">可靠性</h2>
+          <div className="mb-4 text-sm text-zinc-600">近 7 天 fallback：{reliability?.fallback_count_7d ?? 0}</div>
+          <div className="space-y-2">
+            {(reliability?.events ?? []).slice(0, 8).map((event) => (
+              <div key={event.id} className="rounded-md bg-zinc-50 p-3 text-xs text-zinc-600">
+                {shortDate(event.created_at)} · {String(event.detail.reason ?? "unknown")} · {String(event.detail.model ?? "")}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+        </>
+      )}
 
-      {createOpen && (
+      {adminTab === "users" && createOpen && (
         <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">新增使用者</h2>
           <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" onSubmit={(event) => createUser(event).catch(handleError)}>
@@ -481,6 +523,7 @@ export function AdminPage() {
         </section>
       )}
 
+      {adminTab === "users" && (
       <div className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(420px,0.65fr)]">
         <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 p-4">
@@ -628,7 +671,9 @@ export function AdminPage() {
           )}
         </section>
       </div>
+      )}
 
+      {adminTab === "resources" && (
       <section className="mb-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -640,7 +685,7 @@ export function AdminPage() {
             更新資源
           </button>
         </div>
-        <div className="grid gap-0 xl:grid-cols-3">
+        <div className="grid gap-0 xl:grid-cols-2">
           <ResourcePanel title="文件" icon={<FileText size={17} />}>
             {adminDocuments.map((doc) => (
               <div key={doc.id} className="border-b border-zinc-100 p-3 text-sm">
@@ -687,6 +732,22 @@ export function AdminPage() {
             {adminChats.length === 0 && <EmptyResource />}
           </ResourcePanel>
 
+        </div>
+      </section>
+      )}
+
+      {adminTab === "courses" && (
+      <section className="mb-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-zinc-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold">課程管理</h2>
+            <p className="mt-1 text-sm text-zinc-500">管理課程、成員與共享教材</p>
+          </div>
+          <button className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50" onClick={() => loadResources().catch(handleError)}>
+            <RefreshCw size={16} />
+            更新課程
+          </button>
+        </div>
           <ResourcePanel title="課程" icon={<BookOpen size={17} />}>
             {adminCourses.map((course) => (
               <div key={course.id} className="border-b border-zinc-100 p-3 text-sm">
@@ -756,37 +817,10 @@ export function AdminPage() {
             )}
             {adminCourses.length === 0 && <EmptyResource />}
           </ResourcePanel>
-        </div>
       </section>
+      )}
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 font-semibold">Feature 成本</h2>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={featureRows}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="feature" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="total_usd" fill="#4f46e5" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </section>
-        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 font-semibold">可靠性</h2>
-          <div className="mb-4 text-sm text-zinc-600">近 7 天 fallback：{reliability?.fallback_count_7d ?? 0}</div>
-          <div className="space-y-2">
-            {(reliability?.events ?? []).slice(0, 8).map((event) => (
-              <div key={event.id} className="rounded-md bg-zinc-50 p-3 text-xs text-zinc-600">
-                {shortDate(event.created_at)} · {String(event.detail.reason ?? "unknown")} · {String(event.detail.model ?? "")}
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
+      {adminTab === "settings" && (
       <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-3 font-semibold">LLM / Fallback 設定</h2>
         <textarea
@@ -801,7 +835,9 @@ export function AdminPage() {
           {configMessage && <span className="text-sm text-indigo-700">{configMessage}</span>}
         </div>
       </section>
+      )}
 
+      {adminTab === "audit" && (
       <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
           <h2 className="font-semibold">Audit logs</h2>
@@ -816,6 +852,9 @@ export function AdminPage() {
           ))}
         </div>
       </section>
+      )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -834,6 +873,56 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
     <div className="rounded-lg bg-zinc-50 p-3">
       <div className="text-xs text-zinc-500">{label}</div>
       <div className="mt-1 font-semibold">{value}</div>
+    </div>
+  )
+}
+
+function AdminNav({ active, onChange }: { active: AdminTab; onChange: (tab: AdminTab) => void }) {
+  const userArea: Array<[AdminTab, string, ReactNode]> = [
+    ["overview", "概覽", <LayoutDashboard size={16} />],
+    ["users", "使用者", <Users size={16} />],
+  ]
+  const adminArea: Array<[AdminTab, string, ReactNode]> = [
+    ["resources", "資源", <FileText size={16} />],
+    ["courses", "課程", <BookOpen size={16} />],
+    ["settings", "模型設定", <SlidersHorizontal size={16} />],
+    ["audit", "稽核", <Shield size={16} />],
+  ]
+  return (
+    <aside className="h-fit rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
+      <NavGroup title="User Area" items={userArea} active={active} onChange={onChange} />
+      <div className="my-3 border-t border-zinc-100" />
+      <NavGroup title="Admin Area" items={adminArea} active={active} onChange={onChange} />
+    </aside>
+  )
+}
+
+function NavGroup({
+  title,
+  items,
+  active,
+  onChange,
+}: {
+  title: string
+  items: Array<[AdminTab, string, ReactNode]>
+  active: AdminTab
+  onChange: (tab: AdminTab) => void
+}) {
+  return (
+    <div>
+      <div className="mb-2 px-2 text-xs font-semibold uppercase text-zinc-400">{title}</div>
+      <div className="space-y-1">
+        {items.map(([tab, label, icon]) => (
+          <button
+            key={tab}
+            className={tab === active ? "flex w-full items-center gap-2 rounded-md bg-indigo-50 px-3 py-2 text-left text-sm font-medium text-indigo-700" : "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50"}
+            onClick={() => onChange(tab)}
+          >
+            {icon}
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
