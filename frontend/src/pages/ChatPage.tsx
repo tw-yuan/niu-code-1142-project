@@ -1,15 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { MessageSquarePlus, Send, StopCircle } from "lucide-react"
-import { apiFetch, ChatMessage, ChatSession, Citation, DocumentItem } from "../lib/api"
+import ReactMarkdown from "react-markdown"
+import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge"
+import { apiFetch, ChatMessage, ChatSession, Citation, CourseItem, DocumentItem } from "../lib/api"
 import { streamFetch } from "../lib/stream"
+import { useAuthStore } from "../store/auth"
 
 export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [documents, setDocuments] = useState<DocumentItem[]>([])
+  const [courses, setCourses] = useState<CourseItem[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [selectedDocs, setSelectedDocs] = useState<string[]>([])
+  const [courseId, setCourseId] = useState<string>("")
   const [mode, setMode] = useState("enhanced")
   const [streaming, setStreaming] = useState(false)
   const [aborter, setAborter] = useState<AbortController | null>(null)
@@ -22,6 +27,7 @@ export function ChatPage() {
   useEffect(() => {
     loadSessions().catch(() => undefined)
     apiFetch<DocumentItem[]>("/documents").then(setDocuments).catch(() => setDocuments([]))
+    apiFetch<CourseItem[]>("/courses").then(setCourses).catch(() => setCourses([]))
   }, [])
 
   async function loadSessions() {
@@ -41,7 +47,7 @@ export function ChatPage() {
   async function createSession() {
     const session = await apiFetch<ChatSession>("/chat/sessions", {
       method: "POST",
-      body: JSON.stringify({ doc_ids: selectedDocs, mode }),
+      body: JSON.stringify({ doc_ids: selectedDocs, mode, course_id: courseId || null }),
     })
     setSessions((prev) => [session, ...prev])
     setActiveId(session.id)
@@ -50,12 +56,12 @@ export function ChatPage() {
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault()
-    if (!input.trim() || streaming) return
+    if (!input.trim() || streaming || aiDisabled) return
     let sessionId = activeId
     if (!sessionId) {
       const session = await apiFetch<ChatSession>("/chat/sessions", {
         method: "POST",
-        body: JSON.stringify({ doc_ids: selectedDocs, mode }),
+        body: JSON.stringify({ doc_ids: selectedDocs, mode, course_id: courseId || null }),
       })
       setSessions((prev) => [session, ...prev])
       sessionId = session.id
@@ -125,6 +131,19 @@ export function ChatPage() {
             <option value="strict">嚴格</option>
             <option value="socratic">蘇格拉底</option>
           </select>
+          <label className="mb-2 block text-xs font-medium text-zinc-500">範圍</label>
+          <select
+            className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            value={courseId}
+            onChange={(event) => setCourseId(event.target.value)}
+          >
+            <option value="">個人文件</option>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.title}
+              </option>
+            ))}
+          </select>
           <div className="space-y-2">
             {documents
               .filter((doc) => doc.status === "ready")
@@ -164,6 +183,9 @@ export function ChatPage() {
       <section className="flex min-h-[calc(100vh-40px)] flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
           <h1 className="font-semibold">{activeSession?.title || "RAG 對話"}</h1>
+          {activeSession?.course_id && (
+            <div className="mt-1 text-xs text-zinc-500">課程對話：{courses.find((course) => course.id === activeSession.course_id)?.title ?? activeSession.course_id}</div>
+          )}
         </div>
         <div className="flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin">
           {messages.map((message, index) => (
@@ -179,14 +201,31 @@ export function ChatPage() {
                     : "border border-zinc-200 bg-zinc-50 text-zinc-900",
                 ].join(" ")}
               >
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                {message.role === "assistant" ? (
+                  <div className="prose prose-zinc max-w-none text-sm">
+                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                )}
               </div>
+              {message.role === "assistant" && activeSession?.mode !== "strict" && message.content && (
+                <AIGeneratedBadge
+                  variant="inline"
+                  text={activeSession?.mode === "socratic" ? "AI 引導問答，答案由您作答" : "AI 生成回應，請搭配引用驗證"}
+                />
+              )}
               {message.citations && message.citations.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
                   {message.citations.map((citation) => (
-                    <span key={`${citation.doc_id}-${citation.chunk_index}`} className="rounded-lg bg-zinc-100 px-2 py-1">
+                    <a
+                      key={`${citation.doc_id}-${citation.chunk_index}`}
+                      href={`/documents/${citation.doc_id}`}
+                      className="rounded-lg bg-zinc-100 px-2 py-1 hover:bg-zinc-200"
+                    >
                       [{citation.index}] {citation.filename} p.{citation.page}
-                    </span>
+                      {citation.scope === "course" ? " · 課程" : ""}
+                    </a>
                   ))}
                 </div>
               )}
@@ -200,6 +239,7 @@ export function ChatPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="輸入問題"
+              disabled={aiDisabled}
             />
             {streaming ? (
               <button
@@ -211,7 +251,10 @@ export function ChatPage() {
                 停止
               </button>
             ) : (
-              <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+              <button
+                disabled={aiDisabled}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              >
                 <Send size={16} />
                 送出
               </button>
@@ -222,3 +265,5 @@ export function ChatPage() {
     </div>
   )
 }
+  const user = useAuthStore((state) => state.user)
+  const aiDisabled = user?.quota_status === "exceeded"

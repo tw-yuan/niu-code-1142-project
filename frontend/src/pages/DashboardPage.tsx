@@ -1,17 +1,22 @@
-import { BrainCircuit, FileText, MessageSquareText, TrendingUp } from "lucide-react"
+import { BrainCircuit, FileText, ListTodo, MessageSquareText, TrendingUp } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
-import { apiFetch, DocumentItem } from "../lib/api"
+import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api"
 
 export function DashboardPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([])
+  const [tasks, setTasks] = useState<Array<Record<string, any>>>([])
+  const [flashcards, setFlashcards] = useState<FlashcardItem[]>([])
 
   useEffect(() => {
     apiFetch<DocumentItem[]>("/documents").then(setDocuments).catch(() => setDocuments([]))
+    apiFetch<{ tasks: Array<Record<string, any>> }>("/goals/today").then((data) => setTasks(data.tasks)).catch(() => setTasks([]))
+    apiFetch<FlashcardItem[]>("/flashcards").then(setFlashcards).catch(() => setFlashcards([]))
   }, [])
 
   const ready = documents.filter((doc) => doc.status === "ready").length
   const processing = documents.filter((doc) => doc.status !== "ready" && doc.status !== "error").length
+  const due = flashcards.filter((card) => card.next_review <= new Date().toISOString()).length
 
   return (
     <div>
@@ -23,8 +28,23 @@ export function DashboardPage() {
         <Metric title="文件總數" value={documents.length} icon={FileText} />
         <Metric title="可用文件" value={ready} icon={TrendingUp} />
         <Metric title="處理中" value={processing} icon={MessageSquareText} />
-        <Metric title="待複習" value={0} icon={BrainCircuit} />
+        <Metric title="待複習" value={due} icon={BrainCircuit} />
       </div>
+      <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
+        <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
+          <ListTodo size={18} className="text-zinc-500" />
+          <h2 className="font-semibold">今日任務</h2>
+        </div>
+        <div className="divide-y divide-zinc-100">
+          {tasks.map((task, index) => (
+            <div key={index} className="px-5 py-3 text-sm">
+              <div className="font-medium">{taskLabel(task)}</div>
+              <div className="text-xs text-zinc-500">{String(task.doc_title ?? task.type)}</div>
+            </div>
+          ))}
+          {tasks.length === 0 && <div className="px-5 py-8 text-sm text-zinc-500">尚無任務，可先建立學習目標或產生閃卡。</div>}
+        </div>
+      </section>
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
           <h2 className="font-semibold">最近文件</h2>
@@ -44,6 +64,13 @@ export function DashboardPage() {
       </section>
     </div>
   )
+}
+
+function taskLabel(task: Record<string, any>) {
+  if (task.type === "flashcard_review") return `複習 ${task.due_count} 張閃卡`
+  if (task.type === "read_summary") return "閱讀或生成摘要"
+  if (task.type === "take_quiz") return `完成 ${task.suggested_count ?? 5} 題測驗`
+  return String(task.type)
 }
 
 function Metric({

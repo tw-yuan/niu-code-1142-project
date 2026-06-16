@@ -27,7 +27,9 @@ export async function* streamFetch(
   })
   if (!res.ok || !res.body) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? "Request failed")
+    throw new Error(
+      typeof err.detail === "string" ? err.detail : err.detail?.message ?? "Request failed",
+    )
   }
 
   const reader = res.body.getReader()
@@ -48,4 +50,3 @@ export async function* streamFetch(
     }
   }
 }
-

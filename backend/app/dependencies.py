@@ -40,12 +40,14 @@ def get_documents_collection(client: chromadb.ClientAPI):
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    if credentials is None:
+    token = credentials.credentials if credentials else request.query_params.get("token")
+    if token is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    payload = decode_token(credentials.credentials, "access")
+    payload = decode_token(token, "access")
     stmt = select(User).where(User.id == payload["sub"])
     user = (await db.execute(stmt)).scalar_one_or_none()
     if user is None or not user.is_active:
@@ -54,13 +56,15 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    if credentials is None:
+    token = credentials.credentials if credentials else request.query_params.get("token")
+    if token is None:
         return None
     try:
-        payload = decode_token(credentials.credentials, "access")
+        payload = decode_token(token, "access")
     except Exception:
         return None
     user = (await db.execute(select(User).where(User.id == payload["sub"]))).scalar_one_or_none()
