@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import secrets
 import string
@@ -370,6 +372,63 @@ class CoursesService:
             "students": rows,
             "quiz_summary": await self._course_quiz_summary(course_id, course_quiz_rows, members),
         }
+
+    async def progress_csv(self, user_id: str, course_id: str) -> str:
+        data = await self.progress(user_id, course_id)
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "username",
+                "email",
+                "role",
+                "chat_sessions",
+                "chat_messages",
+                "notes",
+                "flashcards",
+                "flashcards_due",
+                "flashcards_mastered",
+                "completed_quizzes",
+                "assigned_quizzes",
+                "quiz_attempts",
+                "quiz_avg_percent",
+                "last_activity_at",
+                "risk_level",
+            ]
+        )
+        for item in data["students"]:
+            writer.writerow(
+                [
+                    item["username"],
+                    item["email"] or "",
+                    item["role"],
+                    item["chat_sessions"],
+                    item["chat_messages"],
+                    item["notes"],
+                    item["flashcards"],
+                    item["flashcards_due"],
+                    item["flashcards_mastered"],
+                    item["quizzes"],
+                    item["assigned_quizzes"],
+                    item["quiz_attempts"],
+                    round(float(item["quiz_avg_score"]) * 100, 2),
+                    item["last_activity_at"] or "",
+                    item["risk_level"],
+                ]
+            )
+        writer.writerow([])
+        writer.writerow(["quiz_title", "student_count", "submission_count", "attempt_count", "score_avg_percent"])
+        for quiz in data["quiz_summary"]:
+            writer.writerow(
+                [
+                    quiz["title"],
+                    quiz["student_count"],
+                    quiz["submission_count"],
+                    quiz["attempt_count"],
+                    round(float(quiz["score_avg"]) * 100, 2),
+                ]
+            )
+        return output.getvalue()
 
     async def assignments(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
         course = await self._get_course(course_id)

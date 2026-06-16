@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   BrainCircuit,
@@ -21,6 +21,7 @@ import { Link } from "react-router-dom";
 import { LoadingButton } from "../components/app/LoadingButton";
 import {
   ApiError,
+  apiBlob,
   apiFetch,
   CourseAnnouncementItem,
   CourseAssignmentItem,
@@ -86,6 +87,10 @@ export function CoursesPage() {
   const canEditCourse = selected?.role === "instructor";
   const canManageMemberRoles = selected?.role === "instructor";
   const isOwner = Boolean(selected && selected.owner_id === user?.id);
+  const upcomingDeadlines = useMemo(
+    () => buildUpcomingDeadlines(assignments, courseQuizzes),
+    [assignments, courseQuizzes],
+  );
 
   async function load() {
     const [nextCourses, docs] = await Promise.all([
@@ -461,6 +466,24 @@ export function CoursesPage() {
     }
   }
 
+  async function exportProgressCsv() {
+    if (!selected || !canManage) return;
+    setBusyAction("export-progress");
+    try {
+      const blob = await apiBlob(`/courses/${selected.id}/progress.csv`);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${safeFilename(selected.title)}-progress.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function leaveCourse() {
     if (!selected || isOwner) return;
     setBusyAction("leave");
@@ -623,6 +646,38 @@ export function CoursesPage() {
                 )}
               </div>
               <div className="mb-5 grid gap-3 lg:grid-cols-2">
+                <section className="rounded-lg border border-zinc-200 lg:col-span-2">
+                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                    <CalendarClock size={16} className="text-zinc-500" />
+                    近期截止
+                  </div>
+                  <div className="grid gap-2 p-3 md:grid-cols-3">
+                    {upcomingDeadlines.map((item) => (
+                      <Link
+                        key={`${item.kind}-${item.id}`}
+                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50"
+                        to={item.href}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">
+                            {item.title}
+                          </span>
+                          <span className={deadlineClass(item.due_at)}>
+                            {deadlineLabel(item.due_at)}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {item.kindLabel} · {formatDateTime(item.due_at)}
+                        </div>
+                      </Link>
+                    ))}
+                    {upcomingDeadlines.length === 0 && (
+                      <div className="text-sm text-zinc-500 md:col-span-3">
+                        目前沒有近期截止項目
+                      </div>
+                    )}
+                  </div>
+                </section>
                 <section className="rounded-lg border border-zinc-200">
                   <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                     成員
@@ -683,7 +738,19 @@ export function CoursesPage() {
                 </section>
                 <section className="rounded-lg border border-zinc-200">
                   <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    學生進度
+                    <div className="flex items-center justify-between gap-2">
+                      <span>學生進度</span>
+                      {canManage && (
+                        <LoadingButton
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                          onClick={exportProgressCsv}
+                          loading={busyAction === "export-progress"}
+                          loadingText="匯出中"
+                        >
+                          匯出 CSV
+                        </LoadingButton>
+                      )}
+                    </div>
                   </div>
                   <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
                     {progress.map((item) => (
@@ -1574,6 +1641,60 @@ function assignmentNeedsDocument(kind: string) {
   return ["read_summary", "note", "flashcards"].includes(kind);
 }
 
+function buildUpcomingDeadlines(
+  assignments: CourseAssignmentItem[],
+  quizzes: QuizItem[],
+) {
+  const items = [
+    ...assignments
+      .filter((assignment) => assignment.due_at)
+      .map((assignment) => ({
+        id: assignment.id,
+        kind: "assignment",
+        kindLabel: "任務",
+        title: assignment.title,
+        due_at: assignment.due_at as string,
+        href: assignmentAction(assignment)?.href ?? "#",
+      })),
+    ...quizzes
+      .filter((quiz) => quiz.course_publication?.due_at)
+      .map((quiz) => ({
+        id: quiz.id,
+        kind: "quiz",
+        kindLabel: "測驗",
+        title: quiz.course_publication?.title ?? quiz.title,
+        due_at: quiz.course_publication?.due_at as string,
+        href: `/quiz/${quiz.id}`,
+      })),
+  ];
+  return items
+    .filter((item) => !Number.isNaN(new Date(item.due_at).getTime()))
+    .sort(
+      (left, right) =>
+        new Date(left.due_at).getTime() - new Date(right.due_at).getTime(),
+    )
+    .slice(0, 3);
+}
+
+function deadlineLabel(value: string) {
+  const diffMs = new Date(value).getTime() - Date.now();
+  if (Number.isNaN(diffMs)) return "期限";
+  if (diffMs < 0) return "已逾期";
+  const days = Math.ceil(diffMs / 86_400_000);
+  if (days <= 1) return "24 小時內";
+  if (days <= 7) return `${days} 天`;
+  return "之後";
+}
+
+function deadlineClass(value: string) {
+  const base = "shrink-0 rounded-md px-2 py-0.5 text-xs";
+  const diffMs = new Date(value).getTime() - Date.now();
+  if (Number.isNaN(diffMs)) return `${base} bg-zinc-100 text-zinc-600`;
+  if (diffMs < 0) return `${base} bg-red-50 text-red-600`;
+  if (diffMs <= 86_400_000) return `${base} bg-amber-50 text-amber-700`;
+  return `${base} bg-indigo-50 text-indigo-700`;
+}
+
 function normalizeDateTimeInput(value: string) {
   if (!value) return null;
   return new Date(value).toISOString();
@@ -1672,6 +1793,10 @@ function priorityClass(priority: string) {
   if (priority === "high") return `${base} bg-red-50 text-red-600`;
   if (priority === "low") return `${base} bg-zinc-100 text-zinc-600`;
   return `${base} bg-zinc-100 text-zinc-700`;
+}
+
+function safeFilename(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/g, "_") || "course";
 }
 
 function formatDateTime(value: string) {

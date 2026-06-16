@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
@@ -212,6 +213,27 @@ async def course_progress(
     db: AsyncSession = Depends(get_db),
 ):
     return await CoursesService(db).progress(current_user.id, course_id)
+
+
+@router.get("/{course_id}/progress.csv")
+async def course_progress_csv(
+    course_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    csv_text = await CoursesService(db).progress_csv(current_user.id, course_id)
+    await AuditService(db).log(
+        "course.progress_export",
+        user_id=current_user.id,
+        resource=f"course:{course_id}",
+        request=request,
+    )
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="course-{course_id}-progress.csv"'},
+    )
 
 
 @router.get("/{course_id}/quizzes")

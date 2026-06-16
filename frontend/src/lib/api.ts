@@ -398,6 +398,34 @@ export async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+export async function apiBlob(
+  path: string,
+  options: RequestInit = {},
+): Promise<Blob> {
+  const token = localStorage.getItem("access_token");
+  const headers = new Headers(options.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+  if (res.status === 401 && path !== "/auth/refresh") {
+    const refreshed = await refreshToken();
+    if (refreshed) return apiBlob(path, options);
+    localStorage.removeItem("access_token");
+    window.location.href = "/login";
+    throw new ApiError(401, "Unauthorized");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, errorMessage(err));
+  }
+  return res.blob();
+}
+
 export async function refreshToken(): Promise<boolean> {
   const res = await fetch(`${BASE_URL}/auth/refresh`, {
     method: "POST",
