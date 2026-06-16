@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/users")
 async def list_users(
     q: str | None = None,
-    role: str | None = Query(default=None, pattern="^(student|admin)$"),
+    role: str | None = Query(default=None, pattern="^(student|teacher|admin)$"),
     is_active: int | None = Query(default=None, ge=0, le=1),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),

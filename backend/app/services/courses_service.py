@@ -38,6 +38,12 @@ class CoursesService:
         self.db = db
 
     async def create(self, user_id: str, body: CourseCreate) -> dict[str, Any]:
+        user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None or user.role not in {"teacher", "admin"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Teacher role required to create courses",
+            )
         course = Course(
             owner_id=user_id,
             title=body.title,
@@ -119,7 +125,7 @@ class CoursesService:
     async def add_document(
         self, user_id: str, course_id: str, body: CourseDocumentRequest
     ) -> dict[str, Any]:
-        await self.require_role(user_id, course_id, {"instructor"})
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
         doc = (
             await self.db.execute(
                 select(Document).where(
@@ -146,7 +152,7 @@ class CoursesService:
         return {"ok": True}
 
     async def remove_document(self, user_id: str, course_id: str, doc_id: str) -> None:
-        await self.require_role(user_id, course_id, {"instructor"})
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
         item = (
             await self.db.execute(
                 select(CourseDocument).where(
@@ -173,17 +179,22 @@ class CoursesService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed")
         if course.owner_id != user_id and (actor.role != "instructor" or member.role == "instructor"):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
+        if course.owner_id != user_id and body.role == "instructor":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
         member.role = body.role
         await self.db.commit()
         return {"ok": True}
 
     async def remove_member(self, user_id: str, course_id: str, member_user_id: str) -> None:
         course = await self._get_course(course_id)
-        actor = await self.require_role(user_id, course_id, {"instructor"})
+        actor = await self.require_role(user_id, course_id, {"instructor", "ta"})
         member = await self._get_member(course_id, member_user_id)
         if member_user_id == course.owner_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed")
-        if course.owner_id != user_id and (actor.role != "instructor" or member.role == "instructor"):
+        if actor.role == "ta":
+            if member.role != "student":
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Instructor only")
+        elif course.owner_id != user_id and member.role == "instructor":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
         await self.db.delete(member)
         await self.db.commit()
@@ -202,7 +213,7 @@ class CoursesService:
     async def members(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
         course = await self._get_course(course_id)
         requester = await self.require_member(user_id, course_id)
-        can_view_email = course.owner_id == user_id or requester.role == "instructor"
+        can_view_email = course.owner_id == user_id or requester.role in {"instructor", "ta"}
         rows = (
             await self.db.execute(
                 select(CourseMember, User.username, User.email)
@@ -223,7 +234,7 @@ class CoursesService:
         ]
 
     async def progress(self, user_id: str, course_id: str) -> dict[str, Any]:
-        await self.require_role(user_id, course_id, {"instructor"})
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
         doc_ids = await self.course_document_ids(user_id, course_id)
         members = await self.members(user_id, course_id)
         course_quiz_rows = (
@@ -403,7 +414,7 @@ class CoursesService:
             "owner_id": course.owner_id,
             "title": course.title,
             "description": course.description,
-            "join_code": course.join_code if course.owner_id == user_id or member.role == "instructor" else None,
+            "join_code": course.join_code if course.owner_id == user_id or member.role in {"instructor", "ta"} else None,
             "role": member.role,
             "is_active": course.is_active,
             "created_at": course.created_at,

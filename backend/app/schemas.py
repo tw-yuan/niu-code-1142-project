@@ -186,7 +186,7 @@ class AdminUserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-    role: Literal["student", "admin"] = "student"
+    role: Literal["student", "teacher", "admin"] = "student"
     quota_mb: int = Field(default=500, ge=1)
     token_quota: int = Field(default=1_000_000, ge=1)
     is_active: int = Field(default=1, ge=0, le=1)
@@ -198,7 +198,7 @@ class AdminUserUpdate(BaseModel):
     quota_mb: int | None = Field(default=None, ge=1)
     token_quota: int | None = Field(default=None, ge=1)
     is_active: int | None = Field(default=None, ge=0, le=1)
-    role: Literal["student", "admin"] | None = None
+    role: Literal["student", "teacher", "admin"] | None = None
 
 
 class AdminPasswordReset(BaseModel):
@@ -213,7 +213,7 @@ class AdminCourseUpdate(BaseModel):
 
 class AdminCourseMemberUpdate(BaseModel):
     user_id: str
-    role: Literal["student", "instructor"] = "student"
+    role: Literal["student", "ta", "instructor"] = "student"
 
 
 class AdminConfigUpdate(BaseModel):
@@ -265,7 +265,7 @@ class CourseJoinRequest(BaseModel):
 
 
 class CourseMemberRoleUpdate(BaseModel):
-    role: Literal["student", "instructor"]
+    role: Literal["student", "ta", "instructor"]
 
 
 class CourseDocumentRequest(BaseModel):

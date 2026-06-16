@@ -50,7 +50,10 @@ export function CoursesPage() {
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const user = useAuthStore((state) => state.user);
-  const canManage = selected?.role === "instructor";
+  const canCreateCourse = user?.role === "teacher" || user?.role === "admin";
+  const canManage = selected?.role === "instructor" || selected?.role === "ta";
+  const canEditCourse = selected?.role === "instructor";
+  const canManageMemberRoles = selected?.role === "instructor";
   const isOwner = Boolean(selected && selected.owner_id === user?.id);
 
   async function load() {
@@ -184,9 +187,9 @@ export function CoursesPage() {
 
   async function updateMemberRole(
     member: CourseMember,
-    role: "student" | "instructor",
+    role: "student" | "ta" | "instructor",
   ) {
-    if (!selected || !canManage || member.role === role) return;
+    if (!selected || !canManageMemberRoles || member.role === role) return;
     setBusyAction(`member-role-${member.user_id}`);
     try {
       await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, {
@@ -245,28 +248,34 @@ export function CoursesPage() {
       </div>
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <form className="mb-5 space-y-3" onSubmit={create}>
-            <label
-              className="block text-xs font-medium text-zinc-500"
-              htmlFor="new-course-title"
-            >
-              課程名稱
-            </label>
-            <input
-              id="new-course-title"
-              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-            <LoadingButton
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              loading={busyAction === "create"}
-              loadingText="建立中"
-              icon={<Plus size={16} />}
-            >
-              建立課程
-            </LoadingButton>
-          </form>
+          {canCreateCourse ? (
+            <form className="mb-5 space-y-3" onSubmit={create}>
+              <label
+                className="block text-xs font-medium text-zinc-500"
+                htmlFor="new-course-title"
+              >
+                課程名稱
+              </label>
+              <input
+                id="new-course-title"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+              <LoadingButton
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                loading={busyAction === "create"}
+                loadingText="建立中"
+                icon={<Plus size={16} />}
+              >
+                建立課程
+              </LoadingButton>
+            </form>
+          ) : (
+            <div className="mb-5 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
+              只有教師或管理員可以建立課程。
+            </div>
+          )}
           <form className="mb-5 flex gap-2" onSubmit={join}>
             <label className="sr-only" htmlFor="course-join-code">
               邀請碼
@@ -304,7 +313,7 @@ export function CoursesPage() {
             <div>
               <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  {canManage ? (
+                  {canEditCourse ? (
                     <div className="grid max-w-xl gap-2">
                       <input
                         className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold"
@@ -400,21 +409,27 @@ export function CoursesPage() {
                           {canManage &&
                             member.user_id !== selected.owner_id && (
                               <div className="flex shrink-0 items-center gap-2">
-                                <select
-                                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs"
-                                  value={member.role}
-                                  onChange={(event) =>
-                                    updateMemberRole(
-                                      member,
-                                      event.target.value as
-                                        | "student"
-                                        | "instructor",
-                                    )
-                                  }
-                                >
-                                  <option value="student">student</option>
-                                  <option value="instructor">instructor</option>
-                                </select>
+                                {canManageMemberRoles && (
+                                  <select
+                                    className="rounded-md border border-zinc-200 px-2 py-1 text-xs"
+                                    value={member.role}
+                                    onChange={(event) =>
+                                      updateMemberRole(
+                                        member,
+                                        event.target.value as
+                                          | "student"
+                                          | "ta"
+                                          | "instructor",
+                                      )
+                                    }
+                                  >
+                                    <option value="student">student</option>
+                                    <option value="ta">ta</option>
+                                    <option value="instructor">
+                                      instructor
+                                    </option>
+                                  </select>
+                                )}
                                 <LoadingButton
                                   className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400"
                                   onClick={() => removeMember(member)}

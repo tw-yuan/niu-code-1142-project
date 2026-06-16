@@ -106,7 +106,7 @@ class LearningService:
         if course_id:
             from app.services.courses_service import CoursesService
 
-            await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
+            await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
             course_doc_ids = set(await CoursesService(self.db).course_document_ids(user_id, course_id))
             if not set(doc_ids).issubset(course_doc_ids):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
@@ -149,7 +149,7 @@ class LearningService:
         if course_id:
             from app.services.courses_service import CoursesService
 
-            await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
+            await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
         quiz = Quiz(
             user_id=user_id,
             course_id=course_id if publish_to_course else None,
@@ -208,7 +208,7 @@ class LearningService:
     ) -> dict[str, Any]:
         from app.services.courses_service import CoursesService
 
-        await CoursesService(self.db).require_role(user_id, course_id, {"instructor"})
+        await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
         quiz = (
             await self.db.execute(select(Quiz).where(and_(Quiz.id == quiz_id, Quiz.user_id == user_id)))
         ).scalar_one_or_none()
