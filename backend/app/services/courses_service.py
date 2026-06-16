@@ -22,6 +22,7 @@ from app.models.tables import (
     CourseDocument,
     CourseHelpRequest,
     CourseMember,
+    CourseQuestionBankItem,
     CourseQuiz,
     Document,
     Flashcard,
@@ -42,6 +43,7 @@ from app.schemas import (
     CourseDocumentRequest,
     CourseJoinRequest,
     CourseMemberRoleUpdate,
+    CourseQuestionReviewUpdate,
     CourseUpdate,
     CourseHelpRequestCreate,
     CourseHelpRequestUpdate,
@@ -573,6 +575,74 @@ class CoursesService:
         ).scalar_one_or_none()
         return self._help_request_out(help_request, username)
 
+    async def question_bank(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        course_quiz_rows = (
+            await self.db.execute(
+                select(CourseQuiz, Quiz)
+                .join(Quiz, Quiz.id == CourseQuiz.quiz_id)
+                .where(and_(CourseQuiz.course_id == course_id, CourseQuiz.status.in_(["published", "draft"])))
+                .order_by(desc(CourseQuiz.published_at))
+            )
+        ).all()
+        for course_quiz, quiz in course_quiz_rows:
+            await self._ensure_question_bank_items(course_quiz, quiz)
+        await self.db.commit()
+        rows = (
+            await self.db.execute(
+                select(CourseQuestionBankItem, Quiz.title, CourseQuiz.title)
+                .join(Quiz, Quiz.id == CourseQuestionBankItem.quiz_id)
+                .join(CourseQuiz, CourseQuiz.id == CourseQuestionBankItem.course_quiz_id)
+                .where(
+                    and_(
+                        CourseQuestionBankItem.course_id == course_id,
+                        CourseQuestionBankItem.status != "archived",
+                    )
+                )
+                .order_by(desc(CourseQuestionBankItem.updated_at), CourseQuestionBankItem.question_index)
+            )
+        ).all()
+        return [
+            self._question_bank_out(item, quiz_title, course_quiz_title)
+            for item, quiz_title, course_quiz_title in rows
+        ]
+
+    async def update_question_review(
+        self,
+        user_id: str,
+        course_id: str,
+        item_id: str,
+        body: CourseQuestionReviewUpdate,
+    ) -> dict[str, Any]:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        row = (
+            await self.db.execute(
+                select(CourseQuestionBankItem, Quiz.title, CourseQuiz.title)
+                .join(Quiz, Quiz.id == CourseQuestionBankItem.quiz_id)
+                .join(CourseQuiz, CourseQuiz.id == CourseQuestionBankItem.course_quiz_id)
+                .where(
+                    and_(
+                        CourseQuestionBankItem.id == item_id,
+                        CourseQuestionBankItem.course_id == course_id,
+                    )
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+        item, quiz_title, course_quiz_title = row
+        item.status = body.status
+        item.review_note = body.review_note
+        item.updated_at = now_iso()
+        if body.status in {"approved", "rejected"}:
+            item.reviewed_by = user_id
+            item.reviewed_at = now_iso()
+        elif body.status == "draft":
+            item.reviewed_by = None
+            item.reviewed_at = None
+        await self.db.commit()
+        return self._question_bank_out(item, quiz_title, course_quiz_title)
+
     async def dashboard(self, user_id: str) -> dict[str, Any]:
         course_ids = (
             await self.db.execute(
@@ -957,6 +1027,76 @@ class CoursesService:
             "resolved_at": help_request.resolved_at,
             "created_at": help_request.created_at,
             "updated_at": help_request.updated_at,
+        }
+
+    async def _ensure_question_bank_items(self, course_quiz: CourseQuiz, quiz: Quiz) -> None:
+        existing_items = (
+            await self.db.execute(
+                select(CourseQuestionBankItem).where(
+                    and_(
+                        CourseQuestionBankItem.course_id == course_quiz.course_id,
+                        CourseQuestionBankItem.quiz_id == quiz.id,
+                    )
+                )
+            )
+        ).scalars().all()
+        by_index = {item.question_index: item for item in existing_items}
+        questions = _safe_json_list(quiz.questions)
+        seen_indexes: set[int] = set()
+        for index, question in enumerate(questions):
+            seen_indexes.add(index)
+            question_json = json.dumps(question, ensure_ascii=False)
+            question_type = str(question.get("type") or question.get("kind") or "").strip() or None
+            item = by_index.get(index)
+            if item is None:
+                self.db.add(
+                    CourseQuestionBankItem(
+                        course_id=course_quiz.course_id,
+                        course_quiz_id=course_quiz.id,
+                        quiz_id=quiz.id,
+                        question_index=index,
+                        question_type=question_type,
+                        question_json=question_json,
+                        created_by=course_quiz.created_by,
+                    )
+                )
+            else:
+                item.course_quiz_id = course_quiz.id
+                item.question_type = question_type
+                item.question_json = question_json
+                item.updated_at = now_iso()
+        for item in existing_items:
+            if item.question_index not in seen_indexes and item.status != "archived":
+                item.status = "archived"
+                item.updated_at = now_iso()
+
+    def _question_bank_out(
+        self,
+        item: CourseQuestionBankItem,
+        quiz_title: str,
+        course_quiz_title: str,
+    ) -> dict[str, Any]:
+        try:
+            question = json.loads(item.question_json)
+        except json.JSONDecodeError:
+            question = {}
+        return {
+            "id": item.id,
+            "course_id": item.course_id,
+            "course_quiz_id": item.course_quiz_id,
+            "quiz_id": item.quiz_id,
+            "quiz_title": quiz_title,
+            "course_quiz_title": course_quiz_title,
+            "question_index": item.question_index,
+            "question_type": item.question_type,
+            "question": question,
+            "status": item.status,
+            "review_note": item.review_note,
+            "created_by": item.created_by,
+            "reviewed_by": item.reviewed_by,
+            "reviewed_at": item.reviewed_at,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
         }
 
     async def _assignment_completion(

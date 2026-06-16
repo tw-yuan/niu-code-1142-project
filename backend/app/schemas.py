@@ -166,6 +166,11 @@ class CourseQuizPublishRequest(BaseModel):
     status: Literal["published", "draft"] = "published"
 
 
+class CourseQuestionReviewUpdate(BaseModel):
+    status: Literal["draft", "approved", "rejected", "archived"]
+    review_note: str | None = Field(default=None, max_length=1000)
+
+
 class WrongbookFlashcardRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
     quiz_id: str | None = None

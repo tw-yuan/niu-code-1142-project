@@ -141,6 +141,33 @@ class CourseQuiz(Base):
     published_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
+class CourseQuestionBankItem(Base):
+    __tablename__ = "course_question_bank_items"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    course_quiz_id: Mapped[str] = mapped_column(
+        String, ForeignKey("course_quizzes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    quiz_id: Mapped[str] = mapped_column(
+        String, ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_type: Mapped[str | None] = mapped_column(String)
+    question_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    review_note: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
 class CourseAssignment(Base):
     __tablename__ = "course_assignments"
 

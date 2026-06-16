@@ -86,6 +86,22 @@ async def _ensure_sqlite_columns(conn) -> None:
         if column not in existing_course_documents:
             await conn.execute(text(f"ALTER TABLE course_documents ADD COLUMN {column} {column_type}"))
 
+    existing_question_bank = (
+        await conn.execute(text("PRAGMA table_info(course_question_bank_items)"))
+    ).fetchall()
+    if existing_question_bank:
+        question_bank_columns = {
+            "review_note": "TEXT",
+            "reviewed_by": "TEXT",
+            "reviewed_at": "TEXT",
+        }
+        existing_question_bank_columns = {row[1] for row in existing_question_bank}
+        for column, column_type in question_bank_columns.items():
+            if column not in existing_question_bank_columns:
+                await conn.execute(
+                    text(f"ALTER TABLE course_question_bank_items ADD COLUMN {column} {column_type}")
+                )
+
     existing_usage = {
         row[1] for row in (await conn.execute(text("PRAGMA table_info(token_usage)"))).fetchall()
     }

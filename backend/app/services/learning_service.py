@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
     CourseQuiz,
+    CourseQuestionBankItem,
     Document,
     Flashcard,
     LearningArtifact,
@@ -164,19 +165,20 @@ class LearningService:
         self.db.add(quiz)
         await self.db.flush()
         if course_id and publish_to_course:
-            self.db.add(
-                CourseQuiz(
-                    course_id=course_id,
-                    quiz_id=quiz.id,
-                    created_by=user_id,
-                    title=title or quiz.title,
-                    due_at=due_at,
-                    available_from=available_from,
-                    answer_visible_at=answer_visible_at,
-                    attempt_limit=attempt_limit,
-                    status="published",
-                )
+            course_quiz = CourseQuiz(
+                course_id=course_id,
+                quiz_id=quiz.id,
+                created_by=user_id,
+                title=title or quiz.title,
+                due_at=due_at,
+                available_from=available_from,
+                answer_visible_at=answer_visible_at,
+                attempt_limit=attempt_limit,
+                status="published",
             )
+            self.db.add(course_quiz)
+            await self.db.flush()
+            await self._sync_question_bank(course_quiz, quiz, questions, user_id)
         await self.db.commit()
         await self.db.refresh(quiz)
         return quiz
@@ -266,7 +268,10 @@ class LearningService:
                 status=status_value,
             )
             self.db.add(course_quiz)
+            await self.db.flush()
         quiz.course_id = course_id
+        if status_value == "published":
+            await self._sync_question_bank(course_quiz, quiz, json.loads(quiz.questions), user_id)
         await self.db.commit()
         return self._course_quiz_out(course_quiz)
 
@@ -625,6 +630,52 @@ class LearningService:
         if card is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found")
         return card
+
+    async def _sync_question_bank(
+        self,
+        course_quiz: CourseQuiz,
+        quiz: Quiz,
+        questions: list[dict[str, Any]],
+        user_id: str,
+    ) -> None:
+        existing_items = (
+            await self.db.execute(
+                select(CourseQuestionBankItem).where(
+                    and_(
+                        CourseQuestionBankItem.course_id == course_quiz.course_id,
+                        CourseQuestionBankItem.quiz_id == quiz.id,
+                    )
+                )
+            )
+        ).scalars().all()
+        by_index = {item.question_index: item for item in existing_items}
+        seen_indexes: set[int] = set()
+        for index, question in enumerate(questions):
+            seen_indexes.add(index)
+            item = by_index.get(index)
+            question_json = to_json(question)
+            question_type = str(question.get("type") or question.get("kind") or "").strip() or None
+            if item is None:
+                self.db.add(
+                    CourseQuestionBankItem(
+                        course_id=course_quiz.course_id,
+                        course_quiz_id=course_quiz.id,
+                        quiz_id=quiz.id,
+                        question_index=index,
+                        question_type=question_type,
+                        question_json=question_json,
+                        created_by=user_id,
+                    )
+                )
+            else:
+                item.course_quiz_id = course_quiz.id
+                item.question_type = question_type
+                item.question_json = question_json
+                item.updated_at = datetime.now(UTC).isoformat()
+        for item in existing_items:
+            if item.question_index not in seen_indexes and item.status != "archived":
+                item.status = "archived"
+                item.updated_at = datetime.now(UTC).isoformat()
 
     def _quiz_out(self, quiz: Quiz, include_answers: bool = True) -> dict[str, Any]:
         questions = json.loads(quiz.questions)

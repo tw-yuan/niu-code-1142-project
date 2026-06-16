@@ -228,6 +228,25 @@ export interface CourseQuizSummary {
   items: Array<Record<string, any>>;
 }
 
+export interface CourseQuestionBankItem {
+  id: string;
+  course_id: string;
+  course_quiz_id: string;
+  quiz_id: string;
+  quiz_title: string;
+  course_quiz_title: string;
+  question_index: number;
+  question_type: string | null;
+  question: Record<string, any>;
+  status: "draft" | "approved" | "rejected" | "archived" | string;
+  review_note: string | null;
+  created_by: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CourseProgress {
   course_id: string;
   document_count: number;

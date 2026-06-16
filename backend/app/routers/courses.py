@@ -13,6 +13,7 @@ from app.schemas import (
     CourseDocumentRequest,
     CourseJoinRequest,
     CourseMemberRoleUpdate,
+    CourseQuestionReviewUpdate,
     CourseUpdate,
     CourseHelpRequestCreate,
     CourseHelpRequestUpdate,
@@ -220,6 +221,35 @@ async def course_quizzes(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).course_quizzes(current_user.id, course_id)
+
+
+@router.get("/{course_id}/question-bank")
+async def course_question_bank(
+    course_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await CoursesService(db).question_bank(current_user.id, course_id)
+
+
+@router.put("/{course_id}/question-bank/{item_id}")
+async def update_course_question_review(
+    course_id: str,
+    item_id: str,
+    body: CourseQuestionReviewUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await CoursesService(db).update_question_review(current_user.id, course_id, item_id, body)
+    await AuditService(db).log(
+        "course.question_review_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:question:{item_id}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return item
 
 
 @router.get("/{course_id}/announcements")

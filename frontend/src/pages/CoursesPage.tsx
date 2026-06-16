@@ -28,6 +28,7 @@ import {
   CourseItem,
   CourseProgress,
   CourseProgressStudent,
+  CourseQuestionBankItem,
   DocumentItem,
   QuizItem,
 } from "../lib/api";
@@ -55,6 +56,9 @@ export function CoursesPage() {
     CourseProgress["quiz_summary"]
   >([]);
   const [courseQuizzes, setCourseQuizzes] = useState<QuizItem[]>([]);
+  const [questionBank, setQuestionBank] = useState<CourseQuestionBankItem[]>(
+    [],
+  );
   const [assignments, setAssignments] = useState<CourseAssignmentItem[]>([]);
   const [announcements, setAnnouncements] = useState<CourseAnnouncementItem[]>(
     [],
@@ -100,12 +104,19 @@ export function CoursesPage() {
     const [
       nextMembers,
       nextCourseQuizzes,
+      nextQuestionBank,
       nextAssignments,
       nextAnnouncements,
       nextHelpRequests,
     ] = await Promise.all([
       apiFetch<CourseMember[]>(`/courses/${id}/members`),
       apiFetch<QuizItem[]>(`/courses/${id}/quizzes`),
+      apiFetch<CourseQuestionBankItem[]>(`/courses/${id}/question-bank`).catch(
+        (err) => {
+          if (err instanceof ApiError && err.status === 403) return [];
+          throw err;
+        },
+      ),
       apiFetch<CourseAssignmentItem[]>(`/courses/${id}/assignments`),
       apiFetch<CourseAnnouncementItem[]>(`/courses/${id}/announcements`),
       apiFetch<CourseHelpRequestItem[]>(`/courses/${id}/help-requests`),
@@ -132,6 +143,7 @@ export function CoursesPage() {
     setCourseDescription(course.description ?? "");
     setMembers(nextMembers);
     setCourseQuizzes(nextCourseQuizzes);
+    setQuestionBank(nextQuestionBank);
     setAssignments(nextAssignments);
     setAnnouncements(nextAnnouncements);
     setHelpRequests(nextHelpRequests);
@@ -422,6 +434,26 @@ export function CoursesPage() {
       await apiFetch(`/courses/${selected.id}/help-requests/${request.id}`, {
         method: "PUT",
         body: JSON.stringify({ status }),
+      });
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function updateQuestionReview(
+    item: CourseQuestionBankItem,
+    status: "draft" | "approved" | "rejected" | "archived",
+  ) {
+    if (!selected || !canManage) return;
+    setBusyAction(`review-question-${item.id}`);
+    try {
+      await apiFetch(`/courses/${selected.id}/question-bank/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          status,
+          review_note: item.review_note,
+        }),
       });
       await openCourse(selected.id);
     } finally {
@@ -1250,6 +1282,149 @@ export function CoursesPage() {
                   )}
                 </div>
               </section>
+              {canManage && (
+                <section className="mb-5 rounded-lg border border-zinc-200">
+                  <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <ListChecks size={16} className="text-zinc-500" />
+                      題庫審題
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      已核准{" "}
+                      {
+                        questionBank.filter(
+                          (item) => item.status === "approved",
+                        ).length
+                      }
+                      /{questionBank.length}
+                    </div>
+                  </div>
+                  <div className="max-h-[520px] overflow-y-auto divide-y divide-zinc-100">
+                    {questionBank.map((item) => (
+                      <div key={item.id} className="px-3 py-3 text-sm">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={questionReviewClass(item.status)}
+                              >
+                                {questionReviewLabel(item.status)}
+                              </span>
+                              <span className="text-xs text-zinc-500">
+                                {item.course_quiz_title} · 第{" "}
+                                {item.question_index + 1} 題
+                              </span>
+                              {item.question_type && (
+                                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
+                                  {item.question_type}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-2 font-medium leading-6">
+                              {questionText(item.question)}
+                            </div>
+                            {questionOptions(item.question).length > 0 && (
+                              <div className="mt-2 grid gap-1 text-xs text-zinc-600 sm:grid-cols-2">
+                                {questionOptions(item.question).map(
+                                  (option, index) => (
+                                    <div
+                                      key={`${item.id}-${index}`}
+                                      className="rounded-md bg-zinc-50 px-2 py-1"
+                                    >
+                                      {option}
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+                              {item.question.answer !== undefined && (
+                                <span>
+                                  答案：{String(item.question.answer)}
+                                </span>
+                              )}
+                              {item.question.source_page && (
+                                <span>頁碼：{item.question.source_page}</span>
+                              )}
+                              {item.reviewed_at && (
+                                <span>
+                                  審核：{formatDateTime(item.reviewed_at)}
+                                </span>
+                              )}
+                            </div>
+                            {item.question.explanation && (
+                              <div className="mt-2 rounded-md bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-800">
+                                {String(item.question.explanation)}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            {item.status !== "approved" && (
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:text-zinc-400"
+                                onClick={() =>
+                                  updateQuestionReview(item, "approved")
+                                }
+                                loading={
+                                  busyAction === `review-question-${item.id}`
+                                }
+                                loadingText="核准中"
+                              >
+                                核准
+                              </LoadingButton>
+                            )}
+                            {item.status !== "rejected" && (
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:text-zinc-400"
+                                onClick={() =>
+                                  updateQuestionReview(item, "rejected")
+                                }
+                                loading={
+                                  busyAction === `review-question-${item.id}`
+                                }
+                                loadingText="退回中"
+                              >
+                                退回
+                              </LoadingButton>
+                            )}
+                            {item.status !== "draft" && (
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                onClick={() =>
+                                  updateQuestionReview(item, "draft")
+                                }
+                                loading={
+                                  busyAction === `review-question-${item.id}`
+                                }
+                                loadingText="重設中"
+                              >
+                                草稿
+                              </LoadingButton>
+                            )}
+                            <LoadingButton
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                              onClick={() =>
+                                updateQuestionReview(item, "archived")
+                              }
+                              loading={
+                                busyAction === `review-question-${item.id}`
+                              }
+                              loadingText="封存中"
+                            >
+                              封存
+                            </LoadingButton>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {questionBank.length === 0 && (
+                      <div className="px-3 py-8 text-sm text-zinc-500">
+                        發布課程測驗後會自動建立題庫
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
               <section className="rounded-lg border border-zinc-200">
                 <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                   <FileText size={16} className="text-zinc-500" />
@@ -1441,6 +1616,36 @@ function assignmentAction(assignment: CourseAssignmentItem) {
     return { href: `/flashcards?doc=${assignment.doc_id}`, label: "練閃卡" };
   }
   return null;
+}
+
+function questionText(question: Record<string, any>) {
+  return String(question.question ?? question.prompt ?? question.title ?? "");
+}
+
+function questionOptions(question: Record<string, any>) {
+  const raw = question.options;
+  if (Array.isArray(raw)) return raw.map((item) => String(item));
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw).map(
+      ([key, value]) => `${key}. ${String(value)}`,
+    );
+  }
+  return [];
+}
+
+function questionReviewLabel(status: string) {
+  if (status === "approved") return "已核准";
+  if (status === "rejected") return "退回";
+  if (status === "archived") return "封存";
+  return "草稿";
+}
+
+function questionReviewClass(status: string) {
+  const base = "rounded-md px-2 py-0.5 text-xs";
+  if (status === "approved") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "rejected") return `${base} bg-amber-50 text-amber-700`;
+  if (status === "archived") return `${base} bg-zinc-100 text-zinc-600`;
+  return `${base} bg-indigo-50 text-indigo-700`;
 }
 
 function helpStatusLabel(status: string) {
