@@ -391,6 +391,8 @@ export function AdminPage() {
 
   async function removeCourseMember(userId: string) {
     if (!selectedCourse) return
+    const member = selectedCourse.members.find((item) => item.user_id === userId)
+    if (member && !window.confirm(`確定移除 ${member.username}？`)) return
     const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/members/${userId}`, { method: "DELETE" })
     setSelectedCourse(updated)
     await loadResources()
@@ -409,6 +411,8 @@ export function AdminPage() {
 
   async function removeCourseDocument(docId: string) {
     if (!selectedCourse) return
+    const doc = selectedCourse.documents.find((item) => item.id === docId)
+    if (doc && !window.confirm(`確定從課程移除 ${doc.filename}？`)) return
     const updated = await apiFetch<AdminCourseDetail>(`/admin/courses/${selectedCourse.id}/documents/${docId}`, { method: "DELETE" })
     setSelectedCourse(updated)
     await loadResources()
@@ -724,19 +728,26 @@ export function AdminPage() {
                   {selectedCourse.members.map((member) => (
                     <div key={member.user_id} className="flex items-center justify-between rounded-md bg-white px-2 py-1 text-xs">
                       <span className="truncate">{member.username} · {member.role}</span>
-                      <button className="text-red-600" onClick={() => removeCourseMember(member.user_id).catch(handleError)}>移除</button>
+                      {member.user_id !== selectedCourse.owner_id && (
+                        <button className="text-red-600" onClick={() => removeCourseMember(member.user_id).catch(handleError)}>移除</button>
+                      )}
                     </div>
                   ))}
                 </div>
                 <div className="mt-4">
                   <div className="mb-2 text-xs font-semibold text-zinc-500">教材</div>
                   <div className="mb-2 flex gap-2">
-                    <input className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs" value={courseDocumentId} onChange={(event) => setCourseDocumentId(event.target.value)} placeholder="doc_id" />
+                    <select className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs" value={courseDocumentId} onChange={(event) => setCourseDocumentId(event.target.value)}>
+                      <option value="">選擇 ready 文件</option>
+                      {adminDocuments.filter((doc) => doc.status === "ready").map((doc) => (
+                        <option key={doc.id} value={doc.id}>{doc.filename} · {doc.username}</option>
+                      ))}
+                    </select>
                     <button className="rounded-lg border border-zinc-200 px-3 py-2 text-xs hover:bg-white" onClick={() => addCourseDocument().catch(handleError)}>加入</button>
                   </div>
                   {selectedCourse.documents.map((doc) => (
                     <div key={doc.id} className="flex items-center justify-between rounded-md bg-white px-2 py-1 text-xs">
-                      <span className="truncate">{doc.filename} · {doc.status}</span>
+                      <span className="truncate">{doc.filename} · {doc.username} · {doc.status}</span>
                       <button className="text-red-600" onClick={() => removeCourseDocument(doc.id).catch(handleError)}>移除</button>
                     </div>
                   ))}

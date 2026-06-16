@@ -15,13 +15,16 @@ from app.models.tables import (
     CourseDocument,
     CourseMember,
     Document,
-    Flashcard,
     Note,
-    Quiz,
     User,
 )
-from app.schemas import CourseCreate, CourseDocumentRequest, CourseJoinRequest
-from app.services.json_utils import from_json_list
+from app.schemas import (
+    CourseCreate,
+    CourseDocumentRequest,
+    CourseJoinRequest,
+    CourseMemberRoleUpdate,
+    CourseUpdate,
+)
 
 
 class CoursesService:
@@ -56,6 +59,26 @@ class CoursesService:
     async def get(self, user_id: str, course_id: str) -> dict[str, Any]:
         course = await self._get_course(course_id)
         await self.require_member(user_id, course_id)
+        return await self._out_for_member(course, user_id, include_detail=True)
+
+    async def update(self, user_id: str, course_id: str, body: CourseUpdate) -> dict[str, Any]:
+        course = await self._get_course(course_id)
+        await self.require_role(user_id, course_id, {"instructor"})
+        if "title" in body.model_fields_set and body.title is not None:
+            course.title = body.title
+        if "description" in body.model_fields_set:
+            course.description = body.description
+        await self.db.commit()
+        await self.db.refresh(course)
+        return await self._out_for_member(course, user_id, include_detail=True)
+
+    async def reset_join_code(self, user_id: str, course_id: str) -> dict[str, Any]:
+        course = await self._get_course(course_id)
+        if course.owner_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
+        course.join_code = await self._new_join_code()
+        await self.db.commit()
+        await self.db.refresh(course)
         return await self._out_for_member(course, user_id, include_detail=True)
 
     async def delete(self, user_id: str, course_id: str) -> None:
@@ -93,7 +116,13 @@ class CoursesService:
         await self.require_role(user_id, course_id, {"instructor"})
         doc = (
             await self.db.execute(
-                select(Document).where(and_(Document.id == body.doc_id, Document.user_id == user_id))
+                select(Document).where(
+                    and_(
+                        Document.id == body.doc_id,
+                        Document.user_id == user_id,
+                        Document.status == "ready",
+                    )
+                )
             )
         ).scalar_one_or_none()
         if doc is None:
@@ -124,8 +153,39 @@ class CoursesService:
         await self.db.delete(item)
         await self.db.commit()
 
+    async def update_member_role(
+        self,
+        user_id: str,
+        course_id: str,
+        member_user_id: str,
+        body: CourseMemberRoleUpdate,
+    ) -> dict[str, Any]:
+        course = await self._get_course(course_id)
+        actor = await self.require_role(user_id, course_id, {"instructor"})
+        member = await self._get_member(course_id, member_user_id)
+        if member_user_id == course.owner_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed")
+        if course.owner_id != user_id and (actor.role != "instructor" or member.role == "instructor"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
+        member.role = body.role
+        await self.db.commit()
+        return {"ok": True}
+
+    async def remove_member(self, user_id: str, course_id: str, member_user_id: str) -> None:
+        course = await self._get_course(course_id)
+        actor = await self.require_role(user_id, course_id, {"instructor"})
+        member = await self._get_member(course_id, member_user_id)
+        if member_user_id == course.owner_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed")
+        if course.owner_id != user_id and (actor.role != "instructor" or member.role == "instructor"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
+        await self.db.delete(member)
+        await self.db.commit()
+
     async def members(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
-        await self.require_member(user_id, course_id)
+        course = await self._get_course(course_id)
+        requester = await self.require_member(user_id, course_id)
+        can_view_email = course.owner_id == user_id or requester.role == "instructor"
         rows = (
             await self.db.execute(
                 select(CourseMember, User.username, User.email)
@@ -138,7 +198,7 @@ class CoursesService:
             {
                 "user_id": member.user_id,
                 "username": username,
-                "email": email,
+                "email": email if can_view_email or member.user_id == user_id else None,
                 "role": member.role,
                 "joined_at": member.joined_at,
             }
@@ -168,33 +228,22 @@ class CoursesService:
                     )
                 ).scalar_one()
             note_count = 0
-            flashcard_count = 0
-            quiz_count = 0
-            if doc_ids:
+            if chat_session_ids:
                 note_count = (
                     await self.db.execute(
-                        select(func.count(Note.id)).where(and_(Note.user_id == member_id, Note.doc_id.in_(doc_ids)))
-                    )
-                ).scalar_one()
-                flashcard_count = (
-                    await self.db.execute(
-                        select(func.count(Flashcard.id)).where(
-                            and_(Flashcard.user_id == member_id, Flashcard.doc_id.in_(doc_ids))
+                        select(func.count(Note.id)).where(
+                            and_(Note.user_id == member_id, Note.session_id.in_(chat_session_ids))
                         )
                     )
                 ).scalar_one()
-                quizzes = (
-                    await self.db.execute(select(Quiz).where(Quiz.user_id == member_id))
-                ).scalars().all()
-                quiz_count = sum(1 for quiz in quizzes if set(from_json_list(quiz.doc_ids)) & set(doc_ids))
             rows.append(
                 {
                     **member,
                     "chat_sessions": len(chat_sessions),
                     "chat_messages": int(message_count),
                     "notes": int(note_count),
-                    "flashcards": int(flashcard_count),
-                    "quizzes": int(quiz_count),
+                    "flashcards": 0,
+                    "quizzes": 0,
                     "last_activity_at": chat_sessions[0].updated_at if chat_sessions else None,
                 }
             )
@@ -205,7 +254,9 @@ class CoursesService:
         await self.require_member(user_id, course_id)
         rows = (
             await self.db.execute(
-                select(CourseDocument.doc_id).where(CourseDocument.course_id == course_id)
+                select(CourseDocument.doc_id)
+                .join(Document, Document.id == CourseDocument.doc_id)
+                .where(and_(CourseDocument.course_id == course_id, Document.status == "ready"))
             )
         ).scalars().all()
         return list(rows)
@@ -241,6 +292,18 @@ class CoursesService:
         if course is None or not course.is_active:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
         return course
+
+    async def _get_member(self, course_id: str, user_id: str) -> CourseMember:
+        member = (
+            await self.db.execute(
+                select(CourseMember).where(
+                    and_(CourseMember.course_id == course_id, CourseMember.user_id == user_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found")
+        return member
 
     async def _out_for_member(
         self,

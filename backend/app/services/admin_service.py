@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import and_, desc, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.models.tables import (
     CourseDocument,
     CourseMember,
     Document,
+    Quiz,
     SystemEvent,
     TokenUsage,
     User,
@@ -32,7 +33,7 @@ from app.schemas import (
 from app.services.audit_service import AuditService
 from app.services.chroma_service import ChromaService
 from app.services.cost_service import cost_stats
-from app.services.json_utils import from_json_list
+from app.services.json_utils import from_json_list, to_json
 from app.services.privacy_service import PrivacyService
 from app.services.security import hash_password
 from app.services.storage import remove_document_dir
@@ -289,12 +290,19 @@ class AdminService:
             "offset": offset,
         }
 
-    async def delete_document(self, doc_id: str, actor_id: str | None = None) -> dict[str, Any]:
+    async def delete_document(
+        self,
+        doc_id: str,
+        actor_id: str | None = None,
+        request: Request | None = None,
+    ) -> dict[str, Any]:
         doc = (await self.db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
         user_id = doc.user_id
+        filename = doc.filename
         await ChromaService().delete_doc_chunks(user_id, doc_id)
+        await self._remove_document_references(doc_id)
         await self.db.delete(doc)
         await self.db.commit()
         remove_document_dir(user_id, doc_id)
@@ -302,7 +310,8 @@ class AdminService:
             "admin.document_delete",
             user_id=actor_id,
             resource=f"document:{doc_id}",
-            detail={"owner_id": user_id, "filename": doc.filename},
+            request=request,
+            detail={"owner_id": user_id, "filename": filename},
         )
         return {"ok": True}
 
@@ -355,7 +364,12 @@ class AdminService:
             "offset": offset,
         }
 
-    async def chat_session_detail(self, session_id: str) -> dict[str, Any]:
+    async def chat_session_detail(
+        self,
+        session_id: str,
+        actor_id: str | None = None,
+        request: Request | None = None,
+    ) -> dict[str, Any]:
         row = (
             await self.db.execute(
                 select(ChatSession, User.username)
@@ -366,6 +380,13 @@ class AdminService:
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
         session, username = row
+        await AuditService(self.db).log(
+            "admin.chat_view",
+            user_id=actor_id,
+            resource=f"chat_session:{session_id}",
+            request=request,
+            detail={"owner_id": session.user_id},
+        )
         messages = (
             await self.db.execute(
                 select(ChatMessage)
@@ -396,7 +417,12 @@ class AdminService:
             ],
         }
 
-    async def delete_chat_session(self, session_id: str, actor_id: str | None = None) -> dict[str, Any]:
+    async def delete_chat_session(
+        self,
+        session_id: str,
+        actor_id: str | None = None,
+        request: Request | None = None,
+    ) -> dict[str, Any]:
         session = (
             await self.db.execute(select(ChatSession).where(ChatSession.id == session_id))
         ).scalar_one_or_none()
@@ -409,6 +435,7 @@ class AdminService:
             "admin.chat_delete",
             user_id=actor_id,
             resource=f"chat_session:{session_id}",
+            request=request,
             detail={"owner_id": owner_id},
         )
         return {"ok": True}
@@ -538,6 +565,7 @@ class AdminService:
         course_id: str,
         body: AdminCourseUpdate,
         actor_id: str | None = None,
+        request: Request | None = None,
     ) -> dict[str, Any]:
         course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
         if course is None:
@@ -551,11 +579,17 @@ class AdminService:
             "admin.course_update",
             user_id=actor_id,
             resource=f"course:{course_id}",
+            request=request,
             detail=body.model_dump(exclude_none=True),
         )
         return await self.course_detail(course_id)
 
-    async def delete_course(self, course_id: str, actor_id: str | None = None) -> dict[str, Any]:
+    async def delete_course(
+        self,
+        course_id: str,
+        actor_id: str | None = None,
+        request: Request | None = None,
+    ) -> dict[str, Any]:
         course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -565,6 +599,7 @@ class AdminService:
             "admin.course_delete",
             user_id=actor_id,
             resource=f"course:{course_id}",
+            request=request,
         )
         return {"ok": True}
 
@@ -573,8 +608,9 @@ class AdminService:
         course_id: str,
         body: AdminCourseMemberUpdate,
         actor_id: str | None = None,
+        request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course.id).where(Course.id == course_id))).scalar_one_or_none()
+        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
         user = (await self.db.execute(select(User.id).where(User.id == body.user_id))).scalar_one_or_none()
@@ -587,16 +623,20 @@ class AdminService:
                 )
             )
         ).scalar_one_or_none()
+        role = "instructor" if body.user_id == course.owner_id else body.role
         if member is None:
-            self.db.add(CourseMember(course_id=course_id, user_id=body.user_id, role=body.role))
+            self.db.add(CourseMember(course_id=course_id, user_id=body.user_id, role=role))
         else:
-            member.role = body.role
+            if body.user_id == course.owner_id and body.role != "instructor":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed")
+            member.role = role
         await self.db.commit()
         await AuditService(self.db).log(
             "admin.course_member_upsert",
             user_id=actor_id,
             resource=f"course:{course_id}:user:{body.user_id}",
-            detail={"role": body.role},
+            request=request,
+            detail={"role": role},
         )
         return await self.course_detail(course_id)
 
@@ -605,7 +645,13 @@ class AdminService:
         course_id: str,
         user_id: str,
         actor_id: str | None = None,
+        request: Request | None = None,
     ) -> dict[str, Any]:
+        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        if user_id == course.owner_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed")
         member = (
             await self.db.execute(
                 select(CourseMember).where(
@@ -621,6 +667,7 @@ class AdminService:
             "admin.course_member_remove",
             user_id=actor_id,
             resource=f"course:{course_id}:user:{user_id}",
+            request=request,
         )
         return await self.course_detail(course_id)
 
@@ -629,13 +676,28 @@ class AdminService:
         course_id: str,
         body: CourseDocumentRequest,
         actor_id: str | None = None,
+        request: Request | None = None,
     ) -> dict[str, Any]:
         course = (await self.db.execute(select(Course.id).where(Course.id == course_id))).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-        doc = (await self.db.execute(select(Document.id).where(Document.id == body.doc_id))).scalar_one_or_none()
+        doc = (await self.db.execute(select(Document).where(Document.id == body.doc_id))).scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        if doc.status != "ready":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not ready")
+        owner_member = (
+            await self.db.execute(
+                select(CourseMember).where(
+                    and_(CourseMember.course_id == course_id, CourseMember.user_id == doc.user_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if owner_member is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Document owner must be a course member",
+            )
         existing = (
             await self.db.execute(
                 select(CourseDocument).where(
@@ -650,6 +712,8 @@ class AdminService:
             "admin.course_document_add",
             user_id=actor_id,
             resource=f"course:{course_id}:document:{body.doc_id}",
+            request=request,
+            detail={"owner_id": doc.user_id, "filename": doc.filename},
         )
         return await self.course_detail(course_id)
 
@@ -658,6 +722,7 @@ class AdminService:
         course_id: str,
         doc_id: str,
         actor_id: str | None = None,
+        request: Request | None = None,
     ) -> dict[str, Any]:
         item = (
             await self.db.execute(
@@ -674,8 +739,40 @@ class AdminService:
             "admin.course_document_remove",
             user_id=actor_id,
             resource=f"course:{course_id}:document:{doc_id}",
+            request=request,
         )
         return await self.course_detail(course_id)
+
+    async def _remove_document_references(self, doc_id: str) -> None:
+        sessions = (
+            await self.db.execute(select(ChatSession).where(ChatSession.doc_ids.like(f'%"{doc_id}"%')))
+        ).scalars().all()
+        for session in sessions:
+            doc_ids = [item for item in from_json_list(session.doc_ids) if item != doc_id]
+            session.doc_ids = to_json(doc_ids)
+
+        messages = (
+            await self.db.execute(select(ChatMessage).where(ChatMessage.citations.like(f"%{doc_id}%")))
+        ).scalars().all()
+        for message in messages:
+            citations = from_json_list(message.citations)
+            filtered = [
+                item
+                for item in citations
+                if not isinstance(item, dict) or item.get("doc_id") != doc_id
+            ]
+            if len(filtered) != len(citations):
+                message.citations = to_json(filtered)
+
+        quizzes = (
+            await self.db.execute(select(Quiz).where(Quiz.doc_ids.like(f'%"{doc_id}"%')))
+        ).scalars().all()
+        for quiz in quizzes:
+            doc_ids = [item for item in from_json_list(quiz.doc_ids) if item != doc_id]
+            if doc_ids:
+                quiz.doc_ids = to_json(doc_ids)
+            else:
+                await self.db.delete(quiz)
 
     async def stats(self) -> dict[str, Any]:
         users = (await self.db.execute(select(func.count(User.id)))).scalar_one()

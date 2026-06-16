@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, rate_limit
 from app.models.tables import User
-from app.schemas import DocumentOut
+from app.schemas import DocumentOut, DocumentUploadResult
 from app.services.audit_service import AuditService
 from app.services.document_service import DocumentService
 from app.services.legal_service import LegalService
@@ -29,6 +29,51 @@ async def upload_document(
         detail={"filename": doc.filename, "file_size": doc.file_size, "file_type": doc.file_type},
     )
     return doc
+
+
+@router.post(
+    "/upload-batch",
+    response_model=list[DocumentUploadResult],
+    dependencies=[rate_limit("documents_upload_batch", 5, 3600)],
+)
+async def upload_documents(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files uploaded")
+    if len(files) > 10:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many files")
+
+    await LegalService(db).require_consent(current_user.id, "copyright_declaration")
+    svc = DocumentService(db)
+    audit = AuditService(db)
+    results: list[dict] = []
+    for upload in files:
+        filename = upload.filename or "upload"
+        try:
+            doc = await svc.upload(current_user.id, upload)
+            await audit.log(
+                "document.upload",
+                user_id=current_user.id,
+                resource=f"document:{doc.id}",
+                request=request,
+                detail={
+                    "filename": doc.filename,
+                    "file_size": doc.file_size,
+                    "file_type": doc.file_type,
+                },
+            )
+            results.append({"filename": doc.filename, "ok": True, "document": doc})
+        except HTTPException as exc:
+            await db.rollback()
+            results.append({"filename": filename, "ok": False, "error": _error_detail(exc.detail)})
+        except Exception as exc:
+            await db.rollback()
+            results.append({"filename": filename, "ok": False, "error": str(exc)})
+    return results
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -99,3 +144,13 @@ async def get_page_image(
         request=request,
     )
     return FileResponse(path, media_type="image/png")
+
+
+def _error_detail(detail: object) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, dict):
+        message = detail.get("message") or detail.get("detail") or detail.get("code")
+        if isinstance(message, str):
+            return message
+    return "Upload failed"

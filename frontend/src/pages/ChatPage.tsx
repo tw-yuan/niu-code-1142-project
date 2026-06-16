@@ -30,7 +30,7 @@ export function ChatPage() {
     [sessions, activeId],
   )
   const scopeDocuments = courseId
-    ? selectedCourse?.documents ?? []
+    ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
     : documents.filter((doc) => doc.status === "ready")
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export function ChatPage() {
     apiFetch<CourseItem>(`/courses/${courseId}`)
       .then((course) => {
         setSelectedCourse(course)
-        const allowed = new Set((course.documents ?? []).map((doc) => doc.id))
+        const allowed = new Set((course.documents ?? []).filter((doc) => doc.status === "ready").map((doc) => doc.id))
         setSelectedDocs((prev) => prev.filter((docId) => allowed.has(docId)))
       })
       .catch(() => {

@@ -201,19 +201,36 @@ class LearningService:
 
     async def wrongbook(self, user_id: str) -> list[dict[str, Any]]:
         quizzes = (
-            await self.db.execute(select(Quiz).where(Quiz.user_id == user_id))
+            await self.db.execute(select(Quiz).where(Quiz.user_id == user_id).order_by(desc(Quiz.created_at)))
         ).scalars().all()
         result: list[dict[str, Any]] = []
         for quiz in quizzes:
+            latest_attempt = (
+                await self.db.execute(
+                    select(QuizAttempt)
+                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz.id))
+                    .order_by(desc(QuizAttempt.completed_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if latest_attempt is None:
+                continue
             questions = json.loads(quiz.questions)
+            answers = json.loads(latest_attempt.answers)
             for idx, question in enumerate(questions):
+                actual = _answer_for(answers, idx)
+                if _answers_match(actual, question.get("answer")):
+                    continue
                 result.append(
                     {
                         "quiz_id": quiz.id,
+                        "attempt_id": latest_attempt.id,
                         "question_index": idx,
                         "question": question.get("question"),
                         "answer": question.get("answer"),
+                        "submitted_answer": actual,
                         "explanation": question.get("explanation"),
+                        "completed_at": latest_attempt.completed_at,
                     }
                 )
         return result[:50]
@@ -395,8 +412,19 @@ def _score_quiz(questions: list[dict[str, Any]], answers: dict[str, Any] | list[
         return 0.0
     correct = 0
     for idx, question in enumerate(questions):
-        expected = question.get("answer")
-        actual = answers.get(str(idx)) if isinstance(answers, dict) else answers[idx] if idx < len(answers) else None
-        if actual == expected:
+        actual = _answer_for(answers, idx)
+        if _answers_match(actual, question.get("answer")):
             correct += 1
     return correct / len(questions)
+
+
+def _answer_for(answers: dict[str, Any] | list[Any], index: int) -> Any:
+    if isinstance(answers, dict):
+        return answers.get(str(index), answers.get(index))
+    return answers[index] if index < len(answers) else None
+
+
+def _answers_match(actual: Any, expected: Any) -> bool:
+    if actual is None:
+        return False
+    return str(actual).strip() == str(expected).strip()

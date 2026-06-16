@@ -1,7 +1,14 @@
 import { ChangeEvent, useEffect, useState } from "react"
 import { BookOpenCheck, FileText, MessageSquareText, RefreshCw, Trash2, Upload } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { BASE_URL, apiFetch, apiUpload, DocumentItem, refreshToken } from "../lib/api"
+import {
+  BASE_URL,
+  apiFetch,
+  apiUploadMany,
+  DocumentItem,
+  DocumentUploadResult,
+  refreshToken,
+} from "../lib/api"
 import { wsManager } from "../lib/ws"
 
 export function DocumentsPage() {
@@ -10,7 +17,7 @@ export function DocumentsPage() {
   const [coverage, setCoverage] = useState<{ chapters: CoverageChapter[] }>({ chapters: [] })
   const [previewUrl, setPreviewUrl] = useState("")
   const [consented, setConsented] = useState(false)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const { id } = useParams()
@@ -65,27 +72,32 @@ export function DocumentsPage() {
     }
   }, [selected?.id, selected?.page_count])
 
-  async function uploadFile(file: File) {
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0) return
     setLoading(true)
     setError("")
     try {
-      await apiUpload<DocumentItem>("/documents/upload", file)
+      const results = await apiUploadMany<DocumentUploadResult[]>("/documents/upload-batch", files)
+      const failed = results.filter((item) => !item.ok)
+      if (failed.length > 0) {
+        setError(failed.map((item) => `${item.filename}: ${item.error ?? "上傳失敗"}`).join("；"))
+      }
       await loadDocuments()
     } catch (err) {
       setError(err instanceof Error ? err.message : "上傳失敗")
     } finally {
       setLoading(false)
-      setPendingFile(null)
+      setPendingFiles([])
     }
   }
 
   function onFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
+    const files = Array.from(event.target.files ?? [])
+    if (files.length === 0) return
     if (!consented) {
-      setPendingFile(file)
+      setPendingFiles(files)
     } else {
-      uploadFile(file).catch(() => undefined)
+      uploadFiles(files).catch(() => undefined)
     }
     event.target.value = ""
   }
@@ -96,7 +108,7 @@ export function DocumentsPage() {
       body: JSON.stringify({ consent_type: "copyright_declaration" }),
     })
     setConsented(true)
-    if (pendingFile) await uploadFile(pendingFile)
+    if (pendingFiles.length > 0) await uploadFiles(pendingFiles)
   }
 
   async function deleteDocument(docId: string) {
@@ -127,7 +139,7 @@ export function DocumentsPage() {
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
             <Upload size={16} />
             上傳
-            <input className="hidden" type="file" accept=".pdf,.md,.pptx,.docx" onChange={onFile} />
+            <input className="hidden" type="file" accept=".pdf,.md,.pptx,.docx" multiple onChange={onFile} />
           </label>
         </div>
       </div>
@@ -235,15 +247,15 @@ export function DocumentsPage() {
         )}
       </aside>
       </div>
-      {pendingFile && (
+      {pendingFiles.length > 0 && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-zinc-950/30 p-4">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold">上傳前著作權聲明</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-600">
-              您上傳的文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
+              您選擇的 {pendingFiles.length} 個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
             </p>
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onClick={() => setPendingFile(null)}>取消</button>
+              <button className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onClick={() => setPendingFiles([])}>取消</button>
               <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white" onClick={acceptConsentAndUpload}>我已了解並同意</button>
             </div>
           </div>

@@ -51,6 +51,13 @@ class DocumentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentUploadResult(BaseModel):
+    filename: str
+    ok: bool
+    document: DocumentOut | None = None
+    error: str | None = None
+
+
 class ChatSessionCreate(BaseModel):
     title: str | None = None
     doc_ids: list[str] = Field(default_factory=list)
@@ -202,8 +209,17 @@ class CourseCreate(BaseModel):
     description: str | None = None
 
 
+class CourseUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+
+
 class CourseJoinRequest(BaseModel):
     join_code: str = Field(min_length=4, max_length=12)
+
+
+class CourseMemberRoleUpdate(BaseModel):
+    role: Literal["student", "instructor"]
 
 
 class CourseDocumentRequest(BaseModel):

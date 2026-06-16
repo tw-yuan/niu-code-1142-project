@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, require_admin
@@ -174,10 +174,11 @@ async def list_documents(
 @router.delete("/documents/{doc_id}")
 async def delete_document(
     doc_id: str,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).delete_document(doc_id, actor_id=current_user.id)
+    return await AdminService(db).delete_document(doc_id, actor_id=current_user.id, request=request)
 
 
 @router.get("/chat-sessions")
@@ -195,19 +196,25 @@ async def list_chat_sessions(
 @router.get("/chat-sessions/{session_id}")
 async def chat_session_detail(
     session_id: str,
-    _: User = Depends(require_admin),
+    request: Request,
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).chat_session_detail(session_id)
+    return await AdminService(db).chat_session_detail(
+        session_id, actor_id=current_user.id, request=request
+    )
 
 
 @router.delete("/chat-sessions/{session_id}")
 async def delete_chat_session(
     session_id: str,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).delete_chat_session(session_id, actor_id=current_user.id)
+    return await AdminService(db).delete_chat_session(
+        session_id, actor_id=current_user.id, request=request
+    )
 
 
 @router.get("/courses")
@@ -236,56 +243,72 @@ async def course_detail(
 async def update_course(
     course_id: str,
     body: AdminCourseUpdate,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).update_course(course_id, body, actor_id=current_user.id)
+    return await AdminService(db).update_course(
+        course_id, body, actor_id=current_user.id, request=request
+    )
 
 
 @router.delete("/courses/{course_id}")
 async def delete_course(
     course_id: str,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).delete_course(course_id, actor_id=current_user.id)
+    return await AdminService(db).delete_course(course_id, actor_id=current_user.id, request=request)
 
 
 @router.put("/courses/{course_id}/members")
 async def upsert_course_member(
     course_id: str,
     body: AdminCourseMemberUpdate,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).upsert_course_member(course_id, body, actor_id=current_user.id)
+    return await AdminService(db).upsert_course_member(
+        course_id, body, actor_id=current_user.id, request=request
+    )
 
 
 @router.delete("/courses/{course_id}/members/{user_id}")
 async def remove_course_member(
     course_id: str,
     user_id: str,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).remove_course_member(course_id, user_id, actor_id=current_user.id)
+    return await AdminService(db).remove_course_member(
+        course_id, user_id, actor_id=current_user.id, request=request
+    )
 
 
 @router.post("/courses/{course_id}/documents")
 async def add_course_document(
     course_id: str,
     body: CourseDocumentRequest,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).add_course_document(course_id, body, actor_id=current_user.id)
+    return await AdminService(db).add_course_document(
+        course_id, body, actor_id=current_user.id, request=request
+    )
 
 
 @router.delete("/courses/{course_id}/documents/{doc_id}")
 async def remove_course_document(
     course_id: str,
     doc_id: str,
+    request: Request,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).remove_course_document(course_id, doc_id, actor_id=current_user.id)
+    return await AdminService(db).remove_course_document(
+        course_id, doc_id, actor_id=current_user.id, request=request
+    )

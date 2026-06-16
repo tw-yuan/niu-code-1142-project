@@ -1,18 +1,25 @@
 import { FormEvent, useEffect, useState } from "react"
 import { BookOpen, Copy, Plus, Users } from "lucide-react"
-import { apiFetch, CourseItem, DocumentItem } from "../lib/api"
+import { ApiError, apiFetch, CourseItem, DocumentItem } from "../lib/api"
+import { useAuthStore } from "../store/auth"
 
 export function CoursesPage() {
-  type CourseMember = { user_id: string; username: string; email: string; role: string; joined_at: string }
-  type CourseProgress = { user_id: string; username: string; email: string; role: string; chat_sessions: number; chat_messages: number; notes: number; flashcards: number; quizzes: number; last_activity_at: string | null }
+  type CourseMember = { user_id: string; username: string; email: string | null; role: string; joined_at: string }
+  type CourseProgress = { user_id: string; username: string; email: string | null; role: string; chat_sessions: number; chat_messages: number; notes: number; flashcards: number; quizzes: number; last_activity_at: string | null }
   const [courses, setCourses] = useState<CourseItem[]>([])
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [selected, setSelected] = useState<CourseItem | null>(null)
   const [title, setTitle] = useState("")
+  const [courseTitle, setCourseTitle] = useState("")
+  const [courseDescription, setCourseDescription] = useState("")
   const [joinCode, setJoinCode] = useState("")
   const [docId, setDocId] = useState("")
   const [members, setMembers] = useState<CourseMember[]>([])
   const [progress, setProgress] = useState<CourseProgress[]>([])
+  const [progressError, setProgressError] = useState("")
+  const user = useAuthStore((state) => state.user)
+  const canManage = selected?.role === "instructor"
+  const isOwner = Boolean(selected && selected.owner_id === user?.id)
 
   async function load() {
     const [nextCourses, docs] = await Promise.all([
@@ -27,8 +34,18 @@ export function CoursesPage() {
   async function openCourse(id: string) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`)
     const nextMembers = await apiFetch<CourseMember[]>(`/courses/${id}/members`)
-    const nextProgress = await apiFetch<{ students: CourseProgress[] }>(`/courses/${id}/progress`).catch(() => ({ students: [] }))
+    setProgressError("")
+    const nextProgress = await apiFetch<{ students: CourseProgress[] }>(`/courses/${id}/progress`).catch((err) => {
+      if (err instanceof ApiError && err.status === 403) {
+        setProgressError("僅教師可查看")
+      } else {
+        setProgressError("進度載入失敗")
+      }
+      return { students: [] }
+    })
     setSelected(course)
+    setCourseTitle(course.title)
+    setCourseDescription(course.description ?? "")
     setMembers(nextMembers)
     setProgress(nextProgress.students)
   }
@@ -67,6 +84,42 @@ export function CoursesPage() {
       method: "POST",
       body: JSON.stringify({ doc_id: docId }),
     })
+    await openCourse(selected.id)
+  }
+
+  async function saveCourse() {
+    if (!selected || !canManage || !courseTitle.trim()) return
+    const updated = await apiFetch<CourseItem>(`/courses/${selected.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: courseTitle.trim(),
+        description: courseDescription.trim() || null,
+      }),
+    })
+    await load()
+    await openCourse(updated.id)
+  }
+
+  async function resetJoinCode() {
+    if (!selected || !isOwner) return
+    const updated = await apiFetch<CourseItem>(`/courses/${selected.id}/join-code/reset`, { method: "POST" })
+    await load()
+    await openCourse(updated.id)
+  }
+
+  async function updateMemberRole(member: CourseMember, role: "student" | "instructor") {
+    if (!selected || !canManage || member.role === role) return
+    await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    })
+    await openCourse(selected.id)
+  }
+
+  async function removeMember(member: CourseMember) {
+    if (!selected || !canManage) return
+    if (!window.confirm(`確定移除 ${member.username ?? member.user_id}？`)) return
+    await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, { method: "DELETE" })
     await openCourse(selected.id)
   }
 
@@ -109,13 +162,30 @@ export function CoursesPage() {
             <div>
               <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">{selected.title}</h2>
-                  <p className="mt-1 text-sm text-zinc-500">{selected.description}</p>
+                  {canManage ? (
+                    <div className="grid max-w-xl gap-2">
+                      <input className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold" value={courseTitle} onChange={(event) => setCourseTitle(event.target.value)} />
+                      <textarea className="min-h-20 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={courseDescription} onChange={(event) => setCourseDescription(event.target.value)} placeholder="課程描述" />
+                      <button className="w-fit rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" onClick={saveCourse}>儲存</button>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 className="text-lg font-semibold">{selected.title}</h2>
+                      <p className="mt-1 text-sm text-zinc-500">{selected.description}</p>
+                    </>
+                  )}
                   {selected.join_code && (
-                    <button className="mt-2 inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700" onClick={() => navigator.clipboard.writeText(selected.join_code ?? "")}>
-                      <Copy size={14} />
-                      {selected.join_code}
-                    </button>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700" onClick={() => navigator.clipboard.writeText(selected.join_code ?? "")}>
+                        <Copy size={14} />
+                        {selected.join_code}
+                      </button>
+                      {isOwner && (
+                        <button className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50" onClick={resetJoinCode}>
+                          重置
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-sm text-zinc-500">
@@ -129,8 +199,21 @@ export function CoursesPage() {
                   <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
                     {members.map((member) => (
                       <div key={member.user_id} className="px-3 py-2 text-sm">
-                        <div className="font-medium">{member.username ?? member.user_id}</div>
-                        <div className="text-xs text-zinc-500">{member.email ?? ""} · {member.role}</div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{member.username ?? member.user_id}</div>
+                            <div className="truncate text-xs text-zinc-500">{member.email ?? ""} · {member.role}</div>
+                          </div>
+                          {canManage && member.user_id !== selected.owner_id && (
+                            <div className="flex shrink-0 items-center gap-2">
+                              <select className="rounded-md border border-zinc-200 px-2 py-1 text-xs" value={member.role} onChange={(event) => updateMemberRole(member, event.target.value as "student" | "instructor")}>
+                                <option value="student">student</option>
+                                <option value="instructor">instructor</option>
+                              </select>
+                              <button className="text-xs text-red-600" onClick={() => removeMember(member)}>移除</button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -153,11 +236,11 @@ export function CoursesPage() {
                         </div>
                       </div>
                     ))}
-                    {progress.length === 0 && <div className="px-3 py-8 text-sm text-zinc-500">目前沒有可顯示的進度</div>}
+                    {progress.length === 0 && <div className="px-3 py-8 text-sm text-zinc-500">{progressError || "目前沒有可顯示的進度"}</div>}
                   </div>
                 </section>
               </div>
-              {(selected.role === "instructor" || selected.join_code) && (
+              {canManage && (
                 <div className="mb-5 flex gap-2">
                   <select className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm" value={docId} onChange={(event) => setDocId(event.target.value)}>
                     <option value="">選擇我的文件</option>
@@ -175,7 +258,7 @@ export function CoursesPage() {
                       <div className="font-medium">{doc.filename}</div>
                       <div className="text-xs text-zinc-500">{doc.status}</div>
                     </div>
-                    {(selected.role === "instructor" || selected.join_code) && (
+                    {canManage && (
                       <button className="text-xs text-red-600" onClick={() => removeDocument(doc.id)}>移除</button>
                     )}
                   </div>

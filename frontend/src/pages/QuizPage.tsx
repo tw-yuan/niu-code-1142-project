@@ -128,6 +128,9 @@ export function QuizPage() {
               {wrongbook.map((item, index) => (
                 <article key={index} className="rounded-lg border border-zinc-200 p-4 text-sm">
                   <div className="font-medium">{String(item.question ?? "")}</div>
+                  {item.submitted_answer !== undefined && item.submitted_answer !== null && (
+                    <div className="mt-2 text-red-600">你的答案：{String(item.submitted_answer)}</div>
+                  )}
                   <div className="mt-2 text-zinc-600">答案：{String(item.answer ?? "")}</div>
                   {item.explanation !== undefined && item.explanation !== null && (
                     <div className="mt-1 text-zinc-500">{String(item.explanation)}</div>

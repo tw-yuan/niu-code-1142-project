@@ -42,6 +42,13 @@ export interface DocumentItem {
   updated_at: string
 }
 
+export interface DocumentUploadResult {
+  filename: string
+  ok: boolean
+  document: DocumentItem | null
+  error: string | null
+}
+
 export interface ChatMessage {
   id?: string
   role: "user" | "assistant"
@@ -176,6 +183,12 @@ export async function refreshToken(): Promise<boolean> {
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData()
   form.append("file", file)
+  return apiFetch<T>(path, { method: "POST", body: form })
+}
+
+export async function apiUploadMany<T>(path: string, files: File[]): Promise<T> {
+  const form = new FormData()
+  files.forEach((file) => form.append("files", file))
   return apiFetch<T>(path, { method: "POST", body: form })
 }
 

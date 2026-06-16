@@ -32,7 +32,7 @@ class DocumentService:
                 )
             )
         ).scalars().all()
-        if len(processing_count) >= 3:
+        if len(processing_count) >= 10:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many documents are processing",
@@ -47,10 +47,11 @@ class DocumentService:
         )
         self.db.add(doc)
         await self.db.flush()
-        local_path, file_size, file_type = await save_upload(user_id, doc.id, upload)
         try:
+            local_path, file_size, file_type = await save_upload(user_id, doc.id, upload)
             await ensure_user_quota(self.db, user_id, file_size)
         except Exception:
+            await self.db.rollback()
             remove_document_dir(user_id, doc.id)
             raise
         doc.local_path = local_path

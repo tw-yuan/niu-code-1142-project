@@ -23,7 +23,10 @@ class RAGService:
         shared_doc_ids = []
         if body.course_id:
             shared_doc_ids = await CoursesService(self.db).course_document_ids(user_id, body.course_id)
-        await self._validate_doc_ids(user_id, body.doc_ids, shared_doc_ids)
+            if not set(body.doc_ids).issubset(set(shared_doc_ids)):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        else:
+            await self._validate_doc_ids(user_id, body.doc_ids)
         session = ChatSession(
             user_id=user_id,
             title=body.title or "新的對話",
@@ -84,8 +87,12 @@ class RAGService:
         rewritten = await self._rewrite_question(question, history, user_id)
         llm = LLMClient(self.db)
         query_embedding = (await llm.embed([rewritten], user_id=user_id))[0]
+        explicit_doc_scope = bool(doc_ids)
         query_doc_ids = doc_ids
-        if session.course_id and not query_doc_ids:
+        if session.course_id:
+            allowed = set(shared_doc_ids)
+            query_doc_ids = [doc_id for doc_id in doc_ids if doc_id in allowed]
+        if session.course_id and not query_doc_ids and not explicit_doc_scope:
             query_doc_ids = shared_doc_ids
         if session.course_id and not query_doc_ids:
             chunks = []
