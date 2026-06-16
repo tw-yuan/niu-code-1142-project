@@ -256,10 +256,20 @@ class LearningService:
                 .order_by(desc(CourseQuiz.published_at))
             )
         ).all()
-        return [
-            {**self._quiz_out(quiz), "course_publication": self._course_quiz_out(course_quiz)}
-            for course_quiz, quiz in rows
-        ]
+        items: list[dict[str, Any]] = []
+        for course_quiz, quiz in rows:
+            item = {**self._quiz_out(quiz), "course_publication": self._course_quiz_out(course_quiz)}
+            latest_attempt = (
+                await self.db.execute(
+                    select(QuizAttempt)
+                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz.id))
+                    .order_by(desc(QuizAttempt.completed_at))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            item["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            items.append(item)
+        return items
 
     async def submit_quiz_attempt(
         self, user_id: str, quiz_id: str, body: QuizAttemptRequest
@@ -592,6 +602,15 @@ class LearningService:
             "due_at": course_quiz.due_at,
             "published_at": course_quiz.published_at,
             "created_by": course_quiz.created_by,
+        }
+
+    def _attempt_summary_out(self, attempt: QuizAttempt) -> dict[str, Any]:
+        return {
+            "id": attempt.id,
+            "quiz_id": attempt.quiz_id,
+            "total_score": attempt.total_score,
+            "duration_sec": attempt.duration_sec,
+            "completed_at": attempt.completed_at,
         }
 
     def _flashcard_out(self, card: Flashcard) -> dict[str, Any]:

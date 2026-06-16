@@ -106,6 +106,7 @@ class GoalsService:
             tasks.append(
                 {
                     "type": "take_quiz",
+                    "doc_id": doc.id,
                     "suggested_doc_id": doc.id,
                     "suggested_count": min(10, max(3, daily_chunks)),
                     "doc_title": doc.filename,
