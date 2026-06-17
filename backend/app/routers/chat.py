@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request
@@ -6,13 +7,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, rate_limit
-from app.models.tables import User
+from app.models.tables import SystemEvent, User
 from app.schemas import ChatSessionCreate, ChatSessionDetail, ChatSessionOut, MessageRequest
 from app.services.audit_service import AuditService
 from app.services.cost_service import check_quota
 from app.services.rag_service import RAGService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/sessions", response_model=ChatSessionOut)
@@ -89,8 +91,33 @@ async def send_message(
             await rag.save_message(
                 session_id, current_user.id, body.content, full_content, citations
             )
-        except Exception:
+        except Exception as exc:
             request_id = str(uuid.uuid4())
+            logger.exception(
+                "Chat message stream failed",
+                extra={
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "user_id": current_user.id,
+                },
+            )
+            db.add(
+                SystemEvent(
+                    event_type="chat_stream_error",
+                    severity="error",
+                    detail=json.dumps(
+                        {
+                            "request_id": request_id,
+                            "session_id": session_id,
+                            "user_id": current_user.id,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            await db.commit()
             yield _sse(
                 {
                     "type": "error",
