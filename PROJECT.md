@@ -524,7 +524,7 @@ data: {"type":"chunk","content":"..."}
 
 功能：
 
-- 從文件自動生成 front/back JSON。
+- 從單一文件或多份文件自動生成 front/back JSON。
 - 可手動建立與編輯。
 - 可從錯題本建立。
 - 使用 `quality` 0 到 5 記錄複習品質。
@@ -1256,6 +1256,10 @@ Admin 使用者會略過 endpoint-level `rate_limit()` dependency，但不一定
 - admin：管理後台、使用者管理、資源稽核、系統設定。
 
 Admin 頁仍以單一 React page 實作，但左側 `AdminNav` 已分成「使用者管理」與「系統管理」，並支援 `/admin?tab=users`、`/admin?tab=resources`、`/admin?tab=settings` 等 query deep link，讓 Dashboard 或後續通知入口可以直接開到指定後台區塊。
+
+Courses 頁支援 `/courses?course=<course_id>&tab=<tab>` deep link。`tab` 可為 `overview`、`materials`、`tasks`、`interaction`、`people`、`question-bank`。Dashboard 的未讀公告與待處理求助會直接跳到對應課程的 `interaction` 分頁。
+
+課程教材分頁支援多選 ready 教材與「整課問答 / 整課測驗或出題 / 整課閃卡」入口。這些入口會把 `course` 與 `doc`/`docs` query 帶到 Chat、Quiz、Flashcards。Chat 與 Quiz 的文件選擇區也提供一鍵全選與清空；Flashcards 可接收多個 `doc_ids` 生成閃卡。
 
 ### 20.3 API Client
 

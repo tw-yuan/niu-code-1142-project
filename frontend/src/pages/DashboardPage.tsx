@@ -132,7 +132,7 @@ export function DashboardPage() {
                 <Link
                   key={item.id}
                   className="block px-5 py-3 text-sm hover:bg-zinc-50"
-                  to={`/courses`}
+                  to={`/courses?course=${item.course_id}&tab=interaction`}
                 >
                   <div className="font-medium">{item.title}</div>
                   <div className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">
@@ -157,7 +157,7 @@ export function DashboardPage() {
                 <Link
                   key={item.id}
                   className="block px-5 py-3 text-sm hover:bg-zinc-50"
-                  to={`/courses`}
+                  to={`/courses?course=${item.course_id}&tab=interaction`}
                 >
                   <div className="font-medium">{item.title}</div>
                   <div className="mt-1 text-xs text-zinc-500">

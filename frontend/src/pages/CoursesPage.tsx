@@ -17,7 +17,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LoadingButton } from "../components/app/LoadingButton";
 import {
   ApiError,
@@ -88,8 +88,11 @@ export function CoursesPage() {
     "normal",
   );
   const [activeTab, setActiveTab] = useState<CourseTab>("overview");
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const location = useLocation();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const canCreateCourse = user?.role === "teacher" || user?.role === "admin";
   const canManage = selected?.role === "instructor" || selected?.role === "ta";
@@ -107,6 +110,17 @@ export function CoursesPage() {
       ),
     [selected],
   );
+  const readyCourseDocuments = useMemo(
+    () => courseDocuments.filter((doc) => doc.status === "ready"),
+    [courseDocuments],
+  );
+  const selectedReadyMaterialIds = selectedMaterialIds.filter((docId) =>
+    readyCourseDocuments.some((doc) => doc.id === docId),
+  );
+  const materialActionDocIds =
+    selectedReadyMaterialIds.length > 0
+      ? selectedReadyMaterialIds
+      : readyCourseDocuments.map((doc) => doc.id);
   const unreadAnnouncements = announcements.filter(
     (announcement) => !announcement.read_at,
   ).length;
@@ -160,7 +174,7 @@ export function CoursesPage() {
 
   useEffect(() => {
     if (activeTab === "question-bank" && !canManage) {
-      setActiveTab("overview");
+      setCourseTab("overview");
     }
   }, [activeTab, canManage]);
 
@@ -173,10 +187,19 @@ export function CoursesPage() {
     setDocuments(
       docs.filter((doc) => doc.status === "ready" && doc.user_id === user?.id),
     );
-    if (!selected && nextCourses[0]) await openCourse(nextCourses[0].id);
+    const params = new URLSearchParams(location.search);
+    const requestedCourseId = params.get("course");
+    const requestedTab = parseCourseTab(params.get("tab")) ?? "overview";
+    const targetCourseId =
+      requestedCourseId || (!selected ? nextCourses[0]?.id : null);
+    if (targetCourseId) await openCourse(targetCourseId, requestedTab, false);
   }
 
-  async function openCourse(id: string) {
+  async function openCourse(
+    id: string,
+    nextTab: CourseTab = "overview",
+    syncUrl = true,
+  ) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`);
     const [
       nextMembers,
@@ -226,12 +249,36 @@ export function CoursesPage() {
     setHelpRequests(nextHelpRequests);
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
-    setActiveTab("overview");
+    setSelectedMaterialIds([]);
+    const visibleTab = normalizeCourseTab(nextTab, course);
+    setActiveTab(visibleTab);
+    if (syncUrl) navigate(coursePath(id, visibleTab));
   }
 
   useEffect(() => {
     load().catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const requestedCourseId = params.get("course");
+    const requestedTab = parseCourseTab(params.get("tab"));
+    if (requestedCourseId && requestedCourseId !== selected?.id) {
+      openCourse(requestedCourseId, requestedTab ?? "overview", false).catch(
+        () => undefined,
+      );
+      return;
+    }
+    if (requestedTab && selected) {
+      setActiveTab(normalizeCourseTab(requestedTab, selected));
+    }
+  }, [location.search, selected?.id]);
+
+  function setCourseTab(tab: CourseTab) {
+    const nextTab = selected ? normalizeCourseTab(tab, selected) : tab;
+    setActiveTab(nextTab);
+    if (selected) navigate(coursePath(selected.id, nextTab), { replace: true });
+  }
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -275,7 +322,7 @@ export function CoursesPage() {
         method: "POST",
         body: JSON.stringify({ doc_id: docId }),
       });
-      await openCourse(selected.id);
+      await openCourse(selected.id, "materials");
     } finally {
       setBusyAction("");
     }
@@ -351,7 +398,7 @@ export function CoursesPage() {
       await apiFetch(`/courses/${selected.id}/documents/${id}`, {
         method: "DELETE",
       });
-      await openCourse(selected.id);
+      await openCourse(selected.id, "materials");
     } finally {
       setBusyAction("");
     }
@@ -802,7 +849,7 @@ export function CoursesPage() {
                           ? "bg-indigo-50 text-indigo-700"
                           : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900",
                       ].join(" ")}
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => setCourseTab(tab.id)}
                     >
                       <tab.icon size={15} />
                       {tab.label}
@@ -1706,9 +1753,86 @@ export function CoursesPage() {
               )}
               {activeTab === "materials" && (
                 <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
-                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <FileText size={16} className="text-zinc-500" />
-                    課程教材
+                  <div className="border-b border-zinc-200 px-3 py-3">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <FileText size={16} className="text-zinc-500" />
+                        課程教材
+                        <span className="text-xs font-normal text-zinc-500">
+                          已選 {selectedReadyMaterialIds.length} /{" "}
+                          {readyCourseDocuments.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                          onClick={() =>
+                            setSelectedMaterialIds(
+                              readyCourseDocuments.map((doc) => doc.id),
+                            )
+                          }
+                          disabled={readyCourseDocuments.length === 0}
+                        >
+                          全選教材
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                          onClick={() => setSelectedMaterialIds([])}
+                        >
+                          清空
+                        </button>
+                        {materialActionDocIds.length > 0 ? (
+                          <>
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                              to={scopedLearningPath(
+                                "/chat",
+                                selected.id,
+                                materialActionDocIds,
+                              )}
+                            >
+                              <MessageSquareText size={13} />
+                              整課問答
+                            </Link>
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                              to={scopedLearningPath(
+                                "/quiz/generate",
+                                selected.id,
+                                materialActionDocIds,
+                                canManage ? { publish: "1" } : undefined,
+                              )}
+                            >
+                              <ListChecks size={13} />
+                              {canManage ? "整課出題" : "整課測驗"}
+                            </Link>
+                            <Link
+                              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                              to={scopedLearningPath(
+                                "/flashcards",
+                                selected.id,
+                                materialActionDocIds,
+                              )}
+                            >
+                              <BrainCircuit size={13} />
+                              整課閃卡
+                            </Link>
+                          </>
+                        ) : (
+                          <span className="text-xs text-zinc-400">
+                            尚無可用教材
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {selectedReadyMaterialIds.length === 0 &&
+                      readyCourseDocuments.length > 0 && (
+                        <div className="mt-2 text-xs text-zinc-500">
+                          未選教材時，整課操作會使用全部可用教材。
+                        </div>
+                      )}
                   </div>
                   <div className="divide-y divide-zinc-100 px-3">
                     {(selected.documents ?? []).map((doc) => (
@@ -1716,11 +1840,35 @@ export function CoursesPage() {
                         key={doc.id}
                         className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div>
-                          <div className="font-medium">{doc.filename}</div>
-                          <div className="text-xs text-zinc-500">
-                            {doc.status}
-                            {doc.course_status === "removed" ? " · 已移除" : ""}
+                        <div className="flex min-w-0 items-start gap-2">
+                          {doc.course_status !== "removed" &&
+                            doc.status === "ready" && (
+                              <input
+                                className="mt-1"
+                                type="checkbox"
+                                checked={selectedMaterialIds.includes(doc.id)}
+                                onChange={(event) => {
+                                  setSelectedMaterialIds((current) =>
+                                    event.target.checked
+                                      ? [...current, doc.id]
+                                      : current.filter(
+                                          (item) => item !== doc.id,
+                                        ),
+                                  );
+                                }}
+                                aria-label={`選取教材 ${doc.filename}`}
+                              />
+                            )}
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {doc.filename}
+                            </div>
+                            <div className="text-xs text-zinc-500">
+                              {doc.status}
+                              {doc.course_status === "removed"
+                                ? " · 已移除"
+                                : ""}
+                            </div>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -1729,7 +1877,9 @@ export function CoursesPage() {
                               <>
                                 <Link
                                   className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                  to={`/chat?course=${selected.id}&doc=${doc.id}`}
+                                  to={scopedLearningPath("/chat", selected.id, [
+                                    doc.id,
+                                  ])}
                                 >
                                   <MessageSquareText size={13} />
                                   對話
@@ -1750,7 +1900,11 @@ export function CoursesPage() {
                                 </Link>
                                 <Link
                                   className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                  to={`/flashcards?doc=${doc.id}`}
+                                  to={scopedLearningPath(
+                                    "/flashcards",
+                                    selected.id,
+                                    [doc.id],
+                                  )}
                                 >
                                   <BrainCircuit size={13} />
                                   閃卡
@@ -1769,7 +1923,12 @@ export function CoursesPage() {
                             doc.status === "ready" && (
                               <Link
                                 className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}
+                                to={scopedLearningPath(
+                                  "/quiz/generate",
+                                  selected.id,
+                                  [doc.id],
+                                  { publish: "1" },
+                                )}
                               >
                                 發布測驗
                               </Link>
@@ -1845,6 +2004,53 @@ export function CoursesPage() {
       </div>
     </div>
   );
+}
+
+function parseCourseTab(value: string | null): CourseTab | null {
+  if (
+    value === "overview" ||
+    value === "materials" ||
+    value === "tasks" ||
+    value === "interaction" ||
+    value === "people" ||
+    value === "question-bank"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function normalizeCourseTab(tab: CourseTab, course: CourseItem): CourseTab {
+  if (
+    tab === "question-bank" &&
+    course.role !== "instructor" &&
+    course.role !== "ta"
+  ) {
+    return "overview";
+  }
+  return tab;
+}
+
+function coursePath(courseId: string, tab: CourseTab) {
+  const params = new URLSearchParams({ course: courseId });
+  if (tab !== "overview") params.set("tab", tab);
+  return `/courses?${params.toString()}`;
+}
+
+function scopedLearningPath(
+  path: string,
+  courseId: string,
+  docIds: string[],
+  extra?: Record<string, string>,
+) {
+  const params = new URLSearchParams({ course: courseId });
+  if (docIds.length === 1) {
+    params.set("doc", docIds[0]);
+  } else if (docIds.length > 1) {
+    params.set("docs", docIds.join(","));
+  }
+  Object.entries(extra ?? {}).forEach(([key, value]) => params.set(key, value));
+  return `${path}?${params.toString()}`;
 }
 
 function riskLabel(risk: string) {

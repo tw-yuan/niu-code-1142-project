@@ -148,7 +148,9 @@ class MindmapExpandRequest(BaseModel):
 
 
 class FlashcardStreamRequest(BaseModel):
-    doc_id: str
+    doc_id: str | None = None
+    doc_ids: list[str] = Field(default_factory=list)
+    course_id: str | None = None
     count: int = Field(default=10, ge=1, le=50)
 
 

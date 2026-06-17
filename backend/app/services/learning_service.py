@@ -7,8 +7,8 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
-    CourseQuiz,
     CourseQuestionBankItem,
+    CourseQuiz,
     Document,
     Flashcard,
     LearningArtifact,
@@ -52,7 +52,9 @@ class LearningService:
         ):
             yield chunk
 
-    async def save_artifact(self, user_id: str, doc_id: str, kind: str, content: str) -> LearningArtifact:
+    async def save_artifact(
+        self, user_id: str, doc_id: str, kind: str, content: str
+    ) -> LearningArtifact:
         await self._get_document(user_id, doc_id)
         artifact = LearningArtifact(user_id=user_id, doc_id=doc_id, kind=kind, content=content)
         self.db.add(artifact)
@@ -108,9 +110,13 @@ class LearningService:
             from app.services.courses_service import CoursesService
 
             await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
-            course_doc_ids = set(await CoursesService(self.db).course_document_ids(user_id, course_id))
+            course_doc_ids = set(
+                await CoursesService(self.db).course_document_ids(user_id, course_id)
+            )
             if not set(doc_ids).issubset(course_doc_ids):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+                )
         else:
             await self._validate_documents(user_id, doc_ids)
         context = await self._context(user_id, doc_ids)
@@ -149,7 +155,9 @@ class LearningService:
         parsed = parse_json_llm(json_text)
         questions = parsed.get("questions", [])
         if not isinstance(questions, list):
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid quiz JSON")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid quiz JSON"
+            )
         if course_id:
             from app.services.courses_service import CoursesService
 
@@ -185,10 +193,14 @@ class LearningService:
 
     async def list_quizzes(self, user_id: str) -> list[dict[str, Any]]:
         owned = (
-            await self.db.execute(
-                select(Quiz).where(Quiz.user_id == user_id).order_by(desc(Quiz.created_at))
+            (
+                await self.db.execute(
+                    select(Quiz).where(Quiz.user_id == user_id).order_by(desc(Quiz.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         course_quizzes = await self._visible_course_quizzes(user_id)
         by_id: dict[str, dict[str, Any]] = {row.id: self._quiz_out(row) for row in owned}
         for course_quiz, quiz in course_quizzes:
@@ -198,7 +210,9 @@ class LearningService:
             )
             item["course_publication"] = self._course_quiz_out(course_quiz)
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
-            item["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            item["latest_attempt"] = (
+                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            )
             by_id[quiz.id] = item
         return sorted(by_id.values(), key=lambda item: str(item["created_at"]), reverse=True)
 
@@ -213,7 +227,9 @@ class LearningService:
             )
             data["course_publication"] = self._course_quiz_out(course_quiz)
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
-            data["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            data["latest_attempt"] = (
+                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            )
         return data
 
     async def publish_quiz_to_course(
@@ -232,7 +248,9 @@ class LearningService:
 
         await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
         quiz = (
-            await self.db.execute(select(Quiz).where(and_(Quiz.id == quiz_id, Quiz.user_id == user_id)))
+            await self.db.execute(
+                select(Quiz).where(and_(Quiz.id == quiz_id, Quiz.user_id == user_id))
+            )
         ).scalar_one_or_none()
         if quiz is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
@@ -244,7 +262,9 @@ class LearningService:
             )
         existing = (
             await self.db.execute(
-                select(CourseQuiz).where(and_(CourseQuiz.course_id == course_id, CourseQuiz.quiz_id == quiz_id))
+                select(CourseQuiz).where(
+                    and_(CourseQuiz.course_id == course_id, CourseQuiz.quiz_id == quiz_id)
+                )
             )
         ).scalar_one_or_none()
         if existing:
@@ -297,7 +317,9 @@ class LearningService:
                 "course_publication": self._course_quiz_out(course_quiz),
             }
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
-            item["latest_attempt"] = self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            item["latest_attempt"] = (
+                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+            )
             items.append(item)
         return items
 
@@ -322,7 +344,9 @@ class LearningService:
         diagnostics = _quiz_diagnostics(
             questions,
             body.answers,
-            include_answers=await self._answers_visible(user_id, course_quiz) if course_quiz else True,
+            include_answers=await self._answers_visible(user_id, course_quiz)
+            if course_quiz
+            else True,
         )
         return {
             "id": attempt.id,
@@ -336,12 +360,16 @@ class LearningService:
     async def quiz_attempts(self, user_id: str, quiz_id: str) -> list[dict[str, Any]]:
         await self._get_quiz(user_id, quiz_id)
         attempts = (
-            await self.db.execute(
-                select(QuizAttempt)
-                .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz_id))
-                .order_by(desc(QuizAttempt.completed_at))
+            (
+                await self.db.execute(
+                    select(QuizAttempt)
+                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz_id))
+                    .order_by(desc(QuizAttempt.completed_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "id": attempt.id,
@@ -428,10 +456,17 @@ class LearningService:
             await self.db.refresh(card)
         return [self._flashcard_out(card) for card in cards]
 
-    async def stream_flashcards(self, user_id: str, doc_id: str, count: int):
-        doc = await self._get_document(user_id, doc_id)
-        context = await self._context(user_id, [doc_id])
-        system, cfg = load_prompt("flashcard_generate", document_title=doc.filename, count=count)
+    async def stream_flashcards(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        count: int,
+        course_id: str | None = None,
+    ):
+        docs = await self._flashcard_documents(user_id, doc_ids, course_id)
+        context = await self._context(user_id, doc_ids)
+        document_title = docs[0].filename if len(docs) == 1 else f"{len(docs)} 份教材"
+        system, cfg = load_prompt("flashcard_generate", document_title=document_title, count=count)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"參考資料：\n{context}"},
@@ -446,13 +481,24 @@ class LearningService:
         ):
             yield chunk
 
-    async def save_flashcards(self, user_id: str, doc_id: str, json_text: str) -> list[Flashcard]:
+    async def save_flashcards(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        json_text: str,
+    ) -> list[Flashcard]:
         parsed = parse_json_llm(json_text)
         cards = parsed.get("cards", [])
         if not isinstance(cards, list):
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid flashcard JSON")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid flashcard JSON"
+            )
         result: list[Flashcard] = []
+        default_doc_id = doc_ids[0] if len(doc_ids) == 1 else None
+        allowed_doc_ids = set(doc_ids)
         for card in cards:
+            source_doc_id = card.get("doc_id")
+            doc_id = source_doc_id if source_doc_id in allowed_doc_ids else default_doc_id
             flashcard = Flashcard(
                 user_id=user_id,
                 doc_id=doc_id,
@@ -468,10 +514,16 @@ class LearningService:
 
     async def list_flashcards(self, user_id: str) -> list[dict[str, Any]]:
         cards = (
-            await self.db.execute(
-                select(Flashcard).where(Flashcard.user_id == user_id).order_by(Flashcard.next_review)
+            (
+                await self.db.execute(
+                    select(Flashcard)
+                    .where(Flashcard.user_id == user_id)
+                    .order_by(Flashcard.next_review)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [self._flashcard_out(card) for card in cards]
 
     async def create_flashcard(self, user_id: str, body: FlashcardCreate) -> dict[str, Any]:
@@ -523,11 +575,44 @@ class LearningService:
         card.ease_factor = max(
             1.3, card.ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
         )
-        card.next_review = (
-            datetime.now(UTC) + timedelta(days=card.interval_days)
-        ).isoformat()
+        card.next_review = (datetime.now(UTC) + timedelta(days=card.interval_days)).isoformat()
         await self.db.commit()
         return self._flashcard_out(card)
+
+    async def _flashcard_documents(
+        self,
+        user_id: str,
+        doc_ids: list[str],
+        course_id: str | None,
+    ) -> list[Document]:
+        if course_id:
+            from app.services.courses_service import CoursesService
+
+            await CoursesService(self.db).require_member(user_id, course_id)
+            course_doc_ids = set(
+                await CoursesService(self.db).course_document_ids(user_id, course_id)
+            )
+            if not set(doc_ids).issubset(course_doc_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+                )
+            docs = (
+                (
+                    await self.db.execute(
+                        select(Document).where(
+                            and_(Document.id.in_(doc_ids), Document.status == "ready")
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if set(doc.id for doc in docs) != set(doc_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+                )
+            return docs
+        return await self._validate_documents(user_id, doc_ids)
 
     async def _context(self, user_id: str, doc_ids: list[str]) -> str:
         shared_doc_ids = await DocumentAccessService(self.db).shared_doc_ids(user_id, doc_ids)
@@ -540,15 +625,19 @@ class LearningService:
 
     async def _validate_documents(self, user_id: str, doc_ids: list[str]) -> list[Document]:
         docs = (
-            await self.db.execute(
-                select(Document).where(
-                    and_(
-                        Document.id.in_(doc_ids),
-                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+            (
+                await self.db.execute(
+                    select(Document).where(
+                        and_(
+                            Document.id.in_(doc_ids),
+                            DocumentAccessService(self.db).accessible_document_condition(user_id),
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if set(doc.id for doc in docs) != set(doc_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
         return list(docs)
@@ -569,9 +658,7 @@ class LearningService:
         return doc
 
     async def _get_quiz(self, user_id: str, quiz_id: str) -> Quiz:
-        quiz = (
-            await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))
-        ).scalar_one_or_none()
+        quiz = (await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))).scalar_one_or_none()
         if quiz is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
         if quiz.user_id == user_id:
@@ -639,15 +726,19 @@ class LearningService:
         user_id: str,
     ) -> None:
         existing_items = (
-            await self.db.execute(
-                select(CourseQuestionBankItem).where(
-                    and_(
-                        CourseQuestionBankItem.course_id == course_quiz.course_id,
-                        CourseQuestionBankItem.quiz_id == quiz.id,
+            (
+                await self.db.execute(
+                    select(CourseQuestionBankItem).where(
+                        and_(
+                            CourseQuestionBankItem.course_id == course_quiz.course_id,
+                            CourseQuestionBankItem.quiz_id == quiz.id,
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         by_index = {item.question_index: item for item in existing_items}
         seen_indexes: set[int] = set()
         for index, question in enumerate(questions):
@@ -720,12 +811,23 @@ class LearningService:
                 detail="Quiz is not available yet",
             )
         attempt_count = (
-            await self.db.execute(
-                select(QuizAttempt)
-                .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == course_quiz.quiz_id))
+            (
+                await self.db.execute(
+                    select(QuizAttempt).where(
+                        and_(
+                            QuizAttempt.user_id == user_id,
+                            QuizAttempt.quiz_id == course_quiz.quiz_id,
+                        )
+                    )
+                )
             )
-        ).scalars().all()
-        if course_quiz.attempt_limit is not None and len(attempt_count) >= course_quiz.attempt_limit:
+            .scalars()
+            .all()
+        )
+        if (
+            course_quiz.attempt_limit is not None
+            and len(attempt_count) >= course_quiz.attempt_limit
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Attempt limit reached",

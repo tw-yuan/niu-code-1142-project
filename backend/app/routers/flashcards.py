@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,6 @@ from app.schemas import (
     WrongbookFlashcardRequest,
 )
 from app.services.cost_service import check_quota
-from app.services.document_service import DocumentService
 from app.services.learning_service import LearningService
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
@@ -27,16 +26,23 @@ async def stream_flashcards(
     db: AsyncSession = Depends(get_db),
 ):
     svc = LearningService(db)
-    await DocumentService(db).get_document(current_user.id, body.doc_id)
+    doc_ids = body.doc_ids or ([body.doc_id] if body.doc_id else [])
+    if not doc_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No documents selected")
     await check_quota(db, current_user.id)
 
     async def event_stream():
         full = ""
         try:
-            async for chunk in svc.stream_flashcards(current_user.id, body.doc_id, body.count):
+            async for chunk in svc.stream_flashcards(
+                current_user.id,
+                doc_ids,
+                body.count,
+                course_id=body.course_id,
+            ):
                 full += chunk
                 yield _sse({"type": "chunk", "content": chunk})
-            cards = await svc.save_flashcards(current_user.id, body.doc_id, full)
+            cards = await svc.save_flashcards(current_user.id, doc_ids, full)
             yield _sse({"type": "flashcard_meta", "data": {"count": len(cards)}})
         except Exception as exc:
             yield _sse({"type": "error", "code": "flashcard_error", "message": str(exc)})

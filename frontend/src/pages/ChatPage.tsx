@@ -72,6 +72,10 @@ export function ChatPage() {
   const scopeDocuments = courseId
     ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
     : documents.filter((doc) => doc.status === "ready");
+  const scopeDocumentIds = scopeDocuments.map((doc) => doc.id);
+  const allScopeDocumentsSelected =
+    scopeDocumentIds.length > 0 &&
+    scopeDocumentIds.every((docId) => selectedDocs.includes(docId));
 
   useEffect(() => {
     loadSessions().catch(() => undefined);
@@ -356,6 +360,30 @@ export function ChatPage() {
             ))}
           </select>
           <div className="space-y-2">
+            {scopeDocuments.length > 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => setSelectedDocs(scopeDocumentIds)}
+                >
+                  全選文件
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => setSelectedDocs([])}
+                >
+                  清空
+                </button>
+                <span className="text-xs text-zinc-500">
+                  已選 {selectedDocs.length} / {scopeDocuments.length}
+                </span>
+                {allScopeDocumentsSelected && (
+                  <span className="text-xs text-indigo-700">已全選</span>
+                )}
+              </div>
+            )}
             {scopeDocuments.map((doc) => (
               <label key={doc.id} className="flex items-center gap-2 text-sm">
                 <input

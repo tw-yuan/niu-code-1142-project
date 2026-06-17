@@ -50,6 +50,9 @@ export function QuizPage() {
     [id, quizzes],
   );
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
+  const documentIds = documents.map((doc) => doc.id);
+  const allDocumentsSelected =
+    documentIds.length > 0 && documentIds.every((id) => docIds.includes(id));
 
   async function load() {
     const [docs, nextQuizzes, wrongbookRows, nextCourses] = await Promise.all([
@@ -98,7 +101,7 @@ export function QuizPage() {
     }
     if (course) {
       setCourseId(course);
-      setPublishToCourse(true);
+      setPublishToCourse(params.get("publish") === "1");
     }
   }, [location.search]);
 
@@ -214,6 +217,36 @@ export function QuizPage() {
           />
           <div className="mb-1 text-xs font-medium text-zinc-500">文件</div>
           <div className="mb-3 max-h-44 overflow-auto rounded-lg border border-zinc-200 p-2">
+            {documents.length > 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 px-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => {
+                    setDocIds(documentIds);
+                    setDocId(documentIds[0] ?? "");
+                  }}
+                >
+                  全選文件
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => {
+                    setDocIds([]);
+                    setDocId("");
+                  }}
+                >
+                  清空
+                </button>
+                <span className="text-xs text-zinc-500">
+                  已選 {docIds.length} / {documents.length}
+                </span>
+                {allDocumentsSelected && (
+                  <span className="text-xs text-indigo-700">已全選</span>
+                )}
+              </div>
+            )}
             {documents.map((doc) => (
               <label
                 key={doc.id}
