@@ -1294,10 +1294,51 @@ export function CoursesPage() {
                                 </span>
                               </div>
                               {request.content && (
-                                <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
-                                  {request.content}
+                                <div className="mt-2 rounded-md bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-700">
+                                  <div className="mb-1 font-medium text-zinc-500">
+                                    學生補充
+                                  </div>
+                                  <div className="whitespace-pre-wrap">
+                                    {request.content}
+                                  </div>
                                 </div>
                               )}
+                              {request.session_messages &&
+                                request.session_messages.length > 0 && (
+                                  <div className="mt-2 rounded-md border border-zinc-200 bg-white">
+                                    <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
+                                      相關聊天紀錄
+                                    </div>
+                                    <div className="max-h-56 overflow-y-auto divide-y divide-zinc-100">
+                                      {request.session_messages.map(
+                                        (message, index) => (
+                                          <div
+                                            key={message.id ?? index}
+                                            className="px-3 py-2 text-xs leading-5"
+                                          >
+                                            <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
+                                              <span className="font-medium">
+                                                {message.role === "user"
+                                                  ? "學生"
+                                                  : "AI"}
+                                              </span>
+                                              {message.created_at && (
+                                                <span>
+                                                  {formatDateTime(
+                                                    message.created_at,
+                                                  )}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="whitespace-pre-wrap text-zinc-700">
+                                              {message.content}
+                                            </div>
+                                          </div>
+                                        ),
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               <div className="mt-2 text-xs text-zinc-500">
                                 {formatDateTime(request.updated_at)}
                                 {request.username

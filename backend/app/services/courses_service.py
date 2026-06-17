@@ -637,7 +637,7 @@ class CoursesService:
                 .order_by(desc(CourseHelpRequest.updated_at))
             )
         ).all()
-        return [self._help_request_out(row, username) for row, username in rows]
+        return [await self._help_request_out(row, username) for row, username in rows]
 
     async def create_help_request(
         self,
@@ -685,7 +685,7 @@ class CoursesService:
         username = (
             await self.db.execute(select(User.username).where(User.id == user_id))
         ).scalar_one_or_none()
-        return self._help_request_out(request, username)
+        return await self._help_request_out(request, username)
 
     async def update_help_request(
         self,
@@ -726,7 +726,7 @@ class CoursesService:
         username = (
             await self.db.execute(select(User.username).where(User.id == help_request.user_id))
         ).scalar_one_or_none()
-        return self._help_request_out(help_request, username)
+        return await self._help_request_out(help_request, username)
 
     async def question_bank(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
         await self.require_role(user_id, course_id, {"instructor", "ta"})
@@ -864,7 +864,7 @@ class CoursesService:
             ],
             "help_requests": [
                 {
-                    **self._help_request_out(help_request, username),
+                    **await self._help_request_out(help_request, username),
                     "course_title": course_title,
                 }
                 for help_request, course_title, username in help_rows
@@ -1196,11 +1196,12 @@ class CoursesService:
             "updated_at": announcement.updated_at,
         }
 
-    def _help_request_out(
+    async def _help_request_out(
         self,
         help_request: CourseHelpRequest,
         username: str | None,
     ) -> dict[str, Any]:
+        session_messages = await self._help_request_session_messages(help_request)
         return {
             "id": help_request.id,
             "course_id": help_request.course_id,
@@ -1215,7 +1216,50 @@ class CoursesService:
             "resolved_at": help_request.resolved_at,
             "created_at": help_request.created_at,
             "updated_at": help_request.updated_at,
+            "session_messages": session_messages,
         }
+
+    async def _help_request_session_messages(
+        self,
+        help_request: CourseHelpRequest,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        if not help_request.session_id:
+            return []
+        session = (
+            await self.db.execute(
+                select(ChatSession).where(
+                    and_(
+                        ChatSession.id == help_request.session_id,
+                        ChatSession.user_id == help_request.user_id,
+                        ChatSession.course_id == help_request.course_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if session is None:
+            return []
+        messages = (
+            (
+                await self.db.execute(
+                    select(ChatMessage)
+                    .where(ChatMessage.session_id == session.id)
+                    .order_by(desc(ChatMessage.created_at))
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at,
+            }
+            for message in reversed(messages)
+        ]
 
     async def _ensure_question_bank_items(self, course_quiz: CourseQuiz, quiz: Quiz) -> None:
         existing_items = (

@@ -307,6 +307,7 @@ export interface CourseHelpRequestItem {
   resolved_at: string | null;
   created_at: string;
   updated_at: string;
+  session_messages?: ChatMessage[];
 }
 
 export interface CourseDashboard {

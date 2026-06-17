@@ -282,6 +282,13 @@ export function ChatPage() {
     const latestUserMessage = [...messages]
       .reverse()
       .find((message) => message.role === "user");
+    const context = messages
+      .slice(-6)
+      .map(
+        (message) =>
+          `${message.role === "user" ? "學生" : "AI"}：${message.content}`,
+      )
+      .join("\n\n");
     setHelpLoading(true);
     setHelpMessage("");
     try {
@@ -292,7 +299,7 @@ export function ChatPage() {
             latestUserMessage?.content.slice(0, 120) ||
             activeSession?.title ||
             "課程對話求助",
-          content: latestUserMessage?.content || null,
+          content: context || latestUserMessage?.content || null,
           session_id: activeId,
           priority: "normal",
         }),
