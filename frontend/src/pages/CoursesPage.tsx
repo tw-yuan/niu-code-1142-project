@@ -569,6 +569,26 @@ export function CoursesPage() {
     }
   }
 
+  async function deleteCourse() {
+    if (!selected || !isOwner) return;
+    setBusyAction("delete-course");
+    try {
+      await apiFetch(`/courses/${selected.id}`, { method: "DELETE" });
+      setSelected(null);
+      setMembers([]);
+      setProgress([]);
+      setQuizSummary([]);
+      setCourseQuizzes([]);
+      setQuestionBank([]);
+      setAssignments([]);
+      setAnnouncements([]);
+      setHelpRequests([]);
+      await load();
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -724,6 +744,17 @@ export function CoursesPage() {
                         icon={<LogOut size={16} />}
                       >
                         退出課程
+                      </LoadingButton>
+                    )}
+                    {isOwner && (
+                      <LoadingButton
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
+                        onClick={deleteCourse}
+                        loading={busyAction === "delete-course"}
+                        loadingText="刪除中"
+                        icon={<Trash2 size={16} />}
+                      >
+                        刪除課程
                       </LoadingButton>
                     )}
                   </div>
