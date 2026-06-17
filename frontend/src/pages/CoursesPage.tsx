@@ -35,6 +35,14 @@ import {
 } from "../lib/api";
 import { useAuthStore } from "../store/auth";
 
+type CourseTab =
+  | "overview"
+  | "materials"
+  | "tasks"
+  | "interaction"
+  | "people"
+  | "question-bank";
+
 export function CoursesPage() {
   type CourseMember = {
     user_id: string;
@@ -79,6 +87,7 @@ export function CoursesPage() {
   const [helpPriority, setHelpPriority] = useState<"low" | "normal" | "high">(
     "normal",
   );
+  const [activeTab, setActiveTab] = useState<CourseTab>("overview");
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const user = useAuthStore((state) => state.user);
@@ -91,6 +100,69 @@ export function CoursesPage() {
     () => buildUpcomingDeadlines(assignments, courseQuizzes),
     [assignments, courseQuizzes],
   );
+  const courseDocuments = useMemo(
+    () =>
+      (selected?.documents ?? []).filter(
+        (doc) => doc.course_status !== "removed",
+      ),
+    [selected],
+  );
+  const unreadAnnouncements = announcements.filter(
+    (announcement) => !announcement.read_at,
+  ).length;
+  const openHelpRequests = helpRequests.filter(
+    (request) => request.status !== "resolved",
+  ).length;
+  const pendingAssignments = assignments.filter(
+    (assignment) =>
+      !["completed", "late"].includes(assignment.completion.status),
+  ).length;
+  const approvedQuestions = questionBank.filter(
+    (item) => item.status === "approved",
+  ).length;
+  const courseTabs = [
+    { id: "overview" as CourseTab, label: "概覽", icon: CalendarClock },
+    {
+      id: "materials" as CourseTab,
+      label: "教材",
+      icon: FileText,
+      count: courseDocuments.length,
+    },
+    {
+      id: "tasks" as CourseTab,
+      label: "任務",
+      icon: ListChecks,
+      count: assignments.length + courseQuizzes.length,
+    },
+    {
+      id: "interaction" as CourseTab,
+      label: "公告/求助",
+      icon: Megaphone,
+      count: unreadAnnouncements + openHelpRequests,
+    },
+    {
+      id: "people" as CourseTab,
+      label: "成員/進度",
+      icon: Users,
+      count: members.length,
+    },
+    ...(canManage
+      ? [
+          {
+            id: "question-bank" as CourseTab,
+            label: "題庫",
+            icon: ListChecks,
+            count: questionBank.length,
+          },
+        ]
+      : []),
+  ];
+
+  useEffect(() => {
+    if (activeTab === "question-bank" && !canManage) {
+      setActiveTab("overview");
+    }
+  }, [activeTab, canManage]);
 
   async function load() {
     const [nextCourses, docs] = await Promise.all([
@@ -154,6 +226,7 @@ export function CoursesPage() {
     setHelpRequests(nextHelpRequests);
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
+    setActiveTab("overview");
   }
 
   useEffect(() => {
@@ -502,8 +575,8 @@ export function CoursesPage() {
         <h1 className="text-2xl font-semibold">課程</h1>
         <p className="mt-1 text-sm text-zinc-500">共用教材與課程 RAG 範圍</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
-        <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="h-fit rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
           {canCreateCourse ? (
             <form className="mb-5 space-y-3" onSubmit={create}>
               <label
@@ -551,102 +624,180 @@ export function CoursesPage() {
               加入
             </LoadingButton>
           </form>
-          <div className="space-y-2">
+          <div className="max-h-[52vh] space-y-1 overflow-y-auto pr-1 scrollbar-thin">
             {courses.map((course) => (
               <button
                 key={course.id}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-50"
+                className={[
+                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
+                  selected?.id === course.id
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-zinc-700 hover:bg-zinc-50",
+                ].join(" ")}
                 onClick={() => openCourse(course.id)}
               >
                 <BookOpen size={16} className="text-zinc-500" />
-                {course.title}
+                <span className="min-w-0 truncate">{course.title}</span>
               </button>
             ))}
           </div>
         </aside>
-        <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm">
           {selected ? (
-            <div>
-              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  {canEditCourse ? (
-                    <div className="grid max-w-xl gap-2">
-                      <input
-                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold"
-                        value={courseTitle}
-                        onChange={(event) => setCourseTitle(event.target.value)}
-                      />
-                      <textarea
-                        className="min-h-20 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={courseDescription}
-                        onChange={(event) =>
-                          setCourseDescription(event.target.value)
-                        }
-                        placeholder="課程描述"
-                      />
-                      <LoadingButton
-                        className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                        onClick={saveCourse}
-                        loading={busyAction === "save-course"}
-                        loadingText="儲存中"
-                      >
-                        儲存
-                      </LoadingButton>
-                    </div>
-                  ) : (
-                    <>
-                      <h2 className="text-lg font-semibold">
-                        {selected.title}
-                      </h2>
-                      <p className="mt-1 text-sm text-zinc-500">
-                        {selected.description}
-                      </p>
-                    </>
-                  )}
-                  {selected.join_code && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <button
-                        className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700"
-                        onClick={() =>
-                          navigator.clipboard.writeText(
-                            selected.join_code ?? "",
-                          )
-                        }
-                      >
-                        <Copy size={14} />
-                        {selected.join_code}
-                      </button>
-                      {isOwner && (
+            <div className="min-w-0">
+              <div className="border-b border-zinc-200 px-5 py-4">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    {canEditCourse ? (
+                      <div className="grid max-w-xl gap-2">
+                        <input
+                          className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold"
+                          value={courseTitle}
+                          onChange={(event) =>
+                            setCourseTitle(event.target.value)
+                          }
+                        />
+                        <textarea
+                          className="min-h-20 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={courseDescription}
+                          onChange={(event) =>
+                            setCourseDescription(event.target.value)
+                          }
+                          placeholder="課程描述"
+                        />
                         <LoadingButton
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                          onClick={resetJoinCode}
-                          loading={busyAction === "reset-code"}
-                          loadingText="重置中"
+                          className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                          onClick={saveCourse}
+                          loading={busyAction === "save-course"}
+                          loadingText="儲存中"
                         >
-                          重置
+                          儲存
                         </LoadingButton>
-                      )}
-                    </div>
-                  )}
+                      </div>
+                    ) : (
+                      <>
+                        <h2 className="text-lg font-semibold">
+                          {selected.title}
+                        </h2>
+                        <p className="mt-1 text-sm text-zinc-500">
+                          {selected.description}
+                        </p>
+                      </>
+                    )}
+                    {selected.join_code && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700"
+                          onClick={() =>
+                            navigator.clipboard.writeText(
+                              selected.join_code ?? "",
+                            )
+                          }
+                        >
+                          <Copy size={14} />
+                          {selected.join_code}
+                        </button>
+                        {isOwner && (
+                          <LoadingButton
+                            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                            onClick={resetJoinCode}
+                            loading={busyAction === "reset-code"}
+                            loadingText="重置中"
+                          >
+                            重置
+                          </LoadingButton>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600">
+                      <Users size={16} />
+                      {members.length} 位成員
+                    </span>
+                    {!isOwner && (
+                      <LoadingButton
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
+                        onClick={leaveCourse}
+                        loading={busyAction === "leave"}
+                        loadingText="退出中"
+                        icon={<LogOut size={16} />}
+                      >
+                        退出課程
+                      </LoadingButton>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-zinc-500">
-                  <Users size={16} />
-                  {members.length} 位成員
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                  <SummaryMetric
+                    label="教材"
+                    value={courseDocuments.length}
+                    detail={`${courseDocuments.filter((doc) => doc.status === "ready").length} 份可用`}
+                  />
+                  <SummaryMetric
+                    label="任務"
+                    value={assignments.length}
+                    detail={`${pendingAssignments} 項待完成`}
+                  />
+                  <SummaryMetric
+                    label="測驗"
+                    value={courseQuizzes.length}
+                    detail={`${courseQuizzes.filter((quiz) => quiz.latest_attempt).length} 項已完成`}
+                  />
+                  <SummaryMetric
+                    label="公告/求助"
+                    value={announcements.length + helpRequests.length}
+                    detail={`${unreadAnnouncements + openHelpRequests} 項待處理`}
+                  />
+                  <SummaryMetric
+                    label="題庫"
+                    value={canManage ? questionBank.length : quizSummary.length}
+                    detail={
+                      canManage
+                        ? `${approvedQuestions} 題已核准`
+                        : `${quizSummary.length} 份測驗摘要`
+                    }
+                  />
                 </div>
-                {!isOwner && (
-                  <LoadingButton
-                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
-                    onClick={leaveCourse}
-                    loading={busyAction === "leave"}
-                    loadingText="退出中"
-                    icon={<LogOut size={16} />}
-                  >
-                    退出課程
-                  </LoadingButton>
-                )}
               </div>
-              <div className="mb-5 grid gap-3 lg:grid-cols-2">
-                <section className="rounded-lg border border-zinc-200 lg:col-span-2">
+              <div className="overflow-x-auto border-b border-zinc-200 px-4 scrollbar-thin">
+                <div className="flex min-w-max gap-1 py-2">
+                  {courseTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      className={[
+                        "inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+                        activeTab === tab.id
+                          ? "bg-indigo-50 text-indigo-700"
+                          : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900",
+                      ].join(" ")}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      <tab.icon size={15} />
+                      {tab.label}
+                      {typeof tab.count === "number" && (
+                        <span className="rounded bg-white px-1.5 py-0.5 text-xs text-zinc-500">
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div
+                className={[
+                  "mx-5 mb-5 mt-5 grid gap-3 lg:grid-cols-2",
+                  activeTab === "overview" || activeTab === "people"
+                    ? ""
+                    : "hidden",
+                ].join(" ")}
+              >
+                <section
+                  className={[
+                    "rounded-lg border border-zinc-200 lg:col-span-2",
+                    activeTab === "overview" ? "" : "hidden",
+                  ].join(" ")}
+                >
                   <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                     <CalendarClock size={16} className="text-zinc-500" />
                     近期截止
@@ -678,7 +829,12 @@ export function CoursesPage() {
                     )}
                   </div>
                 </section>
-                <section className="rounded-lg border border-zinc-200">
+                <section
+                  className={[
+                    "rounded-lg border border-zinc-200",
+                    activeTab === "people" ? "" : "hidden",
+                  ].join(" ")}
+                >
                   <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                     成員
                   </div>
@@ -736,7 +892,12 @@ export function CoursesPage() {
                     ))}
                   </div>
                 </section>
-                <section className="rounded-lg border border-zinc-200">
+                <section
+                  className={[
+                    "rounded-lg border border-zinc-200",
+                    activeTab === "people" ? "" : "hidden",
+                  ].join(" ")}
+                >
                   <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                     <div className="flex items-center justify-between gap-2">
                       <span>學生進度</span>
@@ -785,8 +946,8 @@ export function CoursesPage() {
                   </div>
                 </section>
               </div>
-              {canManage && (
-                <div className="mb-5 flex gap-2">
+              {canManage && activeTab === "materials" && (
+                <div className="mx-5 mb-5 mt-5 flex gap-2">
                   <select
                     className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
                     value={docId}
@@ -809,548 +970,568 @@ export function CoursesPage() {
                   </LoadingButton>
                 </div>
               )}
-              <div className="mb-5 grid gap-3 xl:grid-cols-2">
-                <section className="rounded-lg border border-zinc-200">
+              {activeTab === "interaction" && (
+                <div className="mx-5 mb-5 mt-5 grid gap-3 xl:grid-cols-2">
+                  <section className="rounded-lg border border-zinc-200">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                      <Megaphone size={16} className="text-zinc-500" />
+                      課程公告
+                    </div>
+                    {canManage && (
+                      <form
+                        className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
+                        onSubmit={createAnnouncement}
+                      >
+                        <input
+                          className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={announcementTitle}
+                          onChange={(event) =>
+                            setAnnouncementTitle(event.target.value)
+                          }
+                          placeholder="公告標題"
+                        />
+                        <textarea
+                          className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={announcementContent}
+                          onChange={(event) =>
+                            setAnnouncementContent(event.target.value)
+                          }
+                          placeholder="公告內容"
+                        />
+                        <LoadingButton
+                          className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                          loading={busyAction === "create-announcement"}
+                          loadingText="發布中"
+                          icon={<Plus size={16} />}
+                        >
+                          發布
+                        </LoadingButton>
+                      </form>
+                    )}
+                    <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
+                      {announcements.map((announcement) => (
+                        <div
+                          key={announcement.id}
+                          className="px-3 py-3 text-sm"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium">
+                                  {announcement.title}
+                                </span>
+                                {!announcement.read_at && (
+                                  <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                                    未讀
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
+                                {announcement.content}
+                              </div>
+                              <div className="mt-2 text-xs text-zinc-500">
+                                {formatDateTime(announcement.created_at)}
+                                {announcement.created_by_username
+                                  ? ` · ${announcement.created_by_username}`
+                                  : ""}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col gap-2">
+                              {!announcement.read_at && !canManage && (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                  onClick={() =>
+                                    markAnnouncementRead(announcement)
+                                  }
+                                  loading={
+                                    busyAction ===
+                                    `read-announcement-${announcement.id}`
+                                  }
+                                  loadingText="標記中"
+                                >
+                                  已讀
+                                </LoadingButton>
+                              )}
+                              {canManage && (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                                  onClick={() =>
+                                    deleteAnnouncement(announcement)
+                                  }
+                                  loading={
+                                    busyAction ===
+                                    `delete-announcement-${announcement.id}`
+                                  }
+                                  loadingText="刪除中"
+                                  icon={<Trash2 size={13} />}
+                                >
+                                  刪除
+                                </LoadingButton>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {announcements.length === 0 && (
+                        <div className="px-3 py-8 text-sm text-zinc-500">
+                          目前沒有公告
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                  <section className="rounded-lg border border-zinc-200">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                      <MessageCircleQuestion
+                        size={16}
+                        className="text-zinc-500"
+                      />
+                      求助佇列
+                    </div>
+                    {!canManage && (
+                      <form
+                        className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
+                        onSubmit={createHelpRequest}
+                      >
+                        <input
+                          className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={helpTitle}
+                          onChange={(event) => setHelpTitle(event.target.value)}
+                          placeholder="問題標題"
+                        />
+                        <textarea
+                          className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={helpContent}
+                          onChange={(event) =>
+                            setHelpContent(event.target.value)
+                          }
+                          placeholder="補充說明"
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                            value={helpPriority}
+                            onChange={(event) =>
+                              setHelpPriority(
+                                event.target.value as "low" | "normal" | "high",
+                              )
+                            }
+                          >
+                            <option value="low">低</option>
+                            <option value="normal">一般</option>
+                            <option value="high">高</option>
+                          </select>
+                          <LoadingButton
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                            loading={busyAction === "create-help"}
+                            loadingText="送出中"
+                            icon={<Plus size={16} />}
+                          >
+                            送出
+                          </LoadingButton>
+                        </div>
+                      </form>
+                    )}
+                    <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
+                      {helpRequests.map((request) => (
+                        <div key={request.id} className="px-3 py-3 text-sm">
+                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium">
+                                  {request.title}
+                                </span>
+                                <span
+                                  className={helpStatusClass(request.status)}
+                                >
+                                  {helpStatusLabel(request.status)}
+                                </span>
+                                <span
+                                  className={priorityClass(request.priority)}
+                                >
+                                  {priorityLabel(request.priority)}
+                                </span>
+                              </div>
+                              {request.content && (
+                                <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
+                                  {request.content}
+                                </div>
+                              )}
+                              <div className="mt-2 text-xs text-zinc-500">
+                                {formatDateTime(request.updated_at)}
+                                {request.username
+                                  ? ` · ${request.username}`
+                                  : ""}
+                              </div>
+                            </div>
+                            {canManage && (
+                              <div className="flex shrink-0 flex-wrap gap-2">
+                                {request.status !== "in_progress" && (
+                                  <LoadingButton
+                                    className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                    onClick={() =>
+                                      updateHelpRequest(request, "in_progress")
+                                    }
+                                    loading={
+                                      busyAction === `help-status-${request.id}`
+                                    }
+                                    loadingText="處理中"
+                                  >
+                                    處理
+                                  </LoadingButton>
+                                )}
+                                {request.status !== "resolved" && (
+                                  <LoadingButton
+                                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:text-zinc-400"
+                                    onClick={() =>
+                                      updateHelpRequest(request, "resolved")
+                                    }
+                                    loading={
+                                      busyAction === `help-status-${request.id}`
+                                    }
+                                    loadingText="完成中"
+                                  >
+                                    結案
+                                  </LoadingButton>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {helpRequests.length === 0 && (
+                        <div className="px-3 py-8 text-sm text-zinc-500">
+                          目前沒有求助單
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              )}
+              {activeTab === "tasks" && (
+                <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
                   <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <Megaphone size={16} className="text-zinc-500" />
-                    課程公告
+                    <ListChecks size={16} className="text-zinc-500" />
+                    課程任務
                   </div>
                   {canManage && (
                     <form
-                      className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
-                      onSubmit={createAnnouncement}
+                      className="grid gap-3 border-b border-zinc-200 bg-zinc-50 px-3 py-3 md:grid-cols-[1.4fr_160px_1fr_180px_auto]"
+                      onSubmit={createAssignment}
                     >
-                      <input
-                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={announcementTitle}
-                        onChange={(event) =>
-                          setAnnouncementTitle(event.target.value)
-                        }
-                        placeholder="公告標題"
-                      />
+                      <div>
+                        <label
+                          className="mb-1 block text-xs font-medium text-zinc-500"
+                          htmlFor="assignment-title"
+                        >
+                          任務名稱
+                        </label>
+                        <input
+                          id="assignment-title"
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={assignmentTitle}
+                          onChange={(event) =>
+                            setAssignmentTitle(event.target.value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label
+                          className="mb-1 block text-xs font-medium text-zinc-500"
+                          htmlFor="assignment-kind"
+                        >
+                          類型
+                        </label>
+                        <select
+                          id="assignment-kind"
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          value={assignmentKind}
+                          onChange={(event) => {
+                            const nextKind = event.target
+                              .value as CourseAssignmentItem["kind"];
+                            setAssignmentKind(nextKind);
+                            if (!assignmentNeedsDocument(nextKind)) {
+                              setAssignmentDocId("");
+                            }
+                            if (nextKind !== "quiz") setAssignmentQuizId("");
+                          }}
+                        >
+                          <option value="custom">自訂</option>
+                          <option value="quiz">測驗</option>
+                          <option value="read_summary">閱讀摘要</option>
+                          <option value="note">筆記</option>
+                          <option value="flashcards">閃卡</option>
+                        </select>
+                      </div>
+                      {assignmentKind === "quiz" ? (
+                        <div>
+                          <label
+                            className="mb-1 block text-xs font-medium text-zinc-500"
+                            htmlFor="assignment-quiz"
+                          >
+                            測驗
+                          </label>
+                          <select
+                            id="assignment-quiz"
+                            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                            value={assignmentQuizId}
+                            onChange={(event) =>
+                              setAssignmentQuizId(event.target.value)
+                            }
+                          >
+                            <option value="">選擇測驗</option>
+                            {courseQuizzes.map((quiz) => (
+                              <option key={quiz.id} value={quiz.id}>
+                                {quiz.course_publication?.title ?? quiz.title}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label
+                            className="mb-1 block text-xs font-medium text-zinc-500"
+                            htmlFor="assignment-doc"
+                          >
+                            文件
+                          </label>
+                          <select
+                            id="assignment-doc"
+                            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                            value={assignmentDocId}
+                            onChange={(event) =>
+                              setAssignmentDocId(event.target.value)
+                            }
+                            disabled={!assignmentNeedsDocument(assignmentKind)}
+                          >
+                            <option value="">
+                              {assignmentNeedsDocument(assignmentKind)
+                                ? "選擇文件"
+                                : "不需文件"}
+                            </option>
+                            {(selected.documents ?? []).map((doc) => (
+                              <option key={doc.id} value={doc.id}>
+                                {doc.filename}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <div>
+                        <label
+                          className="mb-1 block text-xs font-medium text-zinc-500"
+                          htmlFor="assignment-due"
+                        >
+                          截止時間
+                        </label>
+                        <input
+                          id="assignment-due"
+                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          type="datetime-local"
+                          value={assignmentDueAt}
+                          onChange={(event) =>
+                            setAssignmentDueAt(event.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <LoadingButton
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                          loading={busyAction === "create-assignment"}
+                          loadingText="新增中"
+                          icon={<Plus size={16} />}
+                        >
+                          新增
+                        </LoadingButton>
+                      </div>
                       <textarea
-                        className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={announcementContent}
+                        className="md:col-span-5 min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentDescription}
                         onChange={(event) =>
-                          setAnnouncementContent(event.target.value)
+                          setAssignmentDescription(event.target.value)
                         }
-                        placeholder="公告內容"
+                        placeholder="任務說明"
                       />
-                      <LoadingButton
-                        className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                        loading={busyAction === "create-announcement"}
-                        loadingText="發布中"
-                        icon={<Plus size={16} />}
-                      >
-                        發布
-                      </LoadingButton>
                     </form>
                   )}
-                  <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
-                    {announcements.map((announcement) => (
-                      <div key={announcement.id} className="px-3 py-3 text-sm">
-                        <div className="flex items-start justify-between gap-3">
+                  <div className="divide-y divide-zinc-100">
+                    {assignments.map((assignment) => {
+                      const action = assignmentAction(assignment);
+                      return (
+                        <div
+                          key={assignment.id}
+                          className="flex flex-col gap-3 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between"
+                        >
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium">
-                                {announcement.title}
+                              <span className="truncate font-medium">
+                                {assignment.title}
                               </span>
-                              {!announcement.read_at && (
-                                <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
-                                  未讀
+                              <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
+                                {assignmentKindLabel(assignment.kind)}
+                              </span>
+                              <span
+                                className={assignmentCompletionClass(
+                                  assignment.completion.status,
+                                )}
+                              >
+                                {assignmentCompletionLabel(
+                                  assignment.completion.status,
+                                )}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                              {assignment.due_at && (
+                                <span className="inline-flex items-center gap-1">
+                                  <CalendarClock size={13} />
+                                  {formatDateTime(assignment.due_at)}
+                                </span>
+                              )}
+                              {assignment.doc_filename && (
+                                <span>{assignment.doc_filename}</span>
+                              )}
+                              {assignment.quiz_title && (
+                                <span>{assignment.quiz_title}</span>
+                              )}
+                              {assignment.completion.score !== null && (
+                                <span>
+                                  分數{" "}
+                                  {Math.round(
+                                    Number(assignment.completion.score) * 100,
+                                  )}
+                                  %
                                 </span>
                               )}
                             </div>
-                            <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
-                              {announcement.content}
-                            </div>
-                            <div className="mt-2 text-xs text-zinc-500">
-                              {formatDateTime(announcement.created_at)}
-                              {announcement.created_by_username
-                                ? ` · ${announcement.created_by_username}`
-                                : ""}
-                            </div>
+                            {assignment.description && (
+                              <div className="mt-2 text-xs leading-5 text-zinc-600">
+                                {assignment.description}
+                              </div>
+                            )}
                           </div>
-                          <div className="flex shrink-0 flex-col gap-2">
-                            {!announcement.read_at && !canManage && (
+                          <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            {assignment.kind === "custom" ? (
                               <LoadingButton
-                                className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
-                                onClick={() =>
-                                  markAnnouncementRead(announcement)
-                                }
+                                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                                onClick={() => submitAssignment(assignment)}
                                 loading={
                                   busyAction ===
-                                  `read-announcement-${announcement.id}`
+                                  `submit-assignment-${assignment.id}`
                                 }
-                                loadingText="標記中"
+                                loadingText="完成中"
+                                icon={<CheckCircle2 size={14} />}
+                                disabled={
+                                  assignment.completion.status ===
+                                    "completed" ||
+                                  assignment.completion.status === "late"
+                                }
                               >
-                                已讀
+                                標記完成
                               </LoadingButton>
-                            )}
+                            ) : action ? (
+                              <Link
+                                className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+                                to={action.href}
+                              >
+                                <ListChecks size={14} />
+                                {action.label}
+                              </Link>
+                            ) : null}
                             {canManage && (
                               <LoadingButton
-                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
-                                onClick={() => deleteAnnouncement(announcement)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                                onClick={() => deleteAssignment(assignment)}
                                 loading={
                                   busyAction ===
-                                  `delete-announcement-${announcement.id}`
+                                  `delete-assignment-${assignment.id}`
                                 }
                                 loadingText="刪除中"
-                                icon={<Trash2 size={13} />}
+                                icon={<Trash2 size={14} />}
                               >
                                 刪除
                               </LoadingButton>
                             )}
                           </div>
                         </div>
-                      </div>
-                    ))}
-                    {announcements.length === 0 && (
+                      );
+                    })}
+                    {assignments.length === 0 && (
                       <div className="px-3 py-8 text-sm text-zinc-500">
-                        目前沒有公告
+                        目前沒有課程任務
                       </div>
                     )}
                   </div>
                 </section>
-                <section className="rounded-lg border border-zinc-200">
+              )}
+              {activeTab === "tasks" && (
+                <section className="mx-5 mb-5 rounded-lg border border-zinc-200">
                   <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <MessageCircleQuestion
-                      size={16}
-                      className="text-zinc-500"
-                    />
-                    求助佇列
+                    <ListChecks size={16} className="text-zinc-500" />
+                    課程測驗
                   </div>
-                  {!canManage && (
-                    <form
-                      className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3"
-                      onSubmit={createHelpRequest}
-                    >
-                      <input
-                        className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={helpTitle}
-                        onChange={(event) => setHelpTitle(event.target.value)}
-                        placeholder="問題標題"
-                      />
-                      <textarea
-                        className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={helpContent}
-                        onChange={(event) => setHelpContent(event.target.value)}
-                        placeholder="補充說明"
-                      />
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                          value={helpPriority}
-                          onChange={(event) =>
-                            setHelpPriority(
-                              event.target.value as "low" | "normal" | "high",
-                            )
-                          }
-                        >
-                          <option value="low">低</option>
-                          <option value="normal">一般</option>
-                          <option value="high">高</option>
-                        </select>
-                        <LoadingButton
-                          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                          loading={busyAction === "create-help"}
-                          loadingText="送出中"
-                          icon={<Plus size={16} />}
-                        >
-                          送出
-                        </LoadingButton>
-                      </div>
-                    </form>
-                  )}
-                  <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
-                    {helpRequests.map((request) => (
-                      <div key={request.id} className="px-3 py-3 text-sm">
-                        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium">
-                                {request.title}
-                              </span>
-                              <span className={helpStatusClass(request.status)}>
-                                {helpStatusLabel(request.status)}
-                              </span>
-                              <span className={priorityClass(request.priority)}>
-                                {priorityLabel(request.priority)}
-                              </span>
-                            </div>
-                            {request.content && (
-                              <div className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-600">
-                                {request.content}
-                              </div>
-                            )}
-                            <div className="mt-2 text-xs text-zinc-500">
-                              {formatDateTime(request.updated_at)}
-                              {request.username ? ` · ${request.username}` : ""}
-                            </div>
-                          </div>
-                          {canManage && (
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              {request.status !== "in_progress" && (
-                                <LoadingButton
-                                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
-                                  onClick={() =>
-                                    updateHelpRequest(request, "in_progress")
-                                  }
-                                  loading={
-                                    busyAction === `help-status-${request.id}`
-                                  }
-                                  loadingText="處理中"
-                                >
-                                  處理
-                                </LoadingButton>
-                              )}
-                              {request.status !== "resolved" && (
-                                <LoadingButton
-                                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:text-zinc-400"
-                                  onClick={() =>
-                                    updateHelpRequest(request, "resolved")
-                                  }
-                                  loading={
-                                    busyAction === `help-status-${request.id}`
-                                  }
-                                  loadingText="完成中"
-                                >
-                                  結案
-                                </LoadingButton>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {helpRequests.length === 0 && (
-                      <div className="px-3 py-8 text-sm text-zinc-500">
-                        目前沒有求助單
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-              <section className="mb-5 rounded-lg border border-zinc-200">
-                <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                  <ListChecks size={16} className="text-zinc-500" />
-                  課程任務
-                </div>
-                {canManage && (
-                  <form
-                    className="grid gap-3 border-b border-zinc-200 bg-zinc-50 px-3 py-3 md:grid-cols-[1.4fr_160px_1fr_180px_auto]"
-                    onSubmit={createAssignment}
-                  >
-                    <div>
-                      <label
-                        className="mb-1 block text-xs font-medium text-zinc-500"
-                        htmlFor="assignment-title"
-                      >
-                        任務名稱
-                      </label>
-                      <input
-                        id="assignment-title"
-                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={assignmentTitle}
-                        onChange={(event) =>
-                          setAssignmentTitle(event.target.value)
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label
-                        className="mb-1 block text-xs font-medium text-zinc-500"
-                        htmlFor="assignment-kind"
-                      >
-                        類型
-                      </label>
-                      <select
-                        id="assignment-kind"
-                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        value={assignmentKind}
-                        onChange={(event) => {
-                          const nextKind = event.target
-                            .value as CourseAssignmentItem["kind"];
-                          setAssignmentKind(nextKind);
-                          if (!assignmentNeedsDocument(nextKind)) {
-                            setAssignmentDocId("");
-                          }
-                          if (nextKind !== "quiz") setAssignmentQuizId("");
-                        }}
-                      >
-                        <option value="custom">自訂</option>
-                        <option value="quiz">測驗</option>
-                        <option value="read_summary">閱讀摘要</option>
-                        <option value="note">筆記</option>
-                        <option value="flashcards">閃卡</option>
-                      </select>
-                    </div>
-                    {assignmentKind === "quiz" ? (
-                      <div>
-                        <label
-                          className="mb-1 block text-xs font-medium text-zinc-500"
-                          htmlFor="assignment-quiz"
-                        >
-                          測驗
-                        </label>
-                        <select
-                          id="assignment-quiz"
-                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                          value={assignmentQuizId}
-                          onChange={(event) =>
-                            setAssignmentQuizId(event.target.value)
-                          }
-                        >
-                          <option value="">選擇測驗</option>
-                          {courseQuizzes.map((quiz) => (
-                            <option key={quiz.id} value={quiz.id}>
-                              {quiz.course_publication?.title ?? quiz.title}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : (
-                      <div>
-                        <label
-                          className="mb-1 block text-xs font-medium text-zinc-500"
-                          htmlFor="assignment-doc"
-                        >
-                          文件
-                        </label>
-                        <select
-                          id="assignment-doc"
-                          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                          value={assignmentDocId}
-                          onChange={(event) =>
-                            setAssignmentDocId(event.target.value)
-                          }
-                          disabled={!assignmentNeedsDocument(assignmentKind)}
-                        >
-                          <option value="">
-                            {assignmentNeedsDocument(assignmentKind)
-                              ? "選擇文件"
-                              : "不需文件"}
-                          </option>
-                          {(selected.documents ?? []).map((doc) => (
-                            <option key={doc.id} value={doc.id}>
-                              {doc.filename}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <div>
-                      <label
-                        className="mb-1 block text-xs font-medium text-zinc-500"
-                        htmlFor="assignment-due"
-                      >
-                        截止時間
-                      </label>
-                      <input
-                        id="assignment-due"
-                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                        type="datetime-local"
-                        value={assignmentDueAt}
-                        onChange={(event) =>
-                          setAssignmentDueAt(event.target.value)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <LoadingButton
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                        loading={busyAction === "create-assignment"}
-                        loadingText="新增中"
-                        icon={<Plus size={16} />}
-                      >
-                        新增
-                      </LoadingButton>
-                    </div>
-                    <textarea
-                      className="md:col-span-5 min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                      value={assignmentDescription}
-                      onChange={(event) =>
-                        setAssignmentDescription(event.target.value)
-                      }
-                      placeholder="任務說明"
-                    />
-                  </form>
-                )}
-                <div className="divide-y divide-zinc-100">
-                  {assignments.map((assignment) => {
-                    const action = assignmentAction(assignment);
-                    return (
+                  <div className="divide-y divide-zinc-100">
+                    {courseQuizzes.map((quiz) => (
                       <div
-                        key={assignment.id}
-                        className="flex flex-col gap-3 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between"
+                        key={quiz.id}
+                        className="flex flex-col gap-3 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate font-medium">
-                              {assignment.title}
-                            </span>
-                            <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
-                              {assignmentKindLabel(assignment.kind)}
-                            </span>
-                            <span
-                              className={assignmentCompletionClass(
-                                assignment.completion.status,
-                              )}
-                            >
-                              {assignmentCompletionLabel(
-                                assignment.completion.status,
-                              )}
-                            </span>
+                          <div className="truncate font-medium">
+                            {quiz.course_publication?.title ?? quiz.title}
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                            {assignment.due_at && (
-                              <span className="inline-flex items-center gap-1">
-                                <CalendarClock size={13} />
-                                {formatDateTime(assignment.due_at)}
+                            <span>{quiz.questions.length} 題</span>
+                            {quiz.course_publication?.available_from && (
+                              <span>
+                                開放{" "}
+                                {formatDateTime(
+                                  quiz.course_publication.available_from,
+                                )}
                               </span>
                             )}
-                            {assignment.doc_filename && (
-                              <span>{assignment.doc_filename}</span>
-                            )}
-                            {assignment.quiz_title && (
-                              <span>{assignment.quiz_title}</span>
-                            )}
-                            {assignment.completion.score !== null && (
+                            {quiz.course_publication?.due_at && (
                               <span>
-                                分數{" "}
+                                截止{" "}
+                                {formatDateTime(quiz.course_publication.due_at)}
+                              </span>
+                            )}
+                            {quiz.course_publication?.attempt_limit && (
+                              <span>
+                                最多 {quiz.course_publication.attempt_limit} 次
+                              </span>
+                            )}
+                            {quiz.latest_attempt ? (
+                              <span className="text-emerald-700">
+                                已完成 ·{" "}
                                 {Math.round(
-                                  Number(assignment.completion.score) * 100,
+                                  Number(quiz.latest_attempt.total_score ?? 0) *
+                                    100,
                                 )}
                                 %
                               </span>
+                            ) : (
+                              <span className="text-amber-700">待完成</span>
                             )}
                           </div>
-                          {assignment.description && (
-                            <div className="mt-2 text-xs leading-5 text-zinc-600">
-                              {assignment.description}
-                            </div>
-                          )}
                         </div>
-                        <div className="flex shrink-0 flex-wrap items-center gap-2">
-                          {assignment.kind === "custom" ? (
-                            <LoadingButton
-                              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                              onClick={() => submitAssignment(assignment)}
-                              loading={
-                                busyAction ===
-                                `submit-assignment-${assignment.id}`
-                              }
-                              loadingText="完成中"
-                              icon={<CheckCircle2 size={14} />}
-                              disabled={
-                                assignment.completion.status === "completed" ||
-                                assignment.completion.status === "late"
-                              }
-                            >
-                              標記完成
-                            </LoadingButton>
-                          ) : action ? (
-                            <Link
-                              className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-                              to={action.href}
-                            >
-                              <ListChecks size={14} />
-                              {action.label}
-                            </Link>
-                          ) : null}
-                          {canManage && (
-                            <LoadingButton
-                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
-                              onClick={() => deleteAssignment(assignment)}
-                              loading={
-                                busyAction ===
-                                `delete-assignment-${assignment.id}`
-                              }
-                              loadingText="刪除中"
-                              icon={<Trash2 size={14} />}
-                            >
-                              刪除
-                            </LoadingButton>
-                          )}
-                        </div>
+                        <Link
+                          className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+                          to={`/quiz/${quiz.id}`}
+                        >
+                          <ListChecks size={14} />
+                          {quiz.latest_attempt ? "查看測驗" : "開始測驗"}
+                        </Link>
                       </div>
-                    );
-                  })}
-                  {assignments.length === 0 && (
-                    <div className="px-3 py-8 text-sm text-zinc-500">
-                      目前沒有課程任務
-                    </div>
-                  )}
-                </div>
-              </section>
-              <section className="mb-5 rounded-lg border border-zinc-200">
-                <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                  <ListChecks size={16} className="text-zinc-500" />
-                  課程測驗
-                </div>
-                <div className="divide-y divide-zinc-100">
-                  {courseQuizzes.map((quiz) => (
-                    <div
-                      key={quiz.id}
-                      className="flex flex-col gap-3 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">
-                          {quiz.course_publication?.title ?? quiz.title}
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                          <span>{quiz.questions.length} 題</span>
-                          {quiz.course_publication?.available_from && (
-                            <span>
-                              開放{" "}
-                              {formatDateTime(
-                                quiz.course_publication.available_from,
-                              )}
-                            </span>
-                          )}
-                          {quiz.course_publication?.due_at && (
-                            <span>
-                              截止{" "}
-                              {formatDateTime(quiz.course_publication.due_at)}
-                            </span>
-                          )}
-                          {quiz.course_publication?.attempt_limit && (
-                            <span>
-                              最多 {quiz.course_publication.attempt_limit} 次
-                            </span>
-                          )}
-                          {quiz.latest_attempt ? (
-                            <span className="text-emerald-700">
-                              已完成 ·{" "}
-                              {Math.round(
-                                Number(quiz.latest_attempt.total_score ?? 0) *
-                                  100,
-                              )}
-                              %
-                            </span>
-                          ) : (
-                            <span className="text-amber-700">待完成</span>
-                          )}
-                        </div>
+                    ))}
+                    {courseQuizzes.length === 0 && (
+                      <div className="px-3 py-8 text-sm text-zinc-500">
+                        目前沒有已發布的課程測驗
                       </div>
-                      <Link
-                        className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-                        to={`/quiz/${quiz.id}`}
-                      >
-                        <ListChecks size={14} />
-                        {quiz.latest_attempt ? "查看測驗" : "開始測驗"}
-                      </Link>
-                    </div>
-                  ))}
-                  {courseQuizzes.length === 0 && (
-                    <div className="px-3 py-8 text-sm text-zinc-500">
-                      目前沒有已發布的課程測驗
-                    </div>
-                  )}
-                </div>
-              </section>
-              {canManage && (
-                <section className="mb-5 rounded-lg border border-zinc-200">
+                    )}
+                  </div>
+                </section>
+              )}
+              {canManage && activeTab === "question-bank" && (
+                <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
                   <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       <ListChecks size={16} className="text-zinc-500" />
@@ -1492,97 +1673,101 @@ export function CoursesPage() {
                   </div>
                 </section>
               )}
-              <section className="rounded-lg border border-zinc-200">
-                <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                  <FileText size={16} className="text-zinc-500" />
-                  課程教材
-                </div>
-                <div className="divide-y divide-zinc-100 px-3">
-                  {(selected.documents ?? []).map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div>
-                        <div className="font-medium">{doc.filename}</div>
-                        <div className="text-xs text-zinc-500">
-                          {doc.status}
-                          {doc.course_status === "removed" ? " · 已移除" : ""}
+              {activeTab === "materials" && (
+                <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
+                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
+                    <FileText size={16} className="text-zinc-500" />
+                    課程教材
+                  </div>
+                  <div className="divide-y divide-zinc-100 px-3">
+                    {(selected.documents ?? []).map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <div className="font-medium">{doc.filename}</div>
+                          <div className="text-xs text-zinc-500">
+                            {doc.status}
+                            {doc.course_status === "removed" ? " · 已移除" : ""}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {doc.course_status !== "removed" &&
+                            doc.status === "ready" && (
+                              <>
+                                <Link
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  to={`/chat?course=${selected.id}&doc=${doc.id}`}
+                                >
+                                  <MessageSquareText size={13} />
+                                  對話
+                                </Link>
+                                <Link
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  to={`/summary/${doc.id}`}
+                                >
+                                  <BookOpen size={13} />
+                                  摘要
+                                </Link>
+                                <Link
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  to={`/mindmap/${doc.id}`}
+                                >
+                                  <Network size={13} />
+                                  心智圖
+                                </Link>
+                                <Link
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  to={`/flashcards?doc=${doc.id}`}
+                                >
+                                  <BrainCircuit size={13} />
+                                  閃卡
+                                </Link>
+                                <Link
+                                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  to={`/notes?doc=${doc.id}`}
+                                >
+                                  <NotebookPen size={13} />
+                                  筆記
+                                </Link>
+                              </>
+                            )}
+                          {canManage &&
+                            doc.course_status !== "removed" &&
+                            doc.status === "ready" && (
+                              <Link
+                                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                                to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}
+                              >
+                                發布測驗
+                              </Link>
+                            )}
+                          {canManage && doc.course_status !== "removed" && (
+                            <LoadingButton
+                              className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400"
+                              onClick={() => removeDocument(doc.id)}
+                              loading={
+                                busyAction === `remove-document-${doc.id}`
+                              }
+                              loadingText="移除中"
+                            >
+                              移除
+                            </LoadingButton>
+                          )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {doc.course_status !== "removed" &&
-                          doc.status === "ready" && (
-                            <>
-                              <Link
-                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/chat?course=${selected.id}&doc=${doc.id}`}
-                              >
-                                <MessageSquareText size={13} />
-                                對話
-                              </Link>
-                              <Link
-                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/summary/${doc.id}`}
-                              >
-                                <BookOpen size={13} />
-                                摘要
-                              </Link>
-                              <Link
-                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/mindmap/${doc.id}`}
-                              >
-                                <Network size={13} />
-                                心智圖
-                              </Link>
-                              <Link
-                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/flashcards?doc=${doc.id}`}
-                              >
-                                <BrainCircuit size={13} />
-                                閃卡
-                              </Link>
-                              <Link
-                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                                to={`/notes?doc=${doc.id}`}
-                              >
-                                <NotebookPen size={13} />
-                                筆記
-                              </Link>
-                            </>
-                          )}
-                        {canManage &&
-                          doc.course_status !== "removed" &&
-                          doc.status === "ready" && (
-                            <Link
-                              className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                              to={`/quiz/generate?course=${selected.id}&doc=${doc.id}`}
-                            >
-                              發布測驗
-                            </Link>
-                          )}
-                        {canManage && doc.course_status !== "removed" && (
-                          <LoadingButton
-                            className="inline-flex items-center gap-1 text-xs text-red-600 disabled:text-zinc-400"
-                            onClick={() => removeDocument(doc.id)}
-                            loading={busyAction === `remove-document-${doc.id}`}
-                            loadingText="移除中"
-                          >
-                            移除
-                          </LoadingButton>
-                        )}
+                    ))}
+                    {(selected.documents ?? []).length === 0 && (
+                      <div className="py-8 text-sm text-zinc-500">
+                        尚無課程文件
                       </div>
-                    </div>
-                  ))}
-                  {(selected.documents ?? []).length === 0 && (
-                    <div className="py-8 text-sm text-zinc-500">
-                      尚無課程文件
-                    </div>
-                  )}
-                </div>
-              </section>
-              {quizSummary.length > 0 && (
-                <section className="mt-5 rounded-lg border border-zinc-200">
+                    )}
+                  </div>
+                </section>
+              )}
+              {activeTab === "overview" && quizSummary.length > 0 && (
+                <section className="mx-5 mb-5 rounded-lg border border-zinc-200">
                   <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
                     測驗弱點
                   </div>
@@ -1628,6 +1813,26 @@ function riskLabel(risk: string) {
   if (risk === "high") return "高風險";
   if (risk === "medium") return "待關注";
   return "正常";
+}
+
+function SummaryMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="min-w-0 border-l border-zinc-200 pl-3 first:border-l-0 first:pl-0">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="mt-1 flex items-end justify-between gap-2">
+        <div className="text-xl font-semibold text-zinc-900">{value}</div>
+        <div className="truncate text-xs text-zinc-500">{detail}</div>
+      </div>
+    </div>
+  );
 }
 
 function riskClass(risk: string) {
