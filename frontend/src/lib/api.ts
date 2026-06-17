@@ -141,6 +141,19 @@ export interface MindmapResponse {
   content: string;
 }
 
+export interface GenerationTask<TOutput = Record<string, unknown>> {
+  id: string;
+  kind: "quiz" | "flashcards" | "mindmap" | string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  input: Record<string, unknown>;
+  output: TOutput | null;
+  error: string | null;
+  artifact_id: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
 export interface FlashcardItem {
   id: string;
   doc_id: string | null;

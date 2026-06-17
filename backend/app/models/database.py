@@ -36,6 +36,8 @@ async def init_db() -> None:
 
 
 async def _ensure_sqlite_columns(conn) -> None:
+    await conn.run_sync(Base.metadata.create_all)
+
     existing_users = {
         row[1] for row in (await conn.execute(text("PRAGMA table_info(users)"))).fetchall()
     }
@@ -72,10 +74,13 @@ async def _ensure_sqlite_columns(conn) -> None:
     }
     for column, column_type in course_quiz_columns.items():
         if column not in existing_course_quizzes:
-            await conn.execute(text(f"ALTER TABLE course_quizzes ADD COLUMN {column} {column_type}"))
+            await conn.execute(
+                text(f"ALTER TABLE course_quizzes ADD COLUMN {column} {column_type}")
+            )
 
     existing_course_documents = {
-        row[1] for row in (await conn.execute(text("PRAGMA table_info(course_documents)"))).fetchall()
+        row[1]
+        for row in (await conn.execute(text("PRAGMA table_info(course_documents)"))).fetchall()
     }
     course_document_columns = {
         "is_active": "INTEGER NOT NULL DEFAULT 1",
@@ -84,7 +89,9 @@ async def _ensure_sqlite_columns(conn) -> None:
     }
     for column, column_type in course_document_columns.items():
         if column not in existing_course_documents:
-            await conn.execute(text(f"ALTER TABLE course_documents ADD COLUMN {column} {column_type}"))
+            await conn.execute(
+                text(f"ALTER TABLE course_documents ADD COLUMN {column} {column_type}")
+            )
 
     existing_question_bank = (
         await conn.execute(text("PRAGMA table_info(course_question_bank_items)"))
@@ -99,7 +106,9 @@ async def _ensure_sqlite_columns(conn) -> None:
         for column, column_type in question_bank_columns.items():
             if column not in existing_question_bank_columns:
                 await conn.execute(
-                    text(f"ALTER TABLE course_question_bank_items ADD COLUMN {column} {column_type}")
+                    text(
+                        f"ALTER TABLE course_question_bank_items ADD COLUMN {column} {column_type}"
+                    )
                 )
 
     existing_usage = {

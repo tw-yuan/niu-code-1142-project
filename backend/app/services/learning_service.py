@@ -127,7 +127,10 @@ class LearningService:
             difficulty=difficulty,
             context=context,
         )
-        messages = [{"role": "system", "content": system}]
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": "請依照 system 指示，只回傳測驗 JSON object。"},
+        ]
         async for chunk in LLMClient(self.db).stream_chat(
             messages,
             temperature=cfg.get("temperature"),

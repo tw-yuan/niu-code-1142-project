@@ -14,9 +14,30 @@ from app.schemas import (
     WrongbookFlashcardRequest,
 )
 from app.services.cost_service import check_quota
+from app.services.generation_service import GenerationService
 from app.services.learning_service import LearningService
+from app.tasks.generation_tasks import run_generation_task
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+
+
+@router.post("/jobs", dependencies=[rate_limit("flashcards_job", 5, 3600)])
+async def create_flashcards_job(
+    body: FlashcardStreamRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc_ids = body.doc_ids or ([body.doc_id] if body.doc_id else [])
+    if not doc_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No documents selected")
+    await check_quota(db, current_user.id)
+    task = await GenerationService(db).create_task(
+        current_user.id,
+        "flashcards",
+        body.model_dump(),
+    )
+    run_generation_task.delay(task["id"])
+    return task
 
 
 @router.post("/stream", dependencies=[rate_limit("flashcards_stream", 5, 3600)])

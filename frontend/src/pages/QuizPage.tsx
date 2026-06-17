@@ -7,10 +7,11 @@ import {
   apiFetch,
   CourseItem,
   DocumentItem,
+  GenerationTask,
   QuizDiagnostic,
   QuizItem,
 } from "../lib/api";
-import { streamFetch } from "../lib/stream";
+import { useGenerationTask } from "../lib/generation";
 import { useAuthStore } from "../store/auth";
 
 export function QuizPage() {
@@ -53,6 +54,13 @@ export function QuizPage() {
   const documentIds = documents.map((doc) => doc.id);
   const allDocumentsSelected =
     documentIds.length > 0 && documentIds.every((id) => docIds.includes(id));
+  const quizGeneration = useGenerationTask<{
+    quiz_id?: string;
+    question_count?: number;
+  }>("quiz", async () => {
+    setPreview("");
+    await load();
+  });
 
   async function load() {
     const [docs, nextQuizzes, wrongbookRows, nextCourses] = await Promise.all([
@@ -116,35 +124,30 @@ export function QuizPage() {
     setPreview("");
     setError("");
     setStreaming(true);
-    let next = "";
-    let failed = false;
     try {
-      for await (const event of streamFetch("/quiz/stream", {
-        doc_ids: activeDocIds,
-        types: ["MC"],
-        count,
-        difficulty,
-        title: quizTitle.trim() || undefined,
-        course_id: courseId || undefined,
-        publish_to_course: publishToCourse && Boolean(courseId),
-        due_at: publishToCourse ? normalizeDateTimeInput(dueAt) : undefined,
-        available_from: publishToCourse
-          ? normalizeDateTimeInput(availableFrom)
-          : undefined,
-        answer_visible_at: publishToCourse
-          ? normalizeDateTimeInput(answerVisibleAt)
-          : undefined,
-        attempt_limit: publishToCourse ? attemptLimit : undefined,
-      })) {
-        if (event.type === "chunk") {
-          next += event.content;
-          setPreview(next);
-        } else if (event.type === "error") {
-          failed = true;
-          setError(event.message);
-        }
-      }
-      if (!failed) await load();
+      const task = await apiFetch<
+        GenerationTask | { task_id: string; status: string }
+      >("/quiz/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          doc_ids: activeDocIds,
+          types: ["MC"],
+          count,
+          difficulty,
+          title: quizTitle.trim() || undefined,
+          course_id: courseId || undefined,
+          publish_to_course: publishToCourse && Boolean(courseId),
+          due_at: publishToCourse ? normalizeDateTimeInput(dueAt) : undefined,
+          available_from: publishToCourse
+            ? normalizeDateTimeInput(availableFrom)
+            : undefined,
+          answer_visible_at: publishToCourse
+            ? normalizeDateTimeInput(answerVisibleAt)
+            : undefined,
+          attempt_limit: publishToCourse ? attemptLimit : undefined,
+        }),
+      });
+      quizGeneration.watch(task);
     } catch (err) {
       setError(err instanceof Error ? err.message : "測驗生成失敗");
     } finally {
@@ -388,9 +391,10 @@ export function QuizPage() {
             disabled={
               activeDocIds.length === 0 ||
               streaming ||
+              quizGeneration.active ||
               user?.quota_status === "exceeded"
             }
-            loading={streaming}
+            loading={streaming || quizGeneration.active}
             loadingText="生成中"
             icon={<Wand2 size={16} />}
           >
@@ -404,6 +408,19 @@ export function QuizPage() {
               className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
             >
               {error}
+            </div>
+          )}
+          {quizGeneration.error && (
+            <div
+              role="alert"
+              className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
+            >
+              {quizGeneration.error}
+            </div>
+          )}
+          {quizGeneration.active && (
+            <div className="mt-3 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
+              測驗生成任務執行中，可先離開頁面，完成後回來會顯示在列表。
             </div>
           )}
           {preview && (

@@ -47,7 +47,7 @@ class LLMClient:
                 **self._chat_kwargs(cfg, temperature, max_tokens, response_format),
             ),
         )
-        content = response.choices[0].message.content or ""
+        content = self._message_content(response)
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
         input_tokens, output_tokens = self._usage_parts(response)
         if input_tokens == 0 and output_tokens == 0:
@@ -92,10 +92,14 @@ class LLMClient:
         input_tokens = self._estimate_messages_tokens(messages)
         token_count = 0
         async for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                token_count += self._estimate_tokens(delta)
-                yield delta
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", None)
+            if content:
+                token_count += self._estimate_tokens(content)
+                yield content
         await self._record_usage(
             user_id,
             feature,
@@ -138,7 +142,7 @@ class LLMClient:
                 max_tokens=cfg.get("max_tokens", 2048),
             ),
         )
-        content = response.choices[0].message.content or ""
+        content = self._message_content(response)
         tokens = self._usage_tokens(response) or self._estimate_tokens(content)
         input_tokens, output_tokens = self._usage_parts(response)
         if input_tokens == 0 and output_tokens == 0:
@@ -185,7 +189,12 @@ class LLMClient:
             output_tokens=0,
             provider=provider.get("base_url"),
         )
-        return [item.embedding for item in response.data]
+        embeddings = [item.embedding for item in getattr(response, "data", [])]
+        if len(embeddings) != len(texts):
+            raise RuntimeError(
+                f"Embedding provider returned {len(embeddings)} vectors for {len(texts)} inputs"
+            )
+        return embeddings
 
     async def _get_config(self, feature: str) -> dict[str, Any]:
         return (await self._load_config())[feature]
@@ -251,6 +260,23 @@ class LLMClient:
                 continue
             except HTTPException:
                 raise
+            except Exception as exc:
+                last_exc = exc
+                await self._record_system_event(
+                    "llm_provider_error",
+                    {
+                        "feature": feature,
+                        "model": provider.get("model"),
+                        "base_url": provider.get("base_url"),
+                        "reason": exc.__class__.__name__,
+                        "fallback_available": index < len(providers) - 1,
+                        "message": str(exc)[:1000],
+                    },
+                    severity="error",
+                )
+                if index == len(providers) - 1:
+                    raise
+                continue
         assert last_exc is not None
         raise last_exc
 
@@ -260,11 +286,16 @@ class LLMClient:
             kwargs["dimensions"] = config["dimensions"]
         return kwargs
 
-    async def _record_system_event(self, event_type: str, detail: dict[str, Any]) -> None:
+    async def _record_system_event(
+        self,
+        event_type: str,
+        detail: dict[str, Any],
+        severity: str = "warning",
+    ) -> None:
         if self.db is None:
             return
         self.db.add(
-            SystemEvent(event_type=event_type, severity="warning", detail=json.dumps(detail))
+            SystemEvent(event_type=event_type, severity=severity, detail=json.dumps(detail))
         )
         await self.db.commit()
 
@@ -345,6 +376,13 @@ class LLMClient:
     def _usage_tokens(self, response: Any) -> int | None:
         usage = getattr(response, "usage", None)
         return getattr(usage, "total_tokens", None)
+
+    def _message_content(self, response: Any) -> str:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return ""
+        message = getattr(choices[0], "message", None)
+        return getattr(message, "content", None) or ""
 
     def _usage_parts(self, response: Any) -> tuple[int, int]:
         usage = getattr(response, "usage", None)

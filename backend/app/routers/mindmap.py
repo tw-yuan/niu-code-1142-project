@@ -9,10 +9,29 @@ from app.models.tables import User
 from app.schemas import MindmapExpandRequest, MindmapRequest
 from app.services.cost_service import check_quota
 from app.services.document_service import DocumentService
+from app.services.generation_service import GenerationService
 from app.services.learning_service import LearningService
 from app.services.mindmap_tree_service import MindmapTreeService, tree_to_markdown
+from app.tasks.generation_tasks import run_generation_task
 
 router = APIRouter(prefix="/mindmap", tags=["mindmap"])
+
+
+@router.post("/jobs", dependencies=[rate_limit("mindmap_job", 5, 3600)])
+async def create_mindmap_job(
+    body: MindmapRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await DocumentService(db).get_document(current_user.id, body.doc_id)
+    await check_quota(db, current_user.id)
+    task = await GenerationService(db).create_task(
+        current_user.id,
+        "mindmap",
+        body.model_dump(),
+    )
+    run_generation_task.delay(task["id"])
+    return task
 
 
 @router.post("/stream", dependencies=[rate_limit("mindmap_stream", 5, 3600)])
@@ -33,8 +52,15 @@ async def stream_mindmap(
                 async for chunk in legacy_svc.stream_mindmap(current_user.id, body.doc_id):
                     full += chunk
                     yield _sse({"type": "chunk", "content": chunk})
-                artifact = await legacy_svc.save_artifact(current_user.id, body.doc_id, "mindmap", full)
-                yield _sse({"type": "mindmap_meta", "data": {"mindmap_id": artifact.id, "format": "markdown"}})
+                artifact = await legacy_svc.save_artifact(
+                    current_user.id, body.doc_id, "mindmap", full
+                )
+                yield _sse(
+                    {
+                        "type": "mindmap_meta",
+                        "data": {"mindmap_id": artifact.id, "format": "markdown"},
+                    }
+                )
             else:
                 async for chunk in tree_svc.stream_tree(current_user.id, body.doc_id):
                     full += chunk
@@ -73,7 +99,10 @@ async def get_mindmap(
     return await MindmapTreeService(db).latest_mindmap(current_user.id, doc_id)
 
 
-@router.post("/{artifact_id}/nodes/{node_id}/expand/stream", dependencies=[rate_limit("mindmap_expand", 15, 3600)])
+@router.post(
+    "/{artifact_id}/nodes/{node_id}/expand/stream",
+    dependencies=[rate_limit("mindmap_expand", 15, 3600)],
+)
 async def expand_mindmap_node(
     artifact_id: str,
     node_id: str,
@@ -95,7 +124,9 @@ async def expand_mindmap_node(
             ):
                 full += chunk
                 yield _sse({"type": "chunk", "content": chunk})
-            artifact, tree, children = await svc.save_expanded_node(current_user.id, artifact_id, node_id, full)
+            artifact, tree, children = await svc.save_expanded_node(
+                current_user.id, artifact_id, node_id, full
+            )
             yield _sse(
                 {
                     "type": "mindmap_patch",

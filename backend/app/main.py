@@ -20,6 +20,7 @@ from app.routers import (
     courses,
     documents,
     flashcards,
+    generation,
     goals,
     legal,
     mindmap,
@@ -51,6 +52,7 @@ app.include_router(summary.router)
 app.include_router(quiz.router)
 app.include_router(mindmap.router)
 app.include_router(flashcards.router)
+app.include_router(generation.router)
 app.include_router(notes.router)
 app.include_router(goals.router)
 app.include_router(courses.router)
@@ -71,7 +73,9 @@ async def global_rate_limit(request: Request, call_next):
         count = await client.zcard(key)
         if count >= limit:
             oldest = await client.zrange(key, 0, 0, withscores=True)
-            retry_after = max(1, int(oldest[0][1] + window_seconds - now)) if oldest else window_seconds
+            retry_after = (
+                max(1, int(oldest[0][1] + window_seconds - now)) if oldest else window_seconds
+            )
             return JSONResponse(
                 {
                     "detail": {

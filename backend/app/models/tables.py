@@ -68,7 +68,9 @@ class ChatSession(Base):
     )
     title: Mapped[str | None] = mapped_column(String)
     doc_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    course_id: Mapped[str | None] = mapped_column(String, ForeignKey("courses.id", ondelete="SET NULL"))
+    course_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="SET NULL")
+    )
     mode: Mapped[str] = mapped_column(String, nullable=False, default="enhanced")
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
     updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
@@ -95,7 +97,9 @@ class Quiz(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    course_id: Mapped[str | None] = mapped_column(String, ForeignKey("courses.id", ondelete="SET NULL"), index=True)
+    course_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="SET NULL"), index=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     doc_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     config: Mapped[str] = mapped_column(Text, nullable=False)
@@ -162,7 +166,9 @@ class CourseQuestionBankItem(Base):
     created_by: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    reviewed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_by: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL")
+    )
     reviewed_at: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
     updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
@@ -181,8 +187,12 @@ class CourseAssignment(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String, nullable=False, default="custom")
-    doc_id: Mapped[str | None] = mapped_column(String, ForeignKey("documents.id", ondelete="SET NULL"))
-    quiz_id: Mapped[str | None] = mapped_column(String, ForeignKey("quizzes.id", ondelete="SET NULL"))
+    doc_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="SET NULL")
+    )
+    quiz_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("quizzes.id", ondelete="SET NULL")
+    )
     due_at: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, nullable=False, default="published")
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
@@ -243,8 +253,12 @@ class CourseHelpRequest(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    session_id: Mapped[str | None] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="SET NULL"))
-    assigned_to: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    session_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("chat_sessions.id", ondelete="SET NULL")
+    )
+    assigned_to: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, nullable=False, default="open")
@@ -270,6 +284,24 @@ class LearningArtifact(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
+class GenerationTask(Base):
+    __tablename__ = "generation_tasks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="queued", index=True)
+    input_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    output_json: Mapped[str | None] = mapped_column(Text)
+    error_msg: Mapped[str | None] = mapped_column(Text)
+    artifact_id: Mapped[str | None] = mapped_column(String, index=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+    finished_at: Mapped[str | None] = mapped_column(String)
+
+
 class Flashcard(Base):
     __tablename__ = "flashcards"
 
@@ -277,7 +309,9 @@ class Flashcard(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    doc_id: Mapped[str | None] = mapped_column(String, ForeignKey("documents.id", ondelete="CASCADE"))
+    doc_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE")
+    )
     front: Mapped[str] = mapped_column(Text, nullable=False)
     back: Mapped[str] = mapped_column(Text, nullable=False)
     source_page: Mapped[int | None] = mapped_column(Integer)
@@ -389,7 +423,9 @@ class Note(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    doc_id: Mapped[str | None] = mapped_column(String, ForeignKey("documents.id", ondelete="SET NULL"))
+    doc_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="SET NULL")
+    )
     session_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("chat_sessions.id", ondelete="SET NULL")
     )
@@ -421,7 +457,9 @@ class Course(Base):
     __tablename__ = "courses"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
-    owner_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     join_code: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
@@ -454,7 +492,9 @@ class CourseDocument(Base):
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     added_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
     removed_at: Mapped[str | None] = mapped_column(String)
-    removed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"))
+    removed_by: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL")
+    )
 
 
 class LegalConsent(Base):

@@ -3,8 +3,13 @@ import { BrainCircuit, Plus, Trash2, Wand2 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
 import { LoadingButton } from "../components/app/LoadingButton";
-import { apiFetch, DocumentItem, FlashcardItem } from "../lib/api";
-import { streamFetch } from "../lib/stream";
+import {
+  apiFetch,
+  DocumentItem,
+  FlashcardItem,
+  GenerationTask,
+} from "../lib/api";
+import { useGenerationTask } from "../lib/generation";
 import { useAuthStore } from "../store/auth";
 
 export function FlashcardsPage() {
@@ -34,6 +39,13 @@ export function FlashcardsPage() {
   }, [cards]);
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
   const documentIds = documents.map((doc) => doc.id);
+  const flashcardGeneration = useGenerationTask<{ count?: number }>(
+    "flashcards",
+    async () => {
+      setPreview("");
+      await load();
+    },
+  );
 
   async function load() {
     const [docs, nextCards] = await Promise.all([
@@ -78,24 +90,19 @@ export function FlashcardsPage() {
     setStreaming(true);
     setError("");
     setPreview("");
-    let next = "";
-    let failed = false;
     try {
-      for await (const event of streamFetch("/flashcards/stream", {
-        doc_id: activeDocIds[0],
-        doc_ids: activeDocIds,
-        course_id: courseId || undefined,
-        count: 10,
-      })) {
-        if (event.type === "chunk") {
-          next += event.content;
-          setPreview(next);
-        } else if (event.type === "error") {
-          failed = true;
-          setError(event.message);
-        }
-      }
-      if (!failed) await load();
+      const task = await apiFetch<
+        GenerationTask<{ count?: number }> | { task_id: string; status: string }
+      >("/flashcards/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          doc_id: activeDocIds[0],
+          doc_ids: activeDocIds,
+          course_id: courseId || undefined,
+          count: 10,
+        }),
+      });
+      flashcardGeneration.watch(task);
     } catch (err) {
       setError(err instanceof Error ? err.message : "閃卡生成失敗");
     } finally {
@@ -287,9 +294,10 @@ export function FlashcardsPage() {
             disabled={
               activeDocIds.length === 0 ||
               streaming ||
+              flashcardGeneration.active ||
               user?.quota_status === "exceeded"
             }
-            loading={streaming}
+            loading={streaming || flashcardGeneration.active}
             loadingText="生成中"
             icon={<Wand2 size={16} />}
           >
@@ -341,6 +349,19 @@ export function FlashcardsPage() {
             >
               {preview}
             </pre>
+          )}
+          {flashcardGeneration.active && (
+            <div className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
+              閃卡生成任務執行中，可先離開頁面，完成後回來會顯示在列表。
+            </div>
+          )}
+          {flashcardGeneration.error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
+            >
+              {flashcardGeneration.error}
+            </div>
           )}
           {error && (
             <div
