@@ -13,16 +13,24 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   BASE_URL,
   apiFetch,
-  apiUploadMany,
+  apiUploadWithProgress,
   DocumentContent,
   DocumentItem,
-  DocumentUploadResult,
   refreshToken,
 } from "../lib/api";
 import { LoadingButton } from "../components/app/LoadingButton";
 import { MarkdownContent } from "../components/app/MarkdownContent";
 import { useAuthStore } from "../store/auth";
 import { wsManager } from "../lib/ws";
+
+type UploadQueueItem = {
+  id: string;
+  filename: string;
+  size: number;
+  progress: number;
+  status: "queued" | "uploading" | "processing" | "done" | "error";
+  error?: string;
+};
 
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -40,6 +48,7 @@ export function DocumentsPage() {
   const [previewUrl, setPreviewUrl] = useState("");
   const [consented, setConsented] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -146,26 +155,65 @@ export function DocumentsPage() {
     if (files.length === 0) return;
     setLoading(true);
     setError("");
+    const queueItems = files.map((file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      filename: file.name,
+      size: file.size,
+      progress: 0,
+      status: "queued" as const,
+    }));
+    setUploadQueue((current) => [...queueItems, ...current]);
+    const failures: string[] = [];
     try {
-      const results = await apiUploadMany<DocumentUploadResult[]>(
-        "/documents/upload-batch",
-        files,
+      await Promise.all(
+        files.map(async (file, index) => {
+          const itemId = queueItems[index].id;
+          setUploadQueueItem(itemId, { status: "uploading", progress: 1 });
+          try {
+            await apiUploadWithProgress<DocumentItem>(
+              "/documents/upload",
+              file,
+              (progress) => setUploadQueueItem(itemId, { progress }),
+            );
+            setUploadQueueItem(itemId, {
+              status: "processing",
+              progress: 100,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "上傳失敗";
+            failures.push(`${file.name}: ${message}`);
+            setUploadQueueItem(itemId, {
+              status: "error",
+              error: message,
+              progress: 100,
+            });
+          }
+        }),
       );
-      const failed = results.filter((item) => !item.ok);
-      if (failed.length > 0) {
-        setError(
-          failed
-            .map((item) => `${item.filename}: ${item.error ?? "上傳失敗"}`)
-            .join("；"),
-        );
+      if (failures.length > 0) {
+        setError(failures.join("；"));
       }
       await loadDocuments();
+      setUploadQueue((current) =>
+        current.map((item) =>
+          queueItems.some((queued) => queued.id === item.id) &&
+          item.status === "processing"
+            ? { ...item, status: "done" }
+            : item,
+        ),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "上傳失敗");
     } finally {
       setLoading(false);
       setPendingFiles([]);
     }
+  }
+
+  function setUploadQueueItem(id: string, patch: Partial<UploadQueueItem>) {
+    setUploadQueue((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
   }
 
   function onFile(event: ChangeEvent<HTMLInputElement>) {
@@ -427,6 +475,7 @@ export function DocumentsPage() {
               accept=".pdf,.md,.pptx,.docx"
               multiple
               onChange={onFile}
+              disabled={loading}
             />
           </label>
         </div>
@@ -435,6 +484,71 @@ export function DocumentsPage() {
         <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           {error}
         </div>
+      )}
+      {uploadQueue.length > 0 && (
+        <section className="mb-4 rounded-lg border border-zinc-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900">上傳佇列</h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                {uploadQueue.length} 個檔案
+              </p>
+            </div>
+            {uploadQueue.some((item) =>
+              ["done", "error"].includes(item.status),
+            ) && (
+              <button
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+                onClick={() =>
+                  setUploadQueue((current) =>
+                    current.filter(
+                      (item) => !["done", "error"].includes(item.status),
+                    ),
+                  )
+                }
+              >
+                清除完成
+              </button>
+            )}
+          </div>
+          <div className="divide-y divide-zinc-100">
+            {uploadQueue.map((item) => (
+              <div
+                key={item.id}
+                className="grid gap-3 px-5 py-3 text-sm md:grid-cols-[minmax(0,1fr)_120px_160px]"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-zinc-900">
+                    {item.filename}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    {formatBytes(item.size)}
+                    {item.error ? ` · ${item.error}` : ""}
+                  </div>
+                </div>
+                <span className={uploadStatusClass(item.status)}>
+                  {uploadStatusLabel(item.status)}
+                </span>
+                <div>
+                  <div className="mb-1 text-right text-xs text-zinc-500">
+                    {item.progress}%
+                  </div>
+                  <div className="h-2 rounded-full bg-zinc-100">
+                    <div
+                      className={[
+                        "h-2 rounded-full transition-all",
+                        item.status === "error"
+                          ? "bg-red-500"
+                          : "bg-indigo-600",
+                      ].join(" ")}
+                      style={{ width: `${item.progress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
@@ -714,6 +828,22 @@ function statusLabel(status: string) {
   if (status === "archived") return "封存";
   if (status === "error") return "錯誤";
   return status;
+}
+
+function uploadStatusLabel(status: UploadQueueItem["status"]) {
+  if (status === "queued") return "排隊中";
+  if (status === "uploading") return "上傳中";
+  if (status === "processing") return "等待處理";
+  if (status === "done") return "已送出";
+  return "失敗";
+}
+
+function uploadStatusClass(status: UploadQueueItem["status"]) {
+  const base = "inline-flex h-fit w-fit rounded-lg px-2 py-1 text-xs";
+  if (status === "error") return `${base} bg-red-50 text-red-600`;
+  if (status === "done") return `${base} bg-emerald-50 text-emerald-700`;
+  if (status === "processing") return `${base} bg-amber-50 text-amber-700`;
+  return `${base} bg-indigo-50 text-indigo-700`;
 }
 
 function formatBytes(bytes: number) {

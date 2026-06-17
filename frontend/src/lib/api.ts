@@ -443,6 +443,53 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   return apiFetch<T>(path, { method: "POST", body: form });
 }
 
+export async function apiUploadWithProgress<T>(
+  path: string,
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<T> {
+  const runUpload = () =>
+    new Promise<{ status: number; responseText: string }>((resolve, reject) => {
+      const form = new FormData();
+      form.append("file", file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${BASE_URL}${path}`);
+      xhr.withCredentials = true;
+      const token = localStorage.getItem("access_token");
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || event.total === 0) return;
+        onProgress(
+          Math.min(99, Math.round((event.loaded / event.total) * 100)),
+        );
+      };
+      xhr.onload = () =>
+        resolve({ status: xhr.status, responseText: xhr.responseText });
+      xhr.onerror = () => reject(new Error("Upload failed"));
+      xhr.onabort = () => reject(new Error("Upload cancelled"));
+      xhr.send(form);
+    });
+
+  let res = await runUpload();
+  if (res.status === 401 && path !== "/auth/refresh") {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      res = await runUpload();
+    } else {
+      localStorage.removeItem("access_token");
+      window.location.href = "/login";
+      throw new ApiError(401, "Unauthorized");
+    }
+  }
+  if (res.status < 200 || res.status >= 300) {
+    const err = res.responseText ? safeJsonParse(res.responseText) : {};
+    throw new ApiError(res.status, errorMessage(err));
+  }
+  onProgress(100);
+  return safeJsonParse(res.responseText) as T;
+}
+
 export async function apiUploadMany<T>(
   path: string,
   files: File[],
@@ -457,4 +504,12 @@ function errorMessage(err: any) {
   if (typeof err?.detail?.message === "string") return err.detail.message;
   if (typeof err?.message === "string") return err.message;
   return "Request failed";
+}
+
+function safeJsonParse(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }
