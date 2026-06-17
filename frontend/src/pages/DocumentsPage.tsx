@@ -23,6 +23,8 @@ import { MarkdownContent } from "../components/app/MarkdownContent";
 import { useAuthStore } from "../store/auth";
 import { wsManager } from "../lib/ws";
 
+const MAX_UPLOAD_FILES = 10;
+
 type UploadQueueItem = {
   id: string;
   filename: string;
@@ -219,6 +221,11 @@ export function DocumentsPage() {
   function onFile(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) return;
+    if (files.length > MAX_UPLOAD_FILES) {
+      setError(`一次最多上傳 ${MAX_UPLOAD_FILES} 個檔案，請分批上傳。`);
+      event.target.value = "";
+      return;
+    }
     if (!consented) {
       setPendingFiles(files);
     } else {
@@ -778,7 +785,9 @@ export function DocumentsPage() {
             <h2 className="text-lg font-semibold">上傳前著作權聲明</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-600">
               您選擇的 {pendingFiles.length}{" "}
-              個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
+              個文件必須為您合法持有的資料，或已獲得著作權人授權。本平台一次最多上傳{" "}
+              {MAX_UPLOAD_FILES}{" "}
+              個檔案，且僅供個人學習使用，違反著作權法的責任由上傳者自行承擔。
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
