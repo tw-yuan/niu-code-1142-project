@@ -1832,7 +1832,14 @@ export function CoursesPage() {
               )}
             </div>
           ) : (
-            <div className="text-sm text-zinc-500">選擇或建立課程</div>
+            <div className="flex min-h-[360px] items-center justify-center px-6 py-16 text-center">
+              <div>
+                <BookOpen size={32} className="mx-auto text-zinc-300" />
+                <div className="mt-3 text-sm font-medium text-zinc-700">
+                  選擇或建立課程
+                </div>
+              </div>
+            </div>
           )}
         </section>
       </div>
