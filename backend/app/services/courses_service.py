@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
 import secrets
 import string
-import contextlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,12 +43,12 @@ from app.schemas import (
     CourseAssignmentUpdate,
     CourseCreate,
     CourseDocumentRequest,
+    CourseHelpRequestCreate,
+    CourseHelpRequestUpdate,
     CourseJoinRequest,
     CourseMemberRoleUpdate,
     CourseQuestionReviewUpdate,
     CourseUpdate,
-    CourseHelpRequestCreate,
-    CourseHelpRequestUpdate,
 )
 from app.services.ws_manager import push_to_user
 
@@ -79,13 +79,17 @@ class CoursesService:
 
     async def list(self, user_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self.db.execute(
-                select(Course)
-                .join(CourseMember, CourseMember.course_id == Course.id)
-                .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
-                .order_by(desc(Course.created_at))
+            (
+                await self.db.execute(
+                    select(Course)
+                    .join(CourseMember, CourseMember.course_id == Course.id)
+                    .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
+                    .order_by(desc(Course.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [await self._out_for_member(row, user_id) for row in rows]
 
     async def get(self, user_id: str, course_id: str) -> dict[str, Any]:
@@ -145,36 +149,75 @@ class CoursesService:
     async def add_document(
         self, user_id: str, course_id: str, body: CourseDocumentRequest
     ) -> dict[str, Any]:
+        return await self.add_documents(user_id, course_id, body)
+
+    async def add_documents(
+        self, user_id: str, course_id: str, body: CourseDocumentRequest
+    ) -> dict[str, Any]:
+        doc_ids = _course_document_ids(body)
+        if not doc_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No documents selected",
+            )
         await self.require_role(user_id, course_id, {"instructor", "ta"})
-        doc = (
-            await self.db.execute(
-                select(Document).where(
-                    and_(
-                        Document.id == body.doc_id,
-                        Document.user_id == user_id,
-                        Document.status == "ready",
+        docs = (
+            (
+                await self.db.execute(
+                    select(Document.id).where(
+                        and_(
+                            Document.id.in_(doc_ids),
+                            Document.user_id == user_id,
+                            Document.status == "ready",
+                        )
                     )
                 )
             )
-        ).scalar_one_or_none()
-        if doc is None:
+            .scalars()
+            .all()
+        )
+        if set(docs) != set(doc_ids):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-        existing = (
-            await self.db.execute(
-                select(CourseDocument).where(
-                    and_(CourseDocument.course_id == course_id, CourseDocument.doc_id == body.doc_id)
+
+        existing_rows = (
+            (
+                await self.db.execute(
+                    select(CourseDocument).where(
+                        and_(
+                            CourseDocument.course_id == course_id,
+                            CourseDocument.doc_id.in_(doc_ids),
+                        )
+                    )
                 )
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            self.db.add(CourseDocument(course_id=course_id, doc_id=body.doc_id))
+            .scalars()
+            .all()
+        )
+        existing_by_doc_id = {item.doc_id: item for item in existing_rows}
+        added = 0
+        reactivated = 0
+        skipped = 0
+        for doc_id in doc_ids:
+            existing = existing_by_doc_id.get(doc_id)
+            if existing is None:
+                self.db.add(CourseDocument(course_id=course_id, doc_id=doc_id))
+                added += 1
+            elif not existing.is_active:
+                existing.is_active = 1
+                existing.removed_at = None
+                existing.removed_by = None
+                reactivated += 1
+            else:
+                skipped += 1
+        if added or reactivated:
             await self.db.commit()
-        elif not existing.is_active:
-            existing.is_active = 1
-            existing.removed_at = None
-            existing.removed_by = None
-            await self.db.commit()
-        return {"ok": True}
+        return {
+            "ok": True,
+            "doc_ids": doc_ids,
+            "added": added,
+            "reactivated": reactivated,
+            "skipped": skipped,
+        }
 
     async def remove_document(self, user_id: str, course_id: str, doc_id: str) -> None:
         await self.require_role(user_id, course_id, {"instructor", "ta"})
@@ -186,7 +229,9 @@ class CoursesService:
             )
         ).scalar_one_or_none()
         if item is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found"
+            )
         item.is_active = 0
         item.removed_at = now_iso()
         item.removed_by = user_id
@@ -203,8 +248,12 @@ class CoursesService:
         actor = await self.require_role(user_id, course_id, {"instructor"})
         member = await self._get_member(course_id, member_user_id)
         if member_user_id == course.owner_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed")
-        if course.owner_id != user_id and (actor.role != "instructor" or member.role == "instructor"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed"
+            )
+        if course.owner_id != user_id and (
+            actor.role != "instructor" or member.role == "instructor"
+        ):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
         if course.owner_id != user_id and body.role == "instructor":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course owner only")
@@ -217,7 +266,9 @@ class CoursesService:
         actor = await self.require_role(user_id, course_id, {"instructor", "ta"})
         member = await self._get_member(course_id, member_user_id)
         if member_user_id == course.owner_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed"
+            )
         if actor.role == "ta":
             if member.role != "student":
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Instructor only")
@@ -277,18 +328,28 @@ class CoursesService:
         for member in members:
             member_id = member["user_id"]
             chat_sessions = (
-                await self.db.execute(
-                    select(ChatSession)
-                    .where(and_(ChatSession.user_id == member_id, ChatSession.course_id == course_id))
-                    .order_by(desc(ChatSession.updated_at))
+                (
+                    await self.db.execute(
+                        select(ChatSession)
+                        .where(
+                            and_(
+                                ChatSession.user_id == member_id, ChatSession.course_id == course_id
+                            )
+                        )
+                        .order_by(desc(ChatSession.updated_at))
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             chat_session_ids = [session.id for session in chat_sessions]
             message_count = 0
             if chat_session_ids:
                 message_count = (
                     await self.db.execute(
-                        select(func.count(ChatMessage.id)).where(ChatMessage.session_id.in_(chat_session_ids))
+                        select(func.count(ChatMessage.id)).where(
+                            ChatMessage.session_id.in_(chat_session_ids)
+                        )
                     )
                 ).scalar_one()
             note_count = 0
@@ -303,26 +364,34 @@ class CoursesService:
             flashcards = []
             if doc_ids:
                 flashcards = (
-                    await self.db.execute(
-                        select(Flashcard).where(
-                            and_(Flashcard.user_id == member_id, Flashcard.doc_id.in_(doc_ids))
+                    (
+                        await self.db.execute(
+                            select(Flashcard).where(
+                                and_(Flashcard.user_id == member_id, Flashcard.doc_id.in_(doc_ids))
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             attempts = []
             if course_quiz_ids:
                 attempts = (
-                    await self.db.execute(
-                        select(QuizAttempt)
-                        .where(
-                            and_(
-                                QuizAttempt.user_id == member_id,
-                                QuizAttempt.quiz_id.in_(course_quiz_ids),
+                    (
+                        await self.db.execute(
+                            select(QuizAttempt)
+                            .where(
+                                and_(
+                                    QuizAttempt.user_id == member_id,
+                                    QuizAttempt.quiz_id.in_(course_quiz_ids),
+                                )
                             )
+                            .order_by(desc(QuizAttempt.completed_at))
                         )
-                        .order_by(desc(QuizAttempt.completed_at))
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             attempted_quiz_ids = {attempt.quiz_id for attempt in attempts}
             avg_score = (
                 sum(float(attempt.total_score or 0) for attempt in attempts) / len(attempts)
@@ -417,7 +486,15 @@ class CoursesService:
                 ]
             )
         writer.writerow([])
-        writer.writerow(["quiz_title", "student_count", "submission_count", "attempt_count", "score_avg_percent"])
+        writer.writerow(
+            [
+                "quiz_title",
+                "student_count",
+                "submission_count",
+                "attempt_count",
+                "score_avg_percent",
+            ]
+        )
         for quiz in data["quiz_summary"]:
             writer.writerow(
                 [
@@ -437,12 +514,16 @@ class CoursesService:
         if course.owner_id != user_id and member.role not in {"instructor", "ta"}:
             conditions.append(CourseAssignment.status == "published")
         rows = (
-            await self.db.execute(
-                select(CourseAssignment)
-                .where(and_(*conditions))
-                .order_by(desc(CourseAssignment.created_at))
+            (
+                await self.db.execute(
+                    select(CourseAssignment)
+                    .where(and_(*conditions))
+                    .order_by(desc(CourseAssignment.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [await self._assignment_out(row, user_id) for row in rows]
 
     async def announcements(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
@@ -452,12 +533,16 @@ class CoursesService:
         if course.owner_id != user_id and member.role not in {"instructor", "ta"}:
             conditions.append(CourseAnnouncement.status == "published")
         rows = (
-            await self.db.execute(
-                select(CourseAnnouncement)
-                .where(and_(*conditions))
-                .order_by(desc(CourseAnnouncement.created_at))
+            (
+                await self.db.execute(
+                    select(CourseAnnouncement)
+                    .where(and_(*conditions))
+                    .order_by(desc(CourseAnnouncement.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [await self._announcement_out(row, user_id) for row in rows]
 
     async def create_announcement(
@@ -512,11 +597,15 @@ class CoursesService:
         await self.db.delete(announcement)
         await self.db.commit()
 
-    async def mark_announcement_read(self, user_id: str, course_id: str, announcement_id: str) -> dict[str, Any]:
+    async def mark_announcement_read(
+        self, user_id: str, course_id: str, announcement_id: str
+    ) -> dict[str, Any]:
         await self.require_member(user_id, course_id)
         announcement = await self._get_announcement(course_id, announcement_id)
         if announcement.status != "published":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found"
+            )
         existing = (
             await self.db.execute(
                 select(CourseAnnouncementRead).where(
@@ -570,7 +659,9 @@ class CoursesService:
                 )
             ).scalar_one_or_none()
             if session is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found"
+                )
         request = CourseHelpRequest(
             course_id=course_id,
             user_id=user_id,
@@ -608,7 +699,10 @@ class CoursesService:
         if "assigned_to" in body.model_fields_set and body.assigned_to:
             assignee = await self._get_member(course_id, body.assigned_to)
             if assignee.role not in {"instructor", "ta"}:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee must be instructor or TA")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Assignee must be instructor or TA",
+                )
         if "status" in body.model_fields_set and body.status is not None:
             help_request.status = body.status
             help_request.resolved_at = now_iso() if body.status == "resolved" else None
@@ -640,7 +734,12 @@ class CoursesService:
             await self.db.execute(
                 select(CourseQuiz, Quiz)
                 .join(Quiz, Quiz.id == CourseQuiz.quiz_id)
-                .where(and_(CourseQuiz.course_id == course_id, CourseQuiz.status.in_(["published", "draft"])))
+                .where(
+                    and_(
+                        CourseQuiz.course_id == course_id,
+                        CourseQuiz.status.in_(["published", "draft"]),
+                    )
+                )
                 .order_by(desc(CourseQuiz.published_at))
             )
         ).all()
@@ -658,7 +757,9 @@ class CoursesService:
                         CourseQuestionBankItem.status != "archived",
                     )
                 )
-                .order_by(desc(CourseQuestionBankItem.updated_at), CourseQuestionBankItem.question_index)
+                .order_by(
+                    desc(CourseQuestionBankItem.updated_at), CourseQuestionBankItem.question_index
+                )
             )
         ).all()
         return [
@@ -704,12 +805,16 @@ class CoursesService:
 
     async def dashboard(self, user_id: str) -> dict[str, Any]:
         course_ids = (
-            await self.db.execute(
-                select(CourseMember.course_id)
-                .join(Course, Course.id == CourseMember.course_id)
-                .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
+            (
+                await self.db.execute(
+                    select(CourseMember.course_id)
+                    .join(Course, Course.id == CourseMember.course_id)
+                    .where(and_(CourseMember.user_id == user_id, Course.is_active == 1))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not course_ids:
             return {"announcements": [], "help_requests": [], "managed_help_count": 0}
         announcements = (
@@ -774,7 +879,9 @@ class CoursesService:
         body: CourseAssignmentCreate,
     ) -> dict[str, Any]:
         await self.require_role(user_id, course_id, {"instructor", "ta"})
-        await self._validate_assignment_refs(user_id, course_id, body.kind, body.doc_id, body.quiz_id)
+        await self._validate_assignment_refs(
+            user_id, course_id, body.kind, body.doc_id, body.quiz_id
+        )
         assignment = CourseAssignment(
             course_id=course_id,
             created_by=user_id,
@@ -803,7 +910,9 @@ class CoursesService:
         next_kind = body.kind if body.kind is not None else assignment.kind
         next_doc_id = body.doc_id if "doc_id" in body.model_fields_set else assignment.doc_id
         next_quiz_id = body.quiz_id if "quiz_id" in body.model_fields_set else assignment.quiz_id
-        await self._validate_assignment_refs(user_id, course_id, next_kind, next_doc_id, next_quiz_id)
+        await self._validate_assignment_refs(
+            user_id, course_id, next_kind, next_doc_id, next_quiz_id
+        )
         for field in ("title", "description", "kind", "doc_id", "quiz_id", "due_at", "status"):
             if field in body.model_fields_set:
                 setattr(assignment, field, getattr(body, field))
@@ -827,7 +936,9 @@ class CoursesService:
         await self.require_member(user_id, course_id)
         assignment = await self._get_assignment(course_id, assignment_id)
         if assignment.status != "published":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
+            )
         existing = (
             await self.db.execute(
                 select(CourseAssignmentSubmission)
@@ -859,18 +970,22 @@ class CoursesService:
         await self._get_course(course_id)
         await self.require_member(user_id, course_id)
         rows = (
-            await self.db.execute(
-                select(CourseDocument.doc_id)
-                .join(Document, Document.id == CourseDocument.doc_id)
-                .where(
-                    and_(
-                        CourseDocument.course_id == course_id,
-                        CourseDocument.is_active == 1,
-                        Document.status == "ready",
+            (
+                await self.db.execute(
+                    select(CourseDocument.doc_id)
+                    .join(Document, Document.id == CourseDocument.doc_id)
+                    .where(
+                        and_(
+                            CourseDocument.course_id == course_id,
+                            CourseDocument.is_active == 1,
+                            Document.status == "ready",
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(rows)
 
     async def require_member(self, user_id: str, course_id: str) -> CourseMember:
@@ -886,15 +1001,15 @@ class CoursesService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course member only")
         return member
 
-    async def require_role(
-        self, user_id: str, course_id: str, roles: set[str]
-    ) -> CourseMember:
+    async def require_role(self, user_id: str, course_id: str, roles: set[str]) -> CourseMember:
         course = await self._get_course(course_id)
         member = await self.require_member(user_id, course_id)
         if course.owner_id == user_id:
             return member
         if member.role not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient course role")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient course role"
+            )
         return member
 
     async def _get_course(self, course_id: str) -> Course:
@@ -914,7 +1029,9 @@ class CoursesService:
             )
         ).scalar_one_or_none()
         if member is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found"
+            )
         return member
 
     async def _get_assignment(self, course_id: str, assignment_id: str) -> CourseAssignment:
@@ -929,7 +1046,9 @@ class CoursesService:
             )
         ).scalar_one_or_none()
         if assignment is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
+            )
         return assignment
 
     async def _get_announcement(self, course_id: str, announcement_id: str) -> CourseAnnouncement:
@@ -944,7 +1063,9 @@ class CoursesService:
             )
         ).scalar_one_or_none()
         if announcement is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found"
+            )
         return announcement
 
     async def _get_help_request(self, course_id: str, request_id: str) -> CourseHelpRequest:
@@ -959,7 +1080,9 @@ class CoursesService:
             )
         ).scalar_one_or_none()
         if help_request is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Help request not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Help request not found"
+            )
         return help_request
 
     async def _validate_assignment_refs(
@@ -971,7 +1094,9 @@ class CoursesService:
         quiz_id: str | None,
     ) -> None:
         if kind in {"read_summary", "note", "flashcards"} and not doc_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is required")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Document is required"
+            )
         if kind == "quiz" and not quiz_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quiz is required")
         if doc_id:
@@ -1017,7 +1142,9 @@ class CoursesService:
         quiz_title = None
         if assignment.doc_id:
             doc_filename = (
-                await self.db.execute(select(Document.filename).where(Document.id == assignment.doc_id))
+                await self.db.execute(
+                    select(Document.filename).where(Document.id == assignment.doc_id)
+                )
             ).scalar_one_or_none()
         if assignment.quiz_id:
             quiz_title = (
@@ -1040,7 +1167,9 @@ class CoursesService:
             "completion": await self._assignment_completion(assignment, user_id),
         }
 
-    async def _announcement_out(self, announcement: CourseAnnouncement, user_id: str) -> dict[str, Any]:
+    async def _announcement_out(
+        self, announcement: CourseAnnouncement, user_id: str
+    ) -> dict[str, Any]:
         read = (
             await self.db.execute(
                 select(CourseAnnouncementRead).where(
@@ -1090,15 +1219,19 @@ class CoursesService:
 
     async def _ensure_question_bank_items(self, course_quiz: CourseQuiz, quiz: Quiz) -> None:
         existing_items = (
-            await self.db.execute(
-                select(CourseQuestionBankItem).where(
-                    and_(
-                        CourseQuestionBankItem.course_id == course_quiz.course_id,
-                        CourseQuestionBankItem.quiz_id == quiz.id,
+            (
+                await self.db.execute(
+                    select(CourseQuestionBankItem).where(
+                        and_(
+                            CourseQuestionBankItem.course_id == course_quiz.course_id,
+                            CourseQuestionBankItem.quiz_id == quiz.id,
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         by_index = {item.question_index: item for item in existing_items}
         questions = _safe_json_list(quiz.questions)
         seen_indexes: set[int] = set()
@@ -1187,7 +1320,12 @@ class CoursesService:
             attempt = (
                 await self.db.execute(
                     select(QuizAttempt)
-                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == assignment.quiz_id))
+                    .where(
+                        and_(
+                            QuizAttempt.user_id == user_id,
+                            QuizAttempt.quiz_id == assignment.quiz_id,
+                        )
+                    )
                     .order_by(desc(QuizAttempt.completed_at))
                     .limit(1)
                 )
@@ -1230,7 +1368,9 @@ class CoursesService:
             card = (
                 await self.db.execute(
                     select(Flashcard)
-                    .where(and_(Flashcard.user_id == user_id, Flashcard.doc_id == assignment.doc_id))
+                    .where(
+                        and_(Flashcard.user_id == user_id, Flashcard.doc_id == assignment.doc_id)
+                    )
                     .order_by(desc(Flashcard.created_at))
                     .limit(1)
                 )
@@ -1238,7 +1378,9 @@ class CoursesService:
             if card:
                 completed_at = card.created_at
                 source = "flashcards"
-        is_late = bool(completed_at and assignment.due_at and _is_after(completed_at, assignment.due_at))
+        is_late = bool(
+            completed_at and assignment.due_at and _is_after(completed_at, assignment.due_at)
+        )
         if completed_at:
             completion_status = "late" if is_late else "completed"
         elif assignment.due_at and _is_past(assignment.due_at):
@@ -1265,7 +1407,9 @@ class CoursesService:
             "owner_id": course.owner_id,
             "title": course.title,
             "description": course.description,
-            "join_code": course.join_code if course.owner_id == user_id or member.role in {"instructor", "ta"} else None,
+            "join_code": course.join_code
+            if course.owner_id == user_id or member.role in {"instructor", "ta"}
+            else None,
             "role": member.role,
             "is_active": course.is_active,
             "created_at": course.created_at,
@@ -1307,7 +1451,9 @@ class CoursesService:
             ).scalar_one_or_none()
             if exists is None:
                 return code
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create join code")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create join code"
+        )
 
     async def _course_quiz_summary(
         self,
@@ -1319,12 +1465,20 @@ class CoursesService:
         summaries: list[dict[str, Any]] = []
         for course_quiz, quiz in course_quiz_rows:
             attempts = (
-                await self.db.execute(
-                    select(QuizAttempt).where(
-                        and_(QuizAttempt.quiz_id == quiz.id, QuizAttempt.user_id.in_(student_ids))
+                (
+                    await self.db.execute(
+                        select(QuizAttempt).where(
+                            and_(
+                                QuizAttempt.quiz_id == quiz.id, QuizAttempt.user_id.in_(student_ids)
+                            )
+                        )
                     )
                 )
-            ).scalars().all() if student_ids else []
+                .scalars()
+                .all()
+                if student_ids
+                else []
+            )
             questions = _safe_json_list(quiz.questions)
             item_stats = _item_analysis(questions, attempts)
             score_avg = (
@@ -1352,29 +1506,43 @@ class CoursesService:
 
     async def _managed_course_ids(self, user_id: str) -> list[str]:
         rows = (
-            await self.db.execute(
-                select(Course.id)
-                .join(CourseMember, CourseMember.course_id == Course.id)
-                .where(
-                    and_(
-                        CourseMember.user_id == user_id,
-                        CourseMember.role.in_(["instructor", "ta"]),
-                        Course.is_active == 1,
+            (
+                await self.db.execute(
+                    select(Course.id)
+                    .join(CourseMember, CourseMember.course_id == Course.id)
+                    .where(
+                        and_(
+                            CourseMember.user_id == user_id,
+                            CourseMember.role.in_(["instructor", "ta"]),
+                            Course.is_active == 1,
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         owned = (
-            await self.db.execute(
-                select(Course.id).where(and_(Course.owner_id == user_id, Course.is_active == 1))
+            (
+                await self.db.execute(
+                    select(Course.id).where(and_(Course.owner_id == user_id, Course.is_active == 1))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return sorted(set(rows).union(owned))
 
     async def _push_course_event(self, course_id: str, message: dict[str, Any]) -> None:
         member_ids = (
-            await self.db.execute(select(CourseMember.user_id).where(CourseMember.course_id == course_id))
-        ).scalars().all()
+            (
+                await self.db.execute(
+                    select(CourseMember.user_id).where(CourseMember.course_id == course_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         for member_id in member_ids:
             with contextlib.suppress(Exception):
                 await push_to_user(member_id, message)
@@ -1382,15 +1550,19 @@ class CoursesService:
     async def _push_course_manager_event(self, course_id: str, message: dict[str, Any]) -> None:
         course = await self._get_course(course_id)
         rows = (
-            await self.db.execute(
-                select(CourseMember.user_id).where(
-                    and_(
-                        CourseMember.course_id == course_id,
-                        CourseMember.role.in_(["instructor", "ta"]),
+            (
+                await self.db.execute(
+                    select(CourseMember.user_id).where(
+                        and_(
+                            CourseMember.course_id == course_id,
+                            CourseMember.role.in_(["instructor", "ta"]),
+                        )
                     )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         manager_ids = set(rows)
         manager_ids.add(course.owner_id)
         for manager_id in manager_ids:
@@ -1412,13 +1584,26 @@ def _answer_for(answers: dict[str, Any] | list[Any], index: int) -> Any:
     return answers[index] if index < len(answers) else None
 
 
+def _course_document_ids(body: CourseDocumentRequest) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    raw_ids = ([body.doc_id] if body.doc_id else []) + body.doc_ids
+    for doc_id in raw_ids:
+        if doc_id not in seen:
+            seen.add(doc_id)
+            result.append(doc_id)
+    return result
+
+
 def _answers_match(actual: Any, expected: Any) -> bool:
     if actual is None:
         return False
     return str(actual).strip() == str(expected).strip()
 
 
-def _item_analysis(questions: list[dict[str, Any]], attempts: list[QuizAttempt]) -> list[dict[str, Any]]:
+def _item_analysis(
+    questions: list[dict[str, Any]], attempts: list[QuizAttempt]
+) -> list[dict[str, Any]]:
     stats: list[dict[str, Any]] = []
     parsed_attempts = []
     for attempt in attempts:

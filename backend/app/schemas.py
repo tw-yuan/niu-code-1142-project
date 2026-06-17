@@ -282,7 +282,8 @@ class CourseMemberRoleUpdate(BaseModel):
 
 
 class CourseDocumentRequest(BaseModel):
-    doc_id: str
+    doc_id: str | None = None
+    doc_ids: list[str] = Field(default_factory=list)
 
 
 class CourseAssignmentCreate(BaseModel):

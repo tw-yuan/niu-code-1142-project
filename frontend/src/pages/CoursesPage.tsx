@@ -58,7 +58,7 @@ export function CoursesPage() {
   const [courseTitle, setCourseTitle] = useState("");
   const [courseDescription, setCourseDescription] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const [docId, setDocId] = useState("");
+  const [addDocumentIds, setAddDocumentIds] = useState<string[]>([]);
   const [members, setMembers] = useState<CourseMember[]>([]);
   const [progress, setProgress] = useState<CourseProgressStudent[]>([]);
   const [quizSummary, setQuizSummary] = useState<
@@ -114,6 +114,13 @@ export function CoursesPage() {
     () => courseDocuments.filter((doc) => doc.status === "ready"),
     [courseDocuments],
   );
+  const addableDocuments = useMemo(() => {
+    const activeCourseDocIds = new Set(courseDocuments.map((doc) => doc.id));
+    return documents.filter((doc) => !activeCourseDocIds.has(doc.id));
+  }, [courseDocuments, documents]);
+  const allAddableDocumentsSelected =
+    addableDocuments.length > 0 &&
+    addableDocuments.every((doc) => addDocumentIds.includes(doc.id));
   const selectedReadyMaterialIds = selectedMaterialIds.filter((docId) =>
     readyCourseDocuments.some((doc) => doc.id === docId),
   );
@@ -250,6 +257,7 @@ export function CoursesPage() {
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
     setSelectedMaterialIds([]);
+    setAddDocumentIds([]);
     const visibleTab = normalizeCourseTab(nextTab, course);
     setActiveTab(visibleTab);
     if (syncUrl) navigate(coursePath(id, visibleTab));
@@ -315,12 +323,12 @@ export function CoursesPage() {
   }
 
   async function addDocument() {
-    if (!selected || !docId) return;
+    if (!selected || addDocumentIds.length === 0) return;
     setBusyAction("add-document");
     try {
       await apiFetch(`/courses/${selected.id}/documents`, {
         method: "POST",
-        body: JSON.stringify({ doc_id: docId }),
+        body: JSON.stringify({ doc_ids: addDocumentIds }),
       });
       await openCourse(selected.id, "materials");
     } finally {
@@ -1025,28 +1033,84 @@ export function CoursesPage() {
                 </section>
               </div>
               {canManage && activeTab === "materials" && (
-                <div className="mx-5 mb-5 mt-5 flex gap-2">
-                  <select
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                    value={docId}
-                    onChange={(event) => setDocId(event.target.value)}
-                  >
-                    <option value="">選擇我的文件</option>
-                    {documents.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.filename}
-                      </option>
+                <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
+                  <div className="flex flex-col gap-3 border-b border-zinc-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Plus size={16} className="text-zinc-500" />
+                      加入教材
+                      <span className="text-xs font-normal text-zinc-500">
+                        已選 {addDocumentIds.length} / {addableDocuments.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                        onClick={() =>
+                          setAddDocumentIds(
+                            addableDocuments.map((doc) => doc.id),
+                          )
+                        }
+                        disabled={addableDocuments.length === 0}
+                      >
+                        全選文件
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                        onClick={() => setAddDocumentIds([])}
+                        disabled={addDocumentIds.length === 0}
+                      >
+                        清空
+                      </button>
+                      {allAddableDocumentsSelected && (
+                        <span className="text-xs text-indigo-700">已全選</span>
+                      )}
+                      <LoadingButton
+                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                        onClick={addDocument}
+                        disabled={
+                          addDocumentIds.length === 0 ||
+                          busyAction === "add-document"
+                        }
+                        loading={busyAction === "add-document"}
+                        loadingText="加入中"
+                      >
+                        {addDocumentIds.length > 0
+                          ? `加入 ${addDocumentIds.length}`
+                          : "加入"}
+                      </LoadingButton>
+                    </div>
+                  </div>
+                  <div className="max-h-52 overflow-auto px-3 py-2">
+                    {addableDocuments.map((doc) => (
+                      <label
+                        key={doc.id}
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={addDocumentIds.includes(doc.id)}
+                          onChange={(event) => {
+                            setAddDocumentIds((current) =>
+                              event.target.checked
+                                ? [...current, doc.id]
+                                : current.filter((item) => item !== doc.id),
+                            );
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {doc.filename}
+                        </span>
+                      </label>
                     ))}
-                  </select>
-                  <LoadingButton
-                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                    onClick={addDocument}
-                    loading={busyAction === "add-document"}
-                    loadingText="加入中"
-                  >
-                    加入
-                  </LoadingButton>
-                </div>
+                    {addableDocuments.length === 0 && (
+                      <div className="px-2 py-3 text-sm text-zinc-500">
+                        沒有可加入的 ready 文件
+                      </div>
+                    )}
+                  </div>
+                </section>
               )}
               {activeTab === "interaction" && (
                 <div className="mx-5 mb-5 mt-5 grid gap-3 xl:grid-cols-2">

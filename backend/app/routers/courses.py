@@ -12,12 +12,12 @@ from app.schemas import (
     CourseAssignmentUpdate,
     CourseCreate,
     CourseDocumentRequest,
+    CourseHelpRequestCreate,
+    CourseHelpRequestUpdate,
     CourseJoinRequest,
     CourseMemberRoleUpdate,
     CourseQuestionReviewUpdate,
     CourseUpdate,
-    CourseHelpRequestCreate,
-    CourseHelpRequestUpdate,
 )
 from app.services.audit_service import AuditService
 from app.services.courses_service import CoursesService
@@ -263,7 +263,9 @@ async def update_course_question_review(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    item = await CoursesService(db).update_question_review(current_user.id, course_id, item_id, body)
+    item = await CoursesService(db).update_question_review(
+        current_user.id, course_id, item_id, body
+    )
     await AuditService(db).log(
         "course.question_review_update",
         user_id=current_user.id,
@@ -352,7 +354,9 @@ async def mark_course_announcement_read(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await CoursesService(db).mark_announcement_read(current_user.id, course_id, announcement_id)
+    return await CoursesService(db).mark_announcement_read(
+        current_user.id, course_id, announcement_id
+    )
 
 
 @router.get("/{course_id}/help-requests")
@@ -445,7 +449,9 @@ async def update_course_assignment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    assignment = await CoursesService(db).update_assignment(current_user.id, course_id, assignment_id, body)
+    assignment = await CoursesService(db).update_assignment(
+        current_user.id, course_id, assignment_id, body
+    )
     await AuditService(db).log(
         "course.assignment_update",
         user_id=current_user.id,
@@ -483,7 +489,9 @@ async def submit_course_assignment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    assignment = await CoursesService(db).submit_assignment(current_user.id, course_id, assignment_id, body)
+    assignment = await CoursesService(db).submit_assignment(
+        current_user.id, course_id, assignment_id, body
+    )
     await AuditService(db).log(
         "course.assignment_submit",
         user_id=current_user.id,
@@ -502,10 +510,11 @@ async def add_course_document(
     db: AsyncSession = Depends(get_db),
 ):
     result = await CoursesService(db).add_document(current_user.id, course_id, body)
+    doc_ids = body.doc_ids or ([body.doc_id] if body.doc_id else [])
     await AuditService(db).log(
         "course.document_add",
         user_id=current_user.id,
-        resource=f"course:{course_id}:document:{body.doc_id}",
+        resource=f"course:{course_id}:documents:{','.join(doc_ids)}",
         request=request,
     )
     return result
