@@ -6,7 +6,6 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import and_, desc, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.tables import (
     AdminConfig,
     ChatMessage,
@@ -34,6 +33,7 @@ from app.services.audit_service import AuditService
 from app.services.chroma_service import ChromaService
 from app.services.cost_service import cost_stats
 from app.services.json_utils import from_json_list, to_json
+from app.services.llm_config import default_llm_config
 from app.services.privacy_service import PrivacyService
 from app.services.security import hash_password
 from app.services.storage import remove_document_dir
@@ -66,16 +66,22 @@ class AdminService:
             stmt = stmt.where(and_(*conditions))
             count_stmt = count_stmt.where(and_(*conditions))
         users = (
-            await self.db.execute(
-                stmt.order_by(desc(User.created_at)).limit(limit).offset(offset)
+            (
+                await self.db.execute(
+                    stmt.order_by(desc(User.created_at)).limit(limit).offset(offset)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         total = (await self.db.execute(count_stmt)).scalar_one()
         usage_by_user = await self._usage_by_user([user.id for user in users])
         document_stats = await self._document_stats([user.id for user in users])
         return {
             "items": [
-                self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+                self._user_summary(
+                    user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {})
+                )
                 for user in users
             ],
             "total": total,
@@ -115,13 +121,19 @@ class AdminService:
         )
         return self._user_summary(user, 0, {})
 
-    async def update_user(self, user_id: str, body: AdminUserUpdate, actor_id: str | None = None) -> dict[str, Any]:
+    async def update_user(
+        self, user_id: str, body: AdminUserUpdate, actor_id: str | None = None
+    ) -> dict[str, Any]:
         user = (await self.db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         next_role = body.role if body.role is not None else user.role
         next_active = body.is_active if body.is_active is not None else user.is_active
-        if actor_id == user.id and user.role == "admin" and (next_role != "admin" or not next_active):
+        if (
+            actor_id == user.id
+            and user.role == "admin"
+            and (next_role != "admin" or not next_active)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot disable or demote your own admin account",
@@ -140,7 +152,9 @@ class AdminService:
                 )
             ).scalar_one_or_none()
             if existing:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="User already exists"
+                )
         for field in ("username", "email", "quota_mb", "token_quota", "is_active", "role"):
             value = getattr(body, field)
             if value is not None:
@@ -155,7 +169,9 @@ class AdminService:
         )
         usage_by_user = await self._usage_by_user([user.id])
         document_stats = await self._document_stats([user.id])
-        return self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+        return self._user_summary(
+            user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {})
+        )
 
     async def reset_user_password(
         self,
@@ -181,7 +197,9 @@ class AdminService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         usage_by_user = await self._usage_by_user([user.id])
         document_stats = await self._document_stats([user.id])
-        data = self._user_summary(user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {}))
+        data = self._user_summary(
+            user, usage_by_user.get(user.id, 0), document_stats.get(user.id, {})
+        )
         data["usage"] = await self.user_usage(user_id)
         data["recent_audit_logs"] = await AuditService(self.db).list_logs(user_id=user_id, limit=20)
         data["deletion"] = {
@@ -199,12 +217,21 @@ class AdminService:
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         since_30 = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
         rows = (
-            await self.db.execute(
-                select(TokenUsage)
-                .where(and_(TokenUsage.user_id == user_id, TokenUsage.created_at >= since_30.isoformat()))
-                .order_by(desc(TokenUsage.created_at))
+            (
+                await self.db.execute(
+                    select(TokenUsage)
+                    .where(
+                        and_(
+                            TokenUsage.user_id == user_id,
+                            TokenUsage.created_at >= since_30.isoformat(),
+                        )
+                    )
+                    .order_by(desc(TokenUsage.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         by_feature: dict[str, int] = {}
         by_model: dict[str, int] = {}
         daily: dict[str, int] = {}
@@ -296,7 +323,9 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        doc = (await self.db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
+        doc = (
+            await self.db.execute(select(Document).where(Document.id == doc_id))
+        ).scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
         user_id = doc.user_id
@@ -378,7 +407,9 @@ class AdminService:
             )
         ).one_or_none()
         if row is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found"
+            )
         session, username = row
         await AuditService(self.db).log(
             "admin.chat_view",
@@ -388,12 +419,16 @@ class AdminService:
             detail={"owner_id": session.user_id},
         )
         messages = (
-            await self.db.execute(
-                select(ChatMessage)
-                .where(ChatMessage.session_id == session.id)
-                .order_by(ChatMessage.created_at)
+            (
+                await self.db.execute(
+                    select(ChatMessage)
+                    .where(ChatMessage.session_id == session.id)
+                    .order_by(ChatMessage.created_at)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {
             "id": session.id,
             "user_id": session.user_id,
@@ -427,7 +462,9 @@ class AdminService:
             await self.db.execute(select(ChatSession).where(ChatSession.id == session_id))
         ).scalar_one_or_none()
         if session is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found"
+            )
         owner_id = session.user_id
         await self.db.delete(session)
         await self.db.commit()
@@ -573,7 +610,9 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        course = (
+            await self.db.execute(select(Course).where(Course.id == course_id))
+        ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
         for field in ("title", "description", "is_active"):
@@ -596,7 +635,9 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        course = (
+            await self.db.execute(select(Course).where(Course.id == course_id))
+        ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
         await self.db.delete(course)
@@ -616,10 +657,14 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        course = (
+            await self.db.execute(select(Course).where(Course.id == course_id))
+        ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-        user = (await self.db.execute(select(User.id).where(User.id == body.user_id))).scalar_one_or_none()
+        user = (
+            await self.db.execute(select(User.id).where(User.id == body.user_id))
+        ).scalar_one_or_none()
         if user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         member = (
@@ -634,7 +679,9 @@ class AdminService:
             self.db.add(CourseMember(course_id=course_id, user_id=body.user_id, role=role))
         else:
             if body.user_id == course.owner_id and body.role != "instructor":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner role is fixed"
+                )
             member.role = role
         await self.db.commit()
         await AuditService(self.db).log(
@@ -653,11 +700,15 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course).where(Course.id == course_id))).scalar_one_or_none()
+        course = (
+            await self.db.execute(select(Course).where(Course.id == course_id))
+        ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
         if user_id == course.owner_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Course owner cannot be removed"
+            )
         member = (
             await self.db.execute(
                 select(CourseMember).where(
@@ -666,7 +717,9 @@ class AdminService:
             )
         ).scalar_one_or_none()
         if member is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course member not found"
+            )
         await self.db.delete(member)
         await self.db.commit()
         await AuditService(self.db).log(
@@ -684,14 +737,20 @@ class AdminService:
         actor_id: str | None = None,
         request: Request | None = None,
     ) -> dict[str, Any]:
-        course = (await self.db.execute(select(Course.id).where(Course.id == course_id))).scalar_one_or_none()
+        course = (
+            await self.db.execute(select(Course.id).where(Course.id == course_id))
+        ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-        doc = (await self.db.execute(select(Document).where(Document.id == body.doc_id))).scalar_one_or_none()
+        doc = (
+            await self.db.execute(select(Document).where(Document.id == body.doc_id))
+        ).scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
         if doc.status != "ready":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not ready")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not ready"
+            )
         owner_member = (
             await self.db.execute(
                 select(CourseMember).where(
@@ -707,7 +766,9 @@ class AdminService:
         existing = (
             await self.db.execute(
                 select(CourseDocument).where(
-                    and_(CourseDocument.course_id == course_id, CourseDocument.doc_id == body.doc_id)
+                    and_(
+                        CourseDocument.course_id == course_id, CourseDocument.doc_id == body.doc_id
+                    )
                 )
             )
         ).scalar_one_or_none()
@@ -743,7 +804,9 @@ class AdminService:
             )
         ).scalar_one_or_none()
         if item is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course document not found"
+            )
         item.is_active = 0
         item.removed_at = now_iso()
         item.removed_by = actor_id
@@ -758,15 +821,27 @@ class AdminService:
 
     async def _remove_document_references(self, doc_id: str) -> None:
         sessions = (
-            await self.db.execute(select(ChatSession).where(ChatSession.doc_ids.like(f'%"{doc_id}"%')))
-        ).scalars().all()
+            (
+                await self.db.execute(
+                    select(ChatSession).where(ChatSession.doc_ids.like(f'%"{doc_id}"%'))
+                )
+            )
+            .scalars()
+            .all()
+        )
         for session in sessions:
             doc_ids = [item for item in from_json_list(session.doc_ids) if item != doc_id]
             session.doc_ids = to_json(doc_ids)
 
         messages = (
-            await self.db.execute(select(ChatMessage).where(ChatMessage.citations.like(f"%{doc_id}%")))
-        ).scalars().all()
+            (
+                await self.db.execute(
+                    select(ChatMessage).where(ChatMessage.citations.like(f"%{doc_id}%"))
+                )
+            )
+            .scalars()
+            .all()
+        )
         for message in messages:
             citations = from_json_list(message.citations)
             filtered = [
@@ -778,8 +853,10 @@ class AdminService:
                 message.citations = to_json(filtered)
 
         quizzes = (
-            await self.db.execute(select(Quiz).where(Quiz.doc_ids.like(f'%"{doc_id}"%')))
-        ).scalars().all()
+            (await self.db.execute(select(Quiz).where(Quiz.doc_ids.like(f'%"{doc_id}"%'))))
+            .scalars()
+            .all()
+        )
         for quiz in quizzes:
             doc_ids = [item for item in from_json_list(quiz.doc_ids) if item != doc_id]
             if doc_ids:
@@ -799,7 +876,9 @@ class AdminService:
         config = await self._load_config()
         return _mask_keys(config)
 
-    async def update_llm_config(self, body: AdminConfigUpdate, actor_id: str | None = None) -> dict[str, Any]:
+    async def update_llm_config(
+        self, body: AdminConfigUpdate, actor_id: str | None = None
+    ) -> dict[str, Any]:
         current = await self._load_config()
         incoming = body.model_dump(exclude_none=True)
         for key, value in incoming.items():
@@ -828,12 +907,21 @@ class AdminService:
     async def reliability_stats(self) -> dict[str, Any]:
         since = (datetime.now(UTC) - timedelta(days=7)).isoformat()
         rows = (
-            await self.db.execute(
-                select(SystemEvent)
-                .where(and_(SystemEvent.event_type == "llm_fallback", SystemEvent.created_at >= since))
-                .order_by(desc(SystemEvent.created_at))
+            (
+                await self.db.execute(
+                    select(SystemEvent)
+                    .where(
+                        and_(
+                            SystemEvent.event_type == "llm_fallback",
+                            SystemEvent.created_at >= since,
+                        )
+                    )
+                    .order_by(desc(SystemEvent.created_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         by_reason: dict[str, int] = {}
         daily: dict[str, int] = {}
         events = []
@@ -868,16 +956,22 @@ class AdminService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        return await AuditService(self.db).list_logs(user_id, action, from_date, to_date, limit, offset)
+        return await AuditService(self.db).list_logs(
+            user_id, action, from_date, to_date, limit, offset
+        )
 
     async def deletion_status(self) -> list[dict[str, Any]]:
         users = (
-            await self.db.execute(
-                select(User)
-                .where(User.deletion_requested_at.is_not(None))
-                .order_by(desc(User.deletion_requested_at))
+            (
+                await self.db.execute(
+                    select(User)
+                    .where(User.deletion_requested_at.is_not(None))
+                    .order_by(desc(User.deletion_requested_at))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "user_id": user.id,
@@ -914,7 +1008,12 @@ class AdminService:
         rows = (
             await self.db.execute(
                 select(TokenUsage.user_id, func.coalesce(func.sum(TokenUsage.tokens_used), 0))
-                .where(and_(TokenUsage.user_id.in_(user_ids), TokenUsage.created_at >= month_start.isoformat()))
+                .where(
+                    and_(
+                        TokenUsage.user_id.in_(user_ids),
+                        TokenUsage.created_at >= month_start.isoformat(),
+                    )
+                )
                 .group_by(TokenUsage.user_id)
             )
         ).all()
@@ -957,7 +1056,9 @@ class AdminService:
         token_used_this_month: int,
         document_stats: dict[str, Any],
     ) -> dict[str, Any]:
-        quota_percent = int(token_used_this_month / user.token_quota * 100) if user.token_quota else 100
+        quota_percent = (
+            int(token_used_this_month / user.token_quota * 100) if user.token_quota else 100
+        )
         return {
             "id": user.id,
             "username": user.username,
@@ -971,7 +1072,11 @@ class AdminService:
             "deletion_scheduled_at": user.deletion_scheduled_at,
             "token_used_this_month": token_used_this_month,
             "quota_percent": quota_percent,
-            "quota_status": "exceeded" if quota_percent >= 100 else "warning" if quota_percent >= 80 else "ok",
+            "quota_status": "exceeded"
+            if quota_percent >= 100
+            else "warning"
+            if quota_percent >= 80
+            else "ok",
             "document_count": document_stats.get("document_count", 0),
             "storage_bytes": document_stats.get("storage_bytes", 0),
             "documents_by_status": document_stats.get("documents_by_status", {}),
@@ -1002,36 +1107,6 @@ class AdminService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot disable or demote the last active admin",
             )
-
-
-def default_llm_config() -> dict[str, Any]:
-    return {
-        "chat": {
-            "base_url": settings.LLM_BASE_URL,
-            "api_key": settings.LLM_API_KEY,
-            "model": settings.LLM_CHAT_MODEL,
-            "max_tokens": 4096,
-            "temperature": 0.3,
-        },
-        "vision": {
-            "base_url": settings.LLM_BASE_URL,
-            "api_key": settings.LLM_API_KEY,
-            "model": settings.LLM_VISION_MODEL,
-            "max_tokens": 2048,
-        },
-        "embedding": {
-            "base_url": settings.LLM_BASE_URL,
-            "api_key": settings.LLM_API_KEY,
-            "model": settings.LLM_EMBED_MODEL,
-            "dimensions": 1536,
-        },
-        "cost_per_1k_tokens": {
-            "gpt-4o": {"input": 0.0025, "output": 0.01},
-            "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-            "text-embedding-3-small": {"input": 0.00002, "output": 0.00002},
-        },
-        "fallback_providers": {},
-    }
 
 
 def _mask_keys(config: dict[str, Any]) -> dict[str, Any]:

@@ -49,6 +49,8 @@ SECRET_KEY=
 LLM_API_KEY=
 ```
 
+`LLM_API_KEY` 與 `LLM_BASE_URL` 是三種 LLM 功能的共用 fallback。若要分開控成本，可另外設定 `LLM_CHAT_API_KEY` / `LLM_CHAT_BASE_URL`、`LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL`、`LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL`。
+
 啟動 production-style compose：
 
 ```bash

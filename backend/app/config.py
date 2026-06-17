@@ -18,8 +18,14 @@ class Settings(BaseSettings):
 
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_CHAT_API_KEY: str = ""
+    LLM_CHAT_BASE_URL: str = ""
     LLM_CHAT_MODEL: str = "gpt-4o-mini"
+    LLM_VISION_API_KEY: str = ""
+    LLM_VISION_BASE_URL: str = ""
     LLM_VISION_MODEL: str = "gpt-4o"
+    LLM_EMBED_API_KEY: str = ""
+    LLM_EMBED_BASE_URL: str = ""
     LLM_EMBED_MODEL: str = "text-embedding-3-small"
 
     MAX_UPLOAD_SIZE_MB: int = 50

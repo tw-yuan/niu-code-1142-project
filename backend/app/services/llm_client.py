@@ -9,9 +9,9 @@ from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitEr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.tables import AdminConfig, SystemEvent, TokenUsage
 from app.services.cost_service import check_quota, estimate_usage_cost, load_cost_config
+from app.services.llm_config import default_llm_config
 
 
 class LLMClient:
@@ -41,8 +41,7 @@ class LLMClient:
                 base_url=cfg["base_url"],
                 api_key=cfg["api_key"],
                 timeout=cfg.get("timeout", 10),
-            )
-            .chat.completions.create(
+            ).chat.completions.create(
                 model=cfg["model"],
                 messages=messages,
                 **self._chat_kwargs(cfg, temperature, max_tokens, response_format),
@@ -82,8 +81,7 @@ class LLMClient:
                 base_url=cfg["base_url"],
                 api_key=cfg["api_key"],
                 timeout=cfg.get("timeout", 10),
-            )
-            .chat.completions.create(
+            ).chat.completions.create(
                 model=cfg["model"],
                 messages=messages,
                 stream=True,
@@ -123,8 +121,7 @@ class LLMClient:
                 base_url=cfg["base_url"],
                 api_key=cfg["api_key"],
                 timeout=cfg.get("timeout", 10),
-            )
-            .chat.completions.create(
+            ).chat.completions.create(
                 model=cfg["model"],
                 messages=[
                     {
@@ -174,8 +171,7 @@ class LLMClient:
                 base_url=cfg["base_url"],
                 api_key=cfg["api_key"],
                 timeout=cfg.get("timeout", 10),
-            )
-            .embeddings.create(input=texts, model=cfg["model"], **self._embed_kwargs(cfg)),
+            ).embeddings.create(input=texts, model=cfg["model"], **self._embed_kwargs(cfg)),
         )
         tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
         if tokens is None:
@@ -195,27 +191,7 @@ class LLMClient:
         return (await self._load_config())[feature]
 
     async def _load_config(self) -> dict[str, Any]:
-        defaults = {
-            "chat": {
-                "base_url": settings.LLM_BASE_URL,
-                "api_key": settings.LLM_API_KEY,
-                "model": settings.LLM_CHAT_MODEL,
-                "max_tokens": 4096,
-                "temperature": 0.3,
-            },
-            "vision": {
-                "base_url": settings.LLM_BASE_URL,
-                "api_key": settings.LLM_API_KEY,
-                "model": settings.LLM_VISION_MODEL,
-                "max_tokens": 2048,
-            },
-            "embedding": {
-                "base_url": settings.LLM_BASE_URL,
-                "api_key": settings.LLM_API_KEY,
-                "model": settings.LLM_EMBED_MODEL,
-                "dimensions": 1536,
-            },
-        }
+        defaults = default_llm_config()
         if self.db is not None:
             row = (
                 await self.db.execute(select(AdminConfig).where(AdminConfig.key == "llm_config"))
@@ -248,7 +224,7 @@ class LLMClient:
             providers.append(merged)
         for provider in providers:
             if not provider.get("api_key"):
-                raise RuntimeError("LLM_API_KEY is not configured")
+                raise RuntimeError(f"LLM API key is not configured for {feature}")
         return providers
 
     async def _call_with_fallback(self, feature: str, providers: list[dict[str, Any]], call_fn):
@@ -287,7 +263,9 @@ class LLMClient:
     async def _record_system_event(self, event_type: str, detail: dict[str, Any]) -> None:
         if self.db is None:
             return
-        self.db.add(SystemEvent(event_type=event_type, severity="warning", detail=json.dumps(detail)))
+        self.db.add(
+            SystemEvent(event_type=event_type, severity="warning", detail=json.dumps(detail))
+        )
         await self.db.commit()
 
     def _chat_kwargs(
@@ -298,7 +276,9 @@ class LLMClient:
         response_format: dict[str, Any] | None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
-            "temperature": temperature if temperature is not None else config.get("temperature", 0.3),
+            "temperature": temperature
+            if temperature is not None
+            else config.get("temperature", 0.3),
             "max_tokens": max_tokens if max_tokens is not None else config.get("max_tokens", 4096),
         }
         if response_format is not None:
@@ -320,7 +300,9 @@ class LLMClient:
         if not user_id or self.db is None:
             return
         cost_config = await load_cost_config(self.db)
-        cost, price_snapshot = estimate_usage_cost(input_tokens, output_tokens, model, feature, cost_config)
+        cost, price_snapshot = estimate_usage_cost(
+            input_tokens, output_tokens, model, feature, cost_config
+        )
         self.db.add(
             TokenUsage(
                 user_id=user_id,
@@ -369,7 +351,9 @@ class LLMClient:
         if usage is None:
             return 0, 0
         prompt = getattr(usage, "prompt_tokens", None) or getattr(usage, "input_tokens", None) or 0
-        completion = getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", None) or 0
+        completion = (
+            getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", None) or 0
+        )
         return int(prompt or 0), int(completion or 0)
 
     def _estimate_messages_tokens(self, messages: list[dict[str, Any]]) -> int:
@@ -380,7 +364,9 @@ class LLMClient:
                 total += self._estimate_tokens(content)
             elif isinstance(content, list):
                 total += sum(
-                    self._estimate_tokens(str(item.get("text", ""))) if isinstance(item, dict) else 1
+                    self._estimate_tokens(str(item.get("text", "")))
+                    if isinstance(item, dict)
+                    else 1
                     for item in content
                 )
             else:
