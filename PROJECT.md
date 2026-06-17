@@ -1,7 +1,7 @@
 # LearnAI 專案完整說明
 
 > 本文件用來讓沒有閱讀程式碼的人理解 LearnAI 的完整專案內容、系統邏輯、技術棧、資料流與部署方式。  
-> 最後整理日期：2026-06-16
+> 最後整理日期：2026-06-17
 
 ## 快速索引
 
@@ -1217,7 +1217,26 @@ Admin 使用者會略過 endpoint-level `rate_limit()` dependency，但不一定
 | `/settings` | 個人設定、匯出、刪除 |
 | `/admin` | Admin 後台 |
 
-### 20.2 API Client
+### 20.2 全站導覽與角色化入口
+
+`frontend/src/components/app/AppLayout.tsx` 是登入後的全站框架。桌面版側欄不是單純平鋪所有功能，而是依任務分成：
+
+- 學習區：儀表板、文件、對話、測驗、閃卡、筆記。
+- 課程區：課程。
+- 管理區：只有平台角色為 `admin` 時顯示，入口為管理後台。
+- 帳號：帳號設定。
+
+手機版底部保留高頻入口：儀表板、文件、對話、課程與更多；更多選單沿用同樣的分區語意，避免管理入口和帳號設定混在一般學習工具裡。
+
+`frontend/src/pages/DashboardPage.tsx` 會依平台角色提供不同常用入口：
+
+- student：整理教材、問教材、開始測驗、複習閃卡。
+- teacher：課程管理、共享教材、建立課程測驗、待處理求助。
+- admin：管理後台、使用者管理、資源稽核、系統設定。
+
+Admin 頁仍以單一 React page 實作，但左側 `AdminNav` 已分成「使用者管理」與「系統管理」，並支援 `/admin?tab=users`、`/admin?tab=resources`、`/admin?tab=settings` 等 query deep link，讓 Dashboard 或後續通知入口可以直接開到指定後台區塊。
+
+### 20.3 API Client
 
 `frontend/src/lib/api.ts`：
 
@@ -1239,7 +1258,7 @@ Admin 使用者會略過 endpoint-level `rate_limit()` dependency，但不一定
 - 自動重連
 - 用 event type 分派 handlers
 
-### 20.3 Auth store
+### 20.4 Auth store
 
 `frontend/src/store/auth.ts` 使用 Zustand 保存：
 

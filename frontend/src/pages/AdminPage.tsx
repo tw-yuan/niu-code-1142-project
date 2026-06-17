@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Ban,
   BookOpen,
@@ -211,7 +212,21 @@ type AdminTab =
   | "settings"
   | "audit";
 
+const adminTabs: AdminTab[] = [
+  "overview",
+  "users",
+  "resources",
+  "courses",
+  "settings",
+  "audit",
+];
+
+function parseAdminTab(tab: string | null): AdminTab | null {
+  return adminTabs.includes(tab as AdminTab) ? (tab as AdminTab) : null;
+}
+
 export function AdminPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [cost, setCost] = useState<CostStats | null>(null);
   const [reliability, setReliability] = useState<ReliabilityStats | null>(null);
@@ -239,7 +254,9 @@ export function AdminPage() {
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
   const [active, setActive] = useState("");
-  const [adminTab, setAdminTab] = useState<AdminTab>("overview");
+  const [adminTab, setAdminTabState] = useState<AdminTab>(
+    () => parseAdminTab(searchParams.get("tab")) ?? "overview",
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<UserForm>(emptyForm);
   const [password, setPassword] = useState("");
@@ -266,8 +283,29 @@ export function AdminPage() {
   }, []);
 
   useEffect(() => {
+    const nextTab = parseAdminTab(searchParams.get("tab")) ?? "overview";
+    setAdminTabState((current) => (current === nextTab ? current : nextTab));
+  }, [searchParams]);
+
+  useEffect(() => {
     loadUsers().catch(handleError);
   }, [q, role, active]);
+
+  function setAdminTab(tab: AdminTab) {
+    setAdminTabState(tab);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (tab === "overview") {
+          next.delete("tab");
+        } else {
+          next.set("tab", tab);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
 
   async function loadAll() {
     setError("");
@@ -1385,14 +1423,14 @@ function AdminNav({
   return (
     <aside className="h-fit rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
       <NavGroup
-        title="User Area"
+        title="使用者管理"
         items={userArea}
         active={active}
         onChange={onChange}
       />
       <div className="my-3 border-t border-zinc-100" />
       <NavGroup
-        title="Admin Area"
+        title="系統管理"
         items={adminArea}
         active={active}
         onChange={onChange}

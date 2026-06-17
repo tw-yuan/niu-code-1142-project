@@ -1,11 +1,16 @@
 import {
+  BookOpen,
   BrainCircuit,
   FileText,
+  Layers3,
   ListTodo,
   Megaphone,
   MessageCircleQuestion,
   MessageSquareText,
+  Settings,
+  Shield,
   TrendingUp,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -16,8 +21,19 @@ import {
   DocumentItem,
   FlashcardItem,
 } from "../lib/api";
+import { useAuthStore } from "../store/auth";
+
+interface QuickAction {
+  title: string;
+  description: string;
+  to: string;
+  icon: LucideIcon;
+  badge?: string;
+  primary?: boolean;
+}
 
 export function DashboardPage() {
+  const user = useAuthStore((state) => state.user);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [tasks, setTasks] = useState<Array<Record<string, any>>>([]);
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
@@ -55,6 +71,11 @@ export function DashboardPage() {
   const due = flashcards.filter(
     (card) => card.next_review <= new Date().toISOString(),
   ).length;
+  const quickActions = getQuickActions(
+    user?.role,
+    due,
+    courseDashboard.managed_help_count,
+  );
 
   return (
     <div>
@@ -62,6 +83,11 @@ export function DashboardPage() {
         <h1 className="text-2xl font-semibold">儀表板</h1>
         <p className="mt-1 text-sm text-zinc-500">本週學習狀態</p>
       </div>
+      <section className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {quickActions.map((action) => (
+          <QuickActionCard key={action.to + action.title} action={action} />
+        ))}
+      </section>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric title="文件總數" value={documents.length} icon={FileText} />
         <Metric title="可用文件" value={ready} icon={TrendingUp} />
@@ -197,6 +223,142 @@ export function DashboardPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function getQuickActions(
+  role: string | undefined,
+  due: number,
+  managedHelpCount: number,
+): QuickAction[] {
+  if (role === "admin") {
+    return [
+      {
+        title: "管理後台",
+        description: "查看成本、可靠性與系統狀態",
+        to: "/admin",
+        icon: Shield,
+        primary: true,
+      },
+      {
+        title: "使用者管理",
+        description: "調整角色、狀態與配額",
+        to: "/admin?tab=users",
+        icon: Users,
+      },
+      {
+        title: "資源稽核",
+        description: "檢查文件、對話與課程資料",
+        to: "/admin?tab=resources",
+        icon: FileText,
+      },
+      {
+        title: "系統設定",
+        description: "管理 LLM provider 與模型設定",
+        to: "/admin?tab=settings",
+        icon: Settings,
+      },
+    ];
+  }
+
+  if (role === "teacher") {
+    return [
+      {
+        title: "課程管理",
+        description: "管理教材、成員、公告與進度",
+        to: "/courses",
+        icon: BookOpen,
+        primary: true,
+      },
+      {
+        title: "共享教材",
+        description: "上傳教材並加入課程範圍",
+        to: "/documents",
+        icon: FileText,
+      },
+      {
+        title: "建立課程測驗",
+        description: "從教材產生題目並發布",
+        to: "/quiz/generate",
+        icon: Layers3,
+      },
+      {
+        title: "待處理求助",
+        description: "回覆學生在課程中的問題",
+        to: "/courses",
+        icon: MessageCircleQuestion,
+        badge: `${managedHelpCount} 件`,
+      },
+    ];
+  }
+
+  return [
+    {
+      title: "整理教材",
+      description: "上傳或查看文件處理狀態",
+      to: "/documents",
+      icon: FileText,
+      primary: true,
+    },
+    {
+      title: "問教材",
+      description: "用個人或課程文件開始對話",
+      to: "/chat",
+      icon: MessageSquareText,
+    },
+    {
+      title: "開始測驗",
+      description: "從教材生成題目並練習",
+      to: "/quiz/generate",
+      icon: Layers3,
+    },
+    {
+      title: "複習閃卡",
+      description: "依間隔複習安排回想",
+      to: "/flashcards?review=1",
+      icon: BrainCircuit,
+      badge: `${due} 張`,
+    },
+  ];
+}
+
+function QuickActionCard({ action }: { action: QuickAction }) {
+  return (
+    <Link
+      to={action.to}
+      className={[
+        "group flex min-h-32 flex-col justify-between rounded-lg border p-4 shadow-sm transition",
+        action.primary
+          ? "border-indigo-200 bg-indigo-50 hover:border-indigo-300"
+          : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div
+          className={[
+            "flex h-10 w-10 items-center justify-center rounded-lg",
+            action.primary
+              ? "bg-white text-indigo-700"
+              : "bg-zinc-100 text-zinc-600",
+          ].join(" ")}
+        >
+          <action.icon size={20} />
+        </div>
+        {action.badge && (
+          <span className="rounded-md bg-white px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+            {action.badge}
+          </span>
+        )}
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-zinc-900">
+          {action.title}
+        </div>
+        <div className="mt-1 text-xs leading-5 text-zinc-500">
+          {action.description}
+        </div>
+      </div>
+    </Link>
   );
 }
 
