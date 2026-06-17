@@ -761,6 +761,7 @@ Admin 刪除文件時會同步：
 
 - `GET /admin/config`
 - `PUT /admin/config`
+- `POST /admin/config/reset`
 
 設定存於 `admin_config` 的 `llm_config` key。可覆蓋：
 
@@ -785,6 +786,8 @@ Admin 刪除文件時會同步：
 - `LLM_EMBED_MODEL`
 
 `LLM_BASE_URL` / `LLM_API_KEY` 是共用 fallback。若某個功能的專用 base URL 或 API key 為空，例如 `LLM_EMBED_BASE_URL=`，該功能會回落使用共用 `LLM_BASE_URL`；API key 也同理。這讓部署者可以把 chat、OCR vision、embedding 分別導向不同 OpenAI-compatible provider，以控制延遲與成本。
+
+`POST /admin/config/reset` 會刪除 DB 中的 `admin_config.llm_config` override，讓 Admin 設定與後續 LLM 呼叫回到目前 backend process 讀到的 `.env` 預設值。若 `.env` 檔案剛修改，必須先 recreate backend/worker/beat container，否則 process 仍會使用舊環境變數。
 
 ### 12.4 成本、可靠性與稽核
 
@@ -1039,6 +1042,7 @@ POST   /admin/users/{user_id}/reset-password
 GET    /admin/stats
 GET    /admin/config
 PUT    /admin/config
+POST   /admin/config/reset
 GET    /admin/stats/cost
 GET    /admin/stats/reliability
 GET    /admin/audit-logs

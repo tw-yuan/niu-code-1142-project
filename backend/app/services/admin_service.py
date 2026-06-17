@@ -901,6 +901,21 @@ class AdminService:
         )
         return _mask_keys(current)
 
+    async def reset_llm_config(self, actor_id: str | None = None) -> dict[str, Any]:
+        row = (
+            await self.db.execute(select(AdminConfig).where(AdminConfig.key == "llm_config"))
+        ).scalar_one_or_none()
+        if row is not None:
+            await self.db.delete(row)
+            await self.db.commit()
+        await AuditService(self.db).log(
+            "admin.config_reset",
+            user_id=actor_id,
+            resource="admin_config:llm_config",
+            detail={"source": "env_defaults"},
+        )
+        return _mask_keys(default_llm_config())
+
     async def cost_stats(self) -> dict[str, Any]:
         return await cost_stats(self.db)
 

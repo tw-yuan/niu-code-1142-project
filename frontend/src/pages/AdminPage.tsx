@@ -251,6 +251,7 @@ export function AdminPage() {
   const [courseDocumentId, setCourseDocumentId] = useState("");
   const [configText, setConfigText] = useState("");
   const [configMessage, setConfigMessage] = useState("");
+  const [configResetting, setConfigResetting] = useState(false);
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
   const [active, setActive] = useState("");
@@ -552,6 +553,22 @@ export function AdminPage() {
     });
     setConfigText(JSON.stringify(next, null, 2));
     setConfigMessage("設定已更新");
+  }
+
+  async function resetConfigToEnv() {
+    setConfigMessage("");
+    setError("");
+    setConfigResetting(true);
+    try {
+      const next = await apiFetch<Record<string, unknown>>(
+        "/admin/config/reset",
+        { method: "POST" },
+      );
+      setConfigText(JSON.stringify(next, null, 2));
+      setConfigMessage("已重設為目前 .env 預設值");
+    } finally {
+      setConfigResetting(false);
+    }
   }
 
   function handleError(err: unknown) {
@@ -1340,12 +1357,24 @@ export function AdminPage() {
                 value={configText}
                 onChange={(event) => setConfigText(event.target.value)}
               />
-              <div className="mt-3 flex items-center gap-3">
+              <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
                   className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
                   onClick={() => saveConfig().catch(handleError)}
                 >
                   儲存設定
+                </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={configResetting}
+                  title="清除 DB override，改用目前 backend process 讀到的 .env 預設值"
+                  onClick={() => resetConfigToEnv().catch(handleError)}
+                >
+                  <RefreshCw
+                    size={16}
+                    className={configResetting ? "animate-spin" : ""}
+                  />
+                  {configResetting ? "重設中" : "重設為 .env 預設值"}
                 </button>
                 {configMessage && (
                   <span className="text-sm text-indigo-700">

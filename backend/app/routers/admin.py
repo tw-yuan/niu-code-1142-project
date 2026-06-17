@@ -102,6 +102,14 @@ async def update_config(
     return await AdminService(db).update_llm_config(body, actor_id=current_user.id)
 
 
+@router.post("/config/reset")
+async def reset_config(
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminService(db).reset_llm_config(actor_id=current_user.id)
+
+
 @router.get("/stats/cost")
 async def cost_stats(
     _: User = Depends(require_admin),
@@ -259,7 +267,9 @@ async def delete_course(
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminService(db).delete_course(course_id, actor_id=current_user.id, request=request)
+    return await AdminService(db).delete_course(
+        course_id, actor_id=current_user.id, request=request
+    )
 
 
 @router.put("/courses/{course_id}/members")
