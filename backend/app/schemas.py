@@ -257,7 +257,7 @@ class NoteCreate(BaseModel):
     doc_id: str | None = None
     session_id: str | None = None
     source_page: int | None = Field(default=None, ge=1)
-    source_type: Literal["chat", "summary", "manual"] = "manual"
+    source_type: Literal["chat", "summary", "manual", "quiz", "flashcard"] = "manual"
 
 
 class NoteUpdate(BaseModel):

@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Plus, Trash2, Wand2 } from "lucide-react";
+import { BrainCircuit, NotebookPen, Plus, Trash2, Wand2 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
 import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
 import { LoadingButton } from "../components/app/LoadingButton";
 import {
   apiFetch,
+  CourseItem,
   DocumentItem,
   FlashcardItem,
   GenerationTask,
@@ -20,6 +21,8 @@ export function FlashcardsPage() {
   const [docId, setDocId] = useState("");
   const [docIds, setDocIds] = useState<string[]>([]);
   const [courseId, setCourseId] = useState("");
+  const [courses, setCourses] = useState<CourseItem[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null);
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [preview, setPreview] = useState("");
@@ -34,6 +37,10 @@ export function FlashcardsPage() {
   const [remembered, setRemembered] = useState(0);
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [batchDeletingCards, setBatchDeletingCards] = useState(false);
+  const [savingNoteCardId, setSavingNoteCardId] = useState<string | null>(null);
+  const [savedNoteCardIds, setSavedNoteCardIds] = useState<Set<string>>(
+    new Set(),
+  );
   const location = useLocation();
 
   const dueCards = useMemo(() => {
@@ -41,7 +48,10 @@ export function FlashcardsPage() {
     return cards.filter((card) => card.next_review <= now);
   }, [cards]);
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
-  const documentIds = documents.map((doc) => doc.id);
+  const scopeDocuments = courseId
+    ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
+    : documents;
+  const documentIds = scopeDocuments.map((doc) => doc.id);
   const flashcardGeneration = useGenerationTask<{ count?: number }>(
     "flashcards",
     async () => {
@@ -51,13 +61,15 @@ export function FlashcardsPage() {
   );
 
   async function load() {
-    const [docs, nextCards] = await Promise.all([
+    const [docs, nextCards, nextCourses] = await Promise.all([
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<FlashcardItem[]>("/flashcards"),
+      apiFetch<CourseItem[]>("/courses").catch(() => []),
     ]);
     const ready = docs.filter((doc) => doc.status === "ready");
     setDocuments(ready);
     setCards(nextCards);
+    setCourses(nextCourses);
     if (!docId && docIds.length === 0 && ready[0]) {
       setDocId(ready[0].id);
       setDocIds([ready[0].id]);
@@ -87,6 +99,29 @@ export function FlashcardsPage() {
     if (course) setCourseId(course);
     if (params.get("review") === "1") setReviewMode(true);
   }, [location.search]);
+
+  useEffect(() => {
+    if (!courseId) {
+      setSelectedCourse(null);
+      return;
+    }
+    apiFetch<CourseItem>(`/courses/${courseId}`)
+      .then((course) => {
+        setSelectedCourse(course);
+        const allowed = new Set(
+          (course.documents ?? [])
+            .filter((doc) => doc.status === "ready")
+            .map((doc) => doc.id),
+        );
+        setDocIds((current) => current.filter((id) => allowed.has(id)));
+        setDocId((current) => (current && allowed.has(current) ? current : ""));
+      })
+      .catch(() => {
+        setSelectedCourse(null);
+        setDocIds([]);
+        setDocId("");
+      });
+  }, [courseId]);
 
   async function generate() {
     if (activeDocIds.length === 0 || user?.quota_status === "exceeded") return;
@@ -175,6 +210,24 @@ export function FlashcardsPage() {
     }
   }
 
+  async function saveCardToNote(card: FlashcardItem) {
+    setSavingNoteCardId(card.id);
+    try {
+      await apiFetch("/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          content: [`# 閃卡：${card.front}`, "", card.back].join("\n"),
+          doc_id: card.doc_id,
+          source_page: card.source_page,
+          source_type: "flashcard",
+        }),
+      });
+      setSavedNoteCardIds((current) => new Set(current).add(card.id));
+    } finally {
+      setSavingNoteCardId(null);
+    }
+  }
+
   const activeReviewCard = dueCards[reviewIndex];
 
   return (
@@ -248,8 +301,24 @@ export function FlashcardsPage() {
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold">生成與新增</h2>
           <div className="mb-1 text-xs font-medium text-zinc-500">文件</div>
+          <select
+            className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            value={courseId}
+            onChange={(event) => {
+              setCourseId(event.target.value);
+              setDocIds([]);
+              setDocId("");
+            }}
+          >
+            <option value="">個人文件</option>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.title}
+              </option>
+            ))}
+          </select>
           <div className="mb-3 max-h-44 overflow-auto rounded-lg border border-zinc-200 p-2">
-            {documents.length > 0 && (
+            {scopeDocuments.length > 0 && (
               <div className="mb-2 flex flex-wrap items-center gap-2 px-2">
                 <button
                   type="button"
@@ -272,11 +341,11 @@ export function FlashcardsPage() {
                   清空
                 </button>
                 <span className="text-xs text-zinc-500">
-                  已選 {docIds.length} / {documents.length}
+                  已選 {docIds.length} / {scopeDocuments.length}
                 </span>
               </div>
             )}
-            {documents.map((doc) => (
+            {scopeDocuments.map((doc) => (
               <label
                 key={doc.id}
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50"
@@ -296,13 +365,15 @@ export function FlashcardsPage() {
                 />
                 <span className="min-w-0 flex-1 truncate">
                   {doc.filename}
-                  {doc.user_id !== user?.id ? "（課程共享）" : ""}
+                  {courseId || ("user_id" in doc && doc.user_id !== user?.id)
+                    ? "（課程共享）"
+                    : ""}
                 </span>
               </label>
             ))}
-            {documents.length === 0 && (
+            {scopeDocuments.length === 0 && (
               <div className="px-2 py-3 text-sm text-zinc-500">
-                尚無 ready 文件
+                {courseId ? "此課程尚無可用教材" : "尚無 ready 文件"}
               </div>
             )}
           </div>
@@ -457,6 +528,15 @@ export function FlashcardsPage() {
                   {card.back}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
+                  <LoadingButton
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                    onClick={() => saveCardToNote(card)}
+                    loading={savingNoteCardId === card.id}
+                    loadingText="儲存中"
+                    icon={<NotebookPen size={13} />}
+                  >
+                    {savedNoteCardIds.has(card.id) ? "已存筆記" : "存到筆記"}
+                  </LoadingButton>
                   {[1, 3, 5].map((quality) => (
                     <LoadingButton
                       key={quality}

@@ -1,5 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ListChecks, Plus, Trash2, Wand2 } from "lucide-react";
+import {
+  CheckCircle2,
+  ListChecks,
+  NotebookPen,
+  Plus,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
 import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
@@ -24,6 +31,7 @@ export function QuizPage() {
   const [docIds, setDocIds] = useState<string[]>([]);
   const [courseId, setCourseId] = useState("");
   const [courses, setCourses] = useState<CourseItem[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null);
   const [publishToCourse, setPublishToCourse] = useState(false);
   const [dueAt, setDueAt] = useState("");
   const [availableFrom, setAvailableFrom] = useState("");
@@ -46,6 +54,8 @@ export function QuizPage() {
   const [wrongbookMessage, setWrongbookMessage] = useState("");
   const [selectedQuizIds, setSelectedQuizIds] = useState<string[]>([]);
   const [batchDeletingQuizzes, setBatchDeletingQuizzes] = useState(false);
+  const [savingNoteKey, setSavingNoteKey] = useState<string | null>(null);
+  const [savedNoteKeys, setSavedNoteKeys] = useState<Set<string>>(new Set());
   const location = useLocation();
   const isWrongbook = location.pathname.endsWith("/wrongbook");
 
@@ -66,7 +76,10 @@ export function QuizPage() {
     courseAttemptLimit !== null && attemptCount >= courseAttemptLimit;
   const shouldLockQuiz = Boolean(latestAttempt && hasReachedAttemptLimit);
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
-  const documentIds = documents.map((doc) => doc.id);
+  const scopeDocuments = courseId
+    ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
+    : documents;
+  const documentIds = scopeDocuments.map((doc) => doc.id);
   const deletableQuizzes = quizzes.filter((quiz) => quiz.user_id === user?.id);
   const allDocumentsSelected =
     documentIds.length > 0 && documentIds.every((id) => docIds.includes(id));
@@ -106,6 +119,29 @@ export function QuizPage() {
   useEffect(() => {
     load().catch(() => undefined);
   }, [isWrongbook]);
+
+  useEffect(() => {
+    if (!courseId) {
+      setSelectedCourse(null);
+      return;
+    }
+    apiFetch<CourseItem>(`/courses/${courseId}`)
+      .then((course) => {
+        setSelectedCourse(course);
+        const allowed = new Set(
+          (course.documents ?? [])
+            .filter((doc) => doc.status === "ready")
+            .map((doc) => doc.id),
+        );
+        setDocIds((current) => current.filter((id) => allowed.has(id)));
+        setDocId((current) => (current && allowed.has(current) ? current : ""));
+      })
+      .catch(() => {
+        setSelectedCourse(null);
+        setDocIds([]);
+        setDocId("");
+      });
+  }, [courseId]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -235,6 +271,46 @@ export function QuizPage() {
     }
   }
 
+  async function saveQuizDiagnosticToNote(
+    question: Record<string, unknown>,
+    index: number,
+    diagnostic?: QuizDiagnostic,
+  ) {
+    if (!activeQuiz) return;
+    const key = `${activeQuiz.id}-${index}`;
+    const questionText = String(question.question ?? question.prompt ?? "");
+    const submitted =
+      diagnostic?.submitted_answer ?? answers[String(index)] ?? "未作答";
+    const answer = diagnostic?.answer ?? question.answer ?? "尚未開放";
+    const explanation = diagnostic?.explanation ?? question.explanation ?? "";
+    const content = [
+      `# ${activeQuiz.title} 第 ${index + 1} 題`,
+      "",
+      `題目：${questionText}`,
+      "",
+      `我的答案：${String(submitted)}`,
+      "",
+      `正確答案：${String(answer)}`,
+      explanation ? `\n解析：${String(explanation)}` : "",
+    ].join("\n");
+    setSavingNoteKey(key);
+    try {
+      await apiFetch("/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          content,
+          doc_id: activeQuiz.doc_ids[0] ?? null,
+          source_page:
+            diagnostic?.source_page ?? (Number(question.source_page) || null),
+          source_type: "quiz",
+        }),
+      });
+      setSavedNoteKeys((current) => new Set(current).add(key));
+    } finally {
+      setSavingNoteKey(null);
+    }
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -259,8 +335,25 @@ export function QuizPage() {
             placeholder="選填"
           />
           <div className="mb-1 text-xs font-medium text-zinc-500">文件</div>
+          <select
+            className="mb-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+            value={courseId}
+            onChange={(event) => {
+              setCourseId(event.target.value);
+              setPublishToCourse(false);
+              setDocIds([]);
+              setDocId("");
+            }}
+          >
+            <option value="">個人文件</option>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.title}
+              </option>
+            ))}
+          </select>
           <div className="mb-3 max-h-44 overflow-auto rounded-lg border border-zinc-200 p-2">
-            {documents.length > 0 && (
+            {scopeDocuments.length > 0 && (
               <div className="mb-2 flex flex-wrap items-center gap-2 px-2">
                 <button
                   type="button"
@@ -283,14 +376,14 @@ export function QuizPage() {
                   清空
                 </button>
                 <span className="text-xs text-zinc-500">
-                  已選 {docIds.length} / {documents.length}
+                  已選 {docIds.length} / {scopeDocuments.length}
                 </span>
                 {allDocumentsSelected && (
                   <span className="text-xs text-indigo-700">已全選</span>
                 )}
               </div>
             )}
-            {documents.map((doc) => (
+            {scopeDocuments.map((doc) => (
               <label
                 key={doc.id}
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-50"
@@ -310,13 +403,15 @@ export function QuizPage() {
                 />
                 <span className="min-w-0 flex-1 truncate">
                   {doc.filename}
-                  {doc.user_id !== user?.id ? "（課程共享）" : ""}
+                  {courseId || ("user_id" in doc && doc.user_id !== user?.id)
+                    ? "（課程共享）"
+                    : ""}
                 </span>
               </label>
             ))}
-            {documents.length === 0 && (
+            {scopeDocuments.length === 0 && (
               <div className="px-2 py-3 text-sm text-zinc-500">
-                尚無 ready 文件
+                {courseId ? "此課程尚無可用教材" : "尚無 ready 文件"}
               </div>
             )}
           </div>
@@ -670,6 +765,17 @@ export function QuizPage() {
                         (item) => item.question_index === index,
                       )}
                       question={question}
+                      onSave={() =>
+                        saveQuizDiagnosticToNote(
+                          question,
+                          index,
+                          visibleDiagnostics.find(
+                            (item) => item.question_index === index,
+                          ),
+                        )
+                      }
+                      saving={savingNoteKey === `${activeQuiz.id}-${index}`}
+                      saved={savedNoteKeys.has(`${activeQuiz.id}-${index}`)}
                     />
                   )}
                 </div>
@@ -748,9 +854,15 @@ function formatDateTime(value: string) {
 function QuestionDiagnostic({
   diagnostic,
   question,
+  onSave,
+  saving,
+  saved,
 }: {
   diagnostic?: QuizDiagnostic;
   question: Record<string, unknown>;
+  onSave: () => void;
+  saving: boolean;
+  saved: boolean;
 }) {
   const isCorrect = diagnostic?.is_correct;
   const explanation = diagnostic?.explanation ?? question.explanation;
@@ -778,6 +890,17 @@ function QuestionDiagnostic({
       {explanation !== undefined && explanation !== null && (
         <div className="mt-1 leading-5">{String(explanation)}</div>
       )}
+      <div className="mt-2">
+        <LoadingButton
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+          onClick={onSave}
+          loading={saving}
+          loadingText="儲存中"
+          icon={<NotebookPen size={13} />}
+        >
+          {saved ? "已存筆記" : "存到筆記"}
+        </LoadingButton>
+      </div>
     </div>
   );
 }

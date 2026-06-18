@@ -51,7 +51,7 @@ async def _run_quiz(db, generation: GenerationService, task, payload: dict):
         payload.get("types", ["MC"]),
         int(payload.get("count", 10)),
         payload.get("difficulty", "medium"),
-        course_id=payload.get("course_id") if payload.get("publish_to_course") else None,
+        course_id=payload.get("course_id"),
     ):
         if not did_stream:
             did_stream = True

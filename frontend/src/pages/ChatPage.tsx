@@ -4,6 +4,7 @@ import {
   Info,
   Lightbulb,
   Loader2,
+  NotebookPen,
   MessageSquarePlus,
   Send,
   StopCircle,
@@ -65,6 +66,8 @@ export function ChatPage() {
   );
   const [helpLoading, setHelpLoading] = useState(false);
   const [helpMessage, setHelpMessage] = useState("");
+  const [savingNoteKey, setSavingNoteKey] = useState<string | null>(null);
+  const [savedNoteKeys, setSavedNoteKeys] = useState<Set<string>>(new Set());
   const [aborter, setAborter] = useState<AbortController | null>(null);
   const user = useAuthStore((state) => state.user);
   const aiDisabled = user?.quota_status === "exceeded";
@@ -324,6 +327,28 @@ export function ChatPage() {
     }
   }
 
+  async function saveMessageToNote(message: ChatMessage, index: number) {
+    if (!message.content.trim()) return;
+    const key = `chat-${activeId ?? "draft"}-${index}`;
+    const firstCitation = message.citations?.[0];
+    setSavingNoteKey(key);
+    try {
+      await apiFetch("/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          content: message.content,
+          session_id: activeId,
+          doc_id: firstCitation?.doc_id ?? null,
+          source_page: firstCitation?.page ?? null,
+          source_type: "chat",
+        }),
+      });
+      setSavedNoteKeys((current) => new Set(current).add(key));
+    } finally {
+      setSavingNoteKey(null);
+    }
+  }
+
   return (
     <div className="grid min-h-[calc(100vh-40px)] gap-4 lg:grid-cols-[280px_1fr]">
       <aside className="rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -566,6 +591,23 @@ export function ChatPage() {
                     }
                   />
                 )}
+              {message.role === "assistant" && message.content && (
+                <div className="mt-2 flex justify-end">
+                  <LoadingButton
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                    onClick={() => saveMessageToNote(message, index)}
+                    loading={
+                      savingNoteKey === `chat-${activeId ?? "draft"}-${index}`
+                    }
+                    loadingText="儲存中"
+                    icon={<NotebookPen size={13} />}
+                  >
+                    {savedNoteKeys.has(`chat-${activeId ?? "draft"}-${index}`)
+                      ? "已存筆記"
+                      : "存到筆記"}
+                  </LoadingButton>
+                </div>
+              )}
               {message.citations && message.citations.length > 0 && (
                 <div className="mt-2 grid gap-2 text-xs text-zinc-500 sm:grid-cols-2">
                   {message.citations.map((citation) => (

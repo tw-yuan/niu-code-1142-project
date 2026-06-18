@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Download, NotebookPen, Plus } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { MarkdownContent } from "../components/app/MarkdownContent";
@@ -6,6 +6,7 @@ import { LoadingButton } from "../components/app/LoadingButton";
 import {
   BASE_URL,
   apiFetch,
+  CourseItem,
   DocumentItem,
   NoteItem,
   refreshToken,
@@ -15,31 +16,70 @@ import { useAuthStore } from "../store/auth";
 export function NotesPage() {
   const user = useAuthStore((state) => state.user);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [courses, setCourses] = useState<CourseItem[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null);
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [docId, setDocId] = useState("");
+  const [courseId, setCourseId] = useState("");
   const [content, setContent] = useState("");
   const [q, setQ] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const location = useLocation();
+  const scopeDocuments = courseId
+    ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
+    : documents;
+  const courseDocIds = useMemo(
+    () => new Set(scopeDocuments.map((doc) => doc.id)),
+    [scopeDocuments],
+  );
+  const visibleNotes = courseId
+    ? notes.filter((note) => note.doc_id && courseDocIds.has(note.doc_id))
+    : notes;
 
   async function load() {
-    const [docs, nextNotes] = await Promise.all([
+    const [docs, nextNotes, nextCourses] = await Promise.all([
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<NoteItem[]>(`/notes${queryString({ doc_id: docId, q })}`),
+      apiFetch<CourseItem[]>("/courses").catch(() => []),
     ]);
     setDocuments(docs);
     setNotes(nextNotes);
+    setCourses(nextCourses);
   }
 
   useEffect(() => {
     load().catch(() => undefined);
-  }, [docId, q]);
+  }, [docId, q, courseId]);
 
   useEffect(() => {
-    const doc = new URLSearchParams(location.search).get("doc");
+    const params = new URLSearchParams(location.search);
+    const doc = params.get("doc");
+    const course = params.get("course");
     if (doc) setDocId(doc);
+    if (course) setCourseId(course);
   }, [location.search]);
+
+  useEffect(() => {
+    if (!courseId) {
+      setSelectedCourse(null);
+      return;
+    }
+    apiFetch<CourseItem>(`/courses/${courseId}`)
+      .then((course) => {
+        setSelectedCourse(course);
+        const allowed = new Set(
+          (course.documents ?? [])
+            .filter((doc) => doc.status === "ready")
+            .map((doc) => doc.id),
+        );
+        setDocId((current) => (current && allowed.has(current) ? current : ""));
+      })
+      .catch(() => {
+        setSelectedCourse(null);
+        setDocId("");
+      });
+  }, [courseId]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -114,14 +154,31 @@ export function NotesPage() {
           <form className="space-y-3" onSubmit={create}>
             <select
               className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+              value={courseId}
+              onChange={(event) => {
+                setCourseId(event.target.value);
+                setDocId("");
+              }}
+            >
+              <option value="">個人文件</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.title}
+                </option>
+              ))}
+            </select>
+            <select
+              className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
             >
               <option value="">全部文件</option>
-              {documents.map((doc) => (
+              {scopeDocuments.map((doc) => (
                 <option key={doc.id} value={doc.id}>
                   {doc.filename}
-                  {doc.user_id !== user?.id ? "（課程共享）" : ""}
+                  {courseId || ("user_id" in doc && doc.user_id !== user?.id)
+                    ? "（課程共享）"
+                    : ""}
                 </option>
               ))}
             </select>
@@ -149,7 +206,9 @@ export function NotesPage() {
               <button
                 type="button"
                 className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
-                onClick={() => setSelectedNoteIds(notes.map((note) => note.id))}
+                onClick={() =>
+                  setSelectedNoteIds(visibleNotes.map((note) => note.id))
+                }
               >
                 全選筆記
               </button>
@@ -162,7 +221,7 @@ export function NotesPage() {
                 清空
               </button>
               <span className="text-xs text-zinc-500">
-                已選 {selectedNoteIds.length} / {notes.length}
+                已選 {selectedNoteIds.length} / {visibleNotes.length}
               </span>
               <LoadingButton
                 className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
@@ -175,7 +234,7 @@ export function NotesPage() {
               </LoadingButton>
             </div>
           )}
-          {notes.map((note) => (
+          {visibleNotes.map((note) => (
             <article
               key={note.id}
               className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
@@ -210,7 +269,7 @@ export function NotesPage() {
               </MarkdownContent>
             </article>
           ))}
-          {notes.length === 0 && (
+          {visibleNotes.length === 0 && (
             <div className="rounded-lg border border-zinc-200 bg-white p-8 text-sm text-zinc-500">
               尚無筆記
             </div>

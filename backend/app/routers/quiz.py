@@ -49,7 +49,7 @@ async def stream_quiz(
                 body.types,
                 body.count,
                 body.difficulty,
-                course_id=body.course_id if body.publish_to_course else None,
+                course_id=body.course_id,
             ):
                 full += chunk
                 yield _sse({"type": "chunk", "content": chunk})
