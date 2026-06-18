@@ -1,6 +1,7 @@
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import chromadb
 import redis.asyncio as redis
@@ -125,6 +126,82 @@ def rate_limit(key_prefix: str, limit: int, window_seconds: int):
     return Depends(_check)
 
 
+def login_rate_limit():
+    async def _check(request: Request, response: Response) -> None:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        identifier = _normalize_login_identifier(body)
+        ip = _client_ip(request)
+        checks = [
+            (
+                f"rl:auth_login:identifier:{identifier}:{ip}",
+                settings.LOGIN_RATE_LIMIT_PER_IDENTIFIER,
+                "identifier",
+            ),
+            (
+                f"rl:auth_login:ip:{ip}",
+                settings.LOGIN_RATE_LIMIT_PER_IP,
+                "ip",
+            ),
+        ]
+        await _check_rate_limit_keys(
+            request,
+            response,
+            checks,
+            settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        )
+
+    return Depends(_check)
+
+
+async def _check_rate_limit_keys(
+    request: Request,
+    response: Response,
+    checks: list[tuple[str, int, str]],
+    window_seconds: int,
+) -> None:
+    now = time.time()
+    reset_at = int(now + window_seconds)
+    try:
+        client = get_redis()
+        for key, limit, scope in checks:
+            await client.zremrangebyscore(key, 0, now - window_seconds)
+            count = await client.zcard(key)
+            if count >= limit:
+                oldest = await client.zrange(key, 0, 0, withscores=True)
+                retry_after = (
+                    max(1, int(oldest[0][1] + window_seconds - now))
+                    if oldest
+                    else window_seconds
+                )
+                response.headers["X-RateLimit-Limit"] = str(limit)
+                response.headers["X-RateLimit-Remaining"] = "0"
+                response.headers["X-RateLimit-Reset"] = str(int(now + retry_after))
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "code": "rate_limited",
+                        "message": "請求過於頻繁，請稍後再試",
+                        "scope": scope,
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
+        member = f"{now}:{uuid.uuid4()}"
+        for key, limit, _scope in checks:
+            await client.zadd(key, {member: now})
+            await client.expire(key, window_seconds)
+            count = await client.zcard(key)
+            response.headers["X-RateLimit-Limit"] = str(limit)
+            response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count))
+            response.headers["X-RateLimit-Reset"] = str(reset_at)
+    except HTTPException:
+        raise
+    except Exception:
+        return
+
+
 def get_token_from_request(request: Request) -> str | None:
     auth = request.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
@@ -138,3 +215,10 @@ def _client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",", 1)[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def _normalize_login_identifier(body: Any) -> str:
+    if isinstance(body, dict):
+        raw = str(body.get("identifier") or "").strip().lower()
+        return raw[:128] if raw else "missing"
+    return "missing"

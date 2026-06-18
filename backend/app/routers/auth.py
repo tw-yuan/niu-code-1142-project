@@ -2,7 +2,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_current_user_optional, get_db, rate_limit
+from app.dependencies import get_current_user, get_current_user_optional, get_db, login_rate_limit
 from app.models.tables import User
 from app.schemas import (
     DeleteConfirmRequest,
@@ -35,7 +35,7 @@ async def register(
     return TokenResponse(access_token=access_token, user=await _user_out(db, user))
 
 
-@router.post("/login", response_model=TokenResponse, dependencies=[rate_limit("auth_login", 10, 900)])
+@router.post("/login", response_model=TokenResponse, dependencies=[login_rate_limit()])
 async def login(
     body: LoginRequest,
     request: Request,

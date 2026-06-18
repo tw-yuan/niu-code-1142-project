@@ -62,7 +62,9 @@ app.include_router(admin.router)
 
 @app.middleware("http")
 async def global_rate_limit(request: Request, call_next):
-    limit = 120
+    if request.url.path == "/auth/login":
+        return await call_next(request)
+    limit = settings.GLOBAL_RATE_LIMIT_PER_MINUTE
     window_seconds = 60
     now = time.time()
     retry_after = window_seconds

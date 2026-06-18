@@ -53,6 +53,8 @@ LLM_API_KEY=
 
 如果 Admin 後台已存過 LLM 設定，DB 會覆蓋 `.env`。可在 Admin 的 LLM / Fallback 設定中按「重設為 .env 預設值」清除 DB override。
 
+Rate limit 可用 `.env` 調整：`GLOBAL_RATE_LIMIT_PER_MINUTE` 控制全域 API 每分鐘上限；登入另以 `LOGIN_RATE_LIMIT_PER_IDENTIFIER`、`LOGIN_RATE_LIMIT_PER_IP`、`LOGIN_RATE_LIMIT_WINDOW_SECONDS` 控制，避免同一代理出口 IP 下的不同使用者互相擋登入。
+
 啟動 production-style compose：
 
 ```bash

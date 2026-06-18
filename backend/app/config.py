@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     DEFAULT_USER_QUOTA_MB: int = 500
     DEFAULT_TOKEN_QUOTA: int = 1_000_000
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
+    GLOBAL_RATE_LIMIT_PER_MINUTE: int = 600
+    LOGIN_RATE_LIMIT_PER_IDENTIFIER: int = 10
+    LOGIN_RATE_LIMIT_PER_IP: int = 120
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 900
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
