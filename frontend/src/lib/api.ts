@@ -149,6 +149,17 @@ export interface GenerationTask<TOutput = Record<string, unknown>> {
   output: TOutput | null;
   error: string | null;
   artifact_id: string | null;
+  progress: {
+    current: number;
+    total: number;
+    percent: number;
+    message: string | null;
+  };
+  user?: {
+    id: string;
+    username: string;
+    email?: string;
+  };
   created_at: string;
   updated_at: string;
   finished_at: string | null;
@@ -169,6 +180,7 @@ export interface FlashcardItem {
 
 export interface QuizItem {
   id: string;
+  user_id: string;
   title: string;
   course_id?: string | null;
   doc_ids: string[];

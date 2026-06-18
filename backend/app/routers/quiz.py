@@ -133,6 +133,16 @@ async def get_quiz(
     return await LearningService(db).get_quiz(current_user.id, quiz_id)
 
 
+@router.delete("/{quiz_id}")
+async def delete_quiz(
+    quiz_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await LearningService(db).delete_quiz(current_user.id, quiz_id)
+    return {"ok": True}
+
+
 @router.post("/{quiz_id}/attempt")
 async def submit_attempt(
     quiz_id: str,

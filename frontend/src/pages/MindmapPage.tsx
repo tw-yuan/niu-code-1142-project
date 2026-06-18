@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { GitBranch, Wand2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
+import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
 import { LoadingButton } from "../components/app/LoadingButton";
 import { MarkdownContent } from "../components/app/MarkdownContent";
 import { MindmapCanvas } from "../components/app/MindmapCanvas";
@@ -177,16 +178,11 @@ export function MindmapPage() {
         </LoadingButton>
       </div>
       <AIGeneratedBadge />
-      {mindmapGeneration.active && (
-        <div className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
-          心智圖生成任務執行中，可先離開頁面，完成後回來會顯示最新圖。
-        </div>
-      )}
-      {mindmapGeneration.error && (
-        <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
-          {mindmapGeneration.error}
-        </div>
-      )}
+      <GenerationTaskStatus
+        task={mindmapGeneration.task}
+        error={mindmapGeneration.error}
+        title="心智圖生成任務"
+      />
       {error && (
         <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
           {error}

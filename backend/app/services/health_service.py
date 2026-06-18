@@ -65,18 +65,16 @@ async def _check_chroma() -> dict[str, Any]:
 async def _check_celery() -> dict[str, Any]:
     def inspect_workers() -> dict[str, Any]:
         inspector = celery_app.control.inspect(timeout=1)
-        active = inspector.active() or {}
-        reserved = inspector.reserved() or {}
-        scheduled = inspector.scheduled() or {}
-        if not active and not reserved and not scheduled:
+        ping = inspector.ping() or {}
+        if not ping:
             raise RuntimeError("No Celery workers online")
         return {
-            "active_tasks": sum(len(items) for items in active.values()),
-            "queued_tasks": sum(len(items) for items in reserved.values())
-            + sum(len(items) for items in scheduled.values()),
+            "workers": len(ping),
         }
 
-    return await asyncio.to_thread(inspect_workers)
+    data = await asyncio.to_thread(inspect_workers)
+    data["queued_tasks"] = await get_redis().llen("celery")
+    return data
 
 
 async def _check_llm(db: AsyncSession) -> dict[str, Any]:

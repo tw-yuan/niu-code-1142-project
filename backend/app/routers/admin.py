@@ -13,6 +13,7 @@ from app.schemas import (
     CourseDocumentRequest,
 )
 from app.services.admin_service import AdminService
+from app.services.generation_service import GenerationService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -124,6 +125,23 @@ async def reliability_stats(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminService(db).reliability_stats()
+
+
+@router.get("/generation-tasks")
+async def generation_tasks(
+    kind: str | None = None,
+    status_value: str | None = Query(default=None, alias="status"),
+    active_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await GenerationService(db).admin_tasks(
+        kind=kind,
+        status_value=status_value,
+        active_only=active_only,
+        limit=limit,
+    )
 
 
 @router.get("/audit-logs")

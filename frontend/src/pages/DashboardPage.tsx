@@ -11,15 +11,18 @@ import {
   Shield,
   TrendingUp,
   Users,
+  Clock3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { GenerationTaskList } from "../components/app/GenerationTaskPanel";
 import {
   apiFetch,
   CourseDashboard,
   DocumentItem,
   FlashcardItem,
+  GenerationTask,
 } from "../lib/api";
 import { useAuthStore } from "../store/auth";
 
@@ -36,12 +39,20 @@ export function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [tasks, setTasks] = useState<Array<Record<string, any>>>([]);
+  const [generationTasks, setGenerationTasks] = useState<GenerationTask[]>([]);
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
   const [courseDashboard, setCourseDashboard] = useState<CourseDashboard>({
     announcements: [],
     help_requests: [],
     managed_help_count: 0,
   });
+
+  async function loadGenerationTasks() {
+    const data = await apiFetch<GenerationTask[]>(
+      "/generation/tasks?active_only=true&limit=20",
+    ).catch(() => []);
+    setGenerationTasks(data);
+  }
 
   useEffect(() => {
     apiFetch<DocumentItem[]>("/documents")
@@ -62,7 +73,22 @@ export function DashboardPage() {
           managed_help_count: 0,
         }),
       );
+    loadGenerationTasks();
   }, []);
+
+  useEffect(() => {
+    if (
+      !generationTasks.some((task) =>
+        ["queued", "running"].includes(task.status),
+      )
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      loadGenerationTasks();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [generationTasks]);
 
   const ready = documents.filter((doc) => doc.status === "ready").length;
   const processing = documents.filter(
@@ -94,6 +120,18 @@ export function DashboardPage() {
         <Metric title="處理中" value={processing} icon={MessageSquareText} />
         <Metric title="待複習" value={due} icon={BrainCircuit} />
       </div>
+      {generationTasks.length > 0 && (
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
+            <Clock3 size={18} className="text-zinc-500" />
+            <h2 className="font-semibold">生成任務狀態</h2>
+          </div>
+          <GenerationTaskList
+            tasks={generationTasks}
+            emptyText="目前沒有生成任務"
+          />
+        </section>
+      )}
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
         <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
           <ListTodo size={18} className="text-zinc-500" />

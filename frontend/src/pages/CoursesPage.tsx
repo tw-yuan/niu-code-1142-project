@@ -89,6 +89,7 @@ export function CoursesPage() {
   );
   const [activeTab, setActiveTab] = useState<CourseTab>("overview");
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const location = useLocation();
@@ -128,6 +129,9 @@ export function CoursesPage() {
     selectedReadyMaterialIds.length > 0
       ? selectedReadyMaterialIds
       : readyCourseDocuments.map((doc) => doc.id);
+  const selectedActiveMaterialIds = selectedMaterialIds.filter((docId) =>
+    courseDocuments.some((doc) => doc.id === docId && doc.course_status !== "removed"),
+  );
   const unreadAnnouncements = announcements.filter(
     (announcement) => !announcement.read_at,
   ).length;
@@ -406,6 +410,23 @@ export function CoursesPage() {
       await apiFetch(`/courses/${selected.id}/documents/${id}`, {
         method: "DELETE",
       });
+      setSelectedMaterialIds((current) => current.filter((docId) => docId !== id));
+      await openCourse(selected.id, "materials");
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function removeSelectedMaterials() {
+    if (!selected || !canManage || selectedActiveMaterialIds.length === 0) return;
+    setBusyAction("remove-selected-materials");
+    try {
+      for (const docId of selectedActiveMaterialIds) {
+        await apiFetch(`/courses/${selected.id}/documents/${docId}`, {
+          method: "DELETE",
+        });
+      }
+      setSelectedMaterialIds([]);
       await openCourse(selected.id, "materials");
     } finally {
       setBusyAction("");
@@ -588,6 +609,31 @@ export function CoursesPage() {
           review_note: item.review_note,
         }),
       });
+      await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function updateSelectedQuestionReview(
+    status: "draft" | "approved" | "rejected" | "archived",
+  ) {
+    if (!selected || !canManage || selectedQuestionIds.length === 0) return;
+    setBusyAction(`review-selected-${status}`);
+    try {
+      const selectedItems = questionBank.filter((item) =>
+        selectedQuestionIds.includes(item.id),
+      );
+      for (const item of selectedItems) {
+        await apiFetch(`/courses/${selected.id}/question-bank/${item.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            status,
+            review_note: item.review_note,
+          }),
+        });
+      }
+      setSelectedQuestionIds([]);
       await openCourse(selected.id);
     } finally {
       setBusyAction("");
@@ -1720,14 +1766,55 @@ export function CoursesPage() {
                       <ListChecks size={16} className="text-zinc-500" />
                       題庫審題
                     </div>
-                    <div className="text-xs text-zinc-500">
-                      已核准{" "}
-                      {
-                        questionBank.filter(
-                          (item) => item.status === "approved",
-                        ).length
-                      }
-                      /{questionBank.length}
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-xs text-zinc-500">
+                        已選 {selectedQuestionIds.length} / {questionBank.length}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                        onClick={() =>
+                          setSelectedQuestionIds(questionBank.map((item) => item.id))
+                        }
+                        disabled={questionBank.length === 0}
+                      >
+                        全選題目
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                        onClick={() => setSelectedQuestionIds([])}
+                        disabled={selectedQuestionIds.length === 0}
+                      >
+                        清空
+                      </button>
+                      <LoadingButton
+                        className="inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:text-zinc-400"
+                        onClick={() => updateSelectedQuestionReview("approved")}
+                        disabled={selectedQuestionIds.length === 0}
+                        loading={busyAction === "review-selected-approved"}
+                        loadingText="核准中"
+                      >
+                        批量核准
+                      </LoadingButton>
+                      <LoadingButton
+                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:text-zinc-400"
+                        onClick={() => updateSelectedQuestionReview("rejected")}
+                        disabled={selectedQuestionIds.length === 0}
+                        loading={busyAction === "review-selected-rejected"}
+                        loadingText="退回中"
+                      >
+                        批量退回
+                      </LoadingButton>
+                      <LoadingButton
+                        className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                        onClick={() => updateSelectedQuestionReview("archived")}
+                        disabled={selectedQuestionIds.length === 0}
+                        loading={busyAction === "review-selected-archived"}
+                        loadingText="封存中"
+                      >
+                        批量封存
+                      </LoadingButton>
                     </div>
                   </div>
                   <div className="max-h-[520px] overflow-y-auto divide-y divide-zinc-100">
@@ -1736,6 +1823,18 @@ export function CoursesPage() {
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedQuestionIds.includes(item.id)}
+                                onChange={(event) =>
+                                  setSelectedQuestionIds((current) =>
+                                    event.target.checked
+                                      ? [...current, item.id]
+                                      : current.filter((id) => id !== item.id),
+                                  )
+                                }
+                                aria-label={`選取題目 ${item.question_index + 1}`}
+                              />
                               <span
                                 className={questionReviewClass(item.status)}
                               >
@@ -1929,6 +2028,18 @@ export function CoursesPage() {
                           <span className="text-xs text-zinc-400">
                             尚無可用教材
                           </span>
+                        )}
+                        {canManage && (
+                          <LoadingButton
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                            onClick={removeSelectedMaterials}
+                            disabled={selectedActiveMaterialIds.length === 0}
+                            loading={busyAction === "remove-selected-materials"}
+                            loadingText="移除中"
+                            icon={<Trash2 size={13} />}
+                          >
+                            批量移除
+                          </LoadingButton>
                         )}
                       </div>
                     </div>

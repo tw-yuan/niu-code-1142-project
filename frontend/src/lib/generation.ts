@@ -100,6 +100,12 @@ export function useGenerationTask<TOutput = Record<string, unknown>>(
       output: null,
       error: null,
       artifact_id: null,
+      progress: {
+        current: 0,
+        total: 1,
+        percent: 0,
+        message: "排隊中",
+      },
       created_at: "",
       updated_at: "",
       finished_at: null,

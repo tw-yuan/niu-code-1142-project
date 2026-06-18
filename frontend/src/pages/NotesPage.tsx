@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Download, NotebookPen, Plus } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { MarkdownContent } from "../components/app/MarkdownContent";
+import { LoadingButton } from "../components/app/LoadingButton";
 import {
   BASE_URL,
   apiFetch,
@@ -18,6 +19,8 @@ export function NotesPage() {
   const [docId, setDocId] = useState("");
   const [content, setContent] = useState("");
   const [q, setQ] = useState("");
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const location = useLocation();
 
   async function load() {
@@ -55,7 +58,22 @@ export function NotesPage() {
 
   async function deleteNote(id: string) {
     await apiFetch(`/notes/${id}`, { method: "DELETE" });
+    setSelectedNoteIds((current) => current.filter((noteId) => noteId !== id));
     await load();
+  }
+
+  async function deleteSelectedNotes() {
+    if (selectedNoteIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      for (const noteId of selectedNoteIds) {
+        await apiFetch(`/notes/${noteId}`, { method: "DELETE" });
+      }
+      setSelectedNoteIds([]);
+      await load();
+    } finally {
+      setBatchDeleting(false);
+    }
   }
 
   async function exportMarkdown() {
@@ -126,6 +144,37 @@ export function NotesPage() {
           </form>
         </aside>
         <section className="space-y-3">
+          {notes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm">
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setSelectedNoteIds(notes.map((note) => note.id))}
+              >
+                全選筆記
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                onClick={() => setSelectedNoteIds([])}
+                disabled={selectedNoteIds.length === 0}
+              >
+                清空
+              </button>
+              <span className="text-xs text-zinc-500">
+                已選 {selectedNoteIds.length} / {notes.length}
+              </span>
+              <LoadingButton
+                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                onClick={deleteSelectedNotes}
+                disabled={selectedNoteIds.length === 0}
+                loading={batchDeleting}
+                loadingText="刪除中"
+              >
+                批量刪除
+              </LoadingButton>
+            </div>
+          )}
           {notes.map((note) => (
             <article
               key={note.id}
@@ -133,6 +182,18 @@ export function NotesPage() {
             >
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={selectedNoteIds.includes(note.id)}
+                    onChange={(event) =>
+                      setSelectedNoteIds((current) =>
+                        event.target.checked
+                          ? [...current, note.id]
+                          : current.filter((id) => id !== note.id),
+                      )
+                    }
+                    aria-label="選取筆記"
+                  />
                   <NotebookPen size={16} />
                   {note.source_type ?? "manual"}{" "}
                   {note.source_page ? `· 第 ${note.source_page} 頁` : ""}

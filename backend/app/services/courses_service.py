@@ -1294,12 +1294,19 @@ class CoursesService:
                         question_type=question_type,
                         question_json=question_json,
                         created_by=course_quiz.created_by,
+                        status="approved",
+                        reviewed_by=course_quiz.created_by,
+                        reviewed_at=now_iso(),
                     )
                 )
             else:
                 item.course_quiz_id = course_quiz.id
                 item.question_type = question_type
                 item.question_json = question_json
+                if item.status == "draft":
+                    item.status = "approved"
+                    item.reviewed_by = course_quiz.created_by
+                    item.reviewed_at = now_iso()
                 item.updated_at = now_iso()
         for item in existing_items:
             if item.question_index not in seen_indexes and item.status != "archived":

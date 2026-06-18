@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   BookOpenCheck,
+  BrainCircuit,
   Eye,
   FileText,
   ListChecks,
@@ -343,6 +344,13 @@ export function DocumentsPage() {
     );
   }
 
+  function openBatchFlashcards() {
+    if (selectedReadyDocs.length === 0) return;
+    navigate(
+      `/flashcards?docs=${selectedReadyDocs.map((doc) => encodeURIComponent(doc.id)).join(",")}`,
+    );
+  }
+
   async function loadContent() {
     if (!selected) return;
     setContentLoading(true);
@@ -565,7 +573,7 @@ export function DocumentsPage() {
                 已選擇 {selectedDocIds.length} 個文件
                 {selectedReadyDocs.length !== selectedDocIds.length && (
                   <span className="ml-2 text-xs text-indigo-600">
-                    只有 ready 文件可用於對話/測驗
+                    只有 ready 文件可用於對話/測驗/閃卡
                   </span>
                 )}
               </div>
@@ -585,6 +593,14 @@ export function DocumentsPage() {
                 >
                   <ListChecks size={16} />
                   多檔測驗
+                </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                  onClick={openBatchFlashcards}
+                  disabled={selectedReadyDocs.length === 0}
+                >
+                  <BrainCircuit size={16} />
+                  多檔閃卡
                 </button>
                 <LoadingButton
                   className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"

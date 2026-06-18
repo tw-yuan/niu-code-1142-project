@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ListChecks, Plus, Wand2 } from "lucide-react";
+import { CheckCircle2, ListChecks, Plus, Trash2, Wand2 } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
+import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
 import { LoadingButton } from "../components/app/LoadingButton";
 import {
   apiFetch,
@@ -43,6 +44,8 @@ export function QuizPage() {
     [],
   );
   const [wrongbookMessage, setWrongbookMessage] = useState("");
+  const [selectedQuizIds, setSelectedQuizIds] = useState<string[]>([]);
+  const [batchDeletingQuizzes, setBatchDeletingQuizzes] = useState(false);
   const location = useLocation();
   const isWrongbook = location.pathname.endsWith("/wrongbook");
 
@@ -64,6 +67,7 @@ export function QuizPage() {
   const shouldLockQuiz = Boolean(latestAttempt && hasReachedAttemptLimit);
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
   const documentIds = documents.map((doc) => doc.id);
+  const deletableQuizzes = quizzes.filter((quiz) => quiz.user_id === user?.id);
   const allDocumentsSelected =
     documentIds.length > 0 && documentIds.every((id) => docIds.includes(id));
   const quizGeneration = useGenerationTask<{
@@ -211,6 +215,23 @@ export function QuizPage() {
       setWrongbookMessage(`已建立 ${created.length} 張錯題閃卡`);
     } finally {
       setWrongbookLoading(false);
+    }
+  }
+
+  async function deleteSelectedQuizzes() {
+    const deletableIds = selectedQuizIds.filter((quizId) =>
+      deletableQuizzes.some((quiz) => quiz.id === quizId),
+    );
+    if (deletableIds.length === 0) return;
+    setBatchDeletingQuizzes(true);
+    try {
+      for (const quizId of deletableIds) {
+        await apiFetch(`/quiz/${quizId}`, { method: "DELETE" });
+      }
+      setSelectedQuizIds([]);
+      await load();
+    } finally {
+      setBatchDeletingQuizzes(false);
     }
   }
 
@@ -429,19 +450,12 @@ export function QuizPage() {
               {error}
             </div>
           )}
-          {quizGeneration.error && (
-            <div
-              role="alert"
-              className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
-            >
-              {quizGeneration.error}
-            </div>
-          )}
-          {quizGeneration.active && (
-            <div className="mt-3 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
-              測驗生成任務執行中，可先離開頁面，完成後回來會顯示在列表。
-            </div>
-          )}
+          <GenerationTaskStatus
+            task={quizGeneration.task}
+            error={quizGeneration.error}
+            title="測驗生成任務"
+            className="mt-3"
+          />
           {preview && (
             <pre
               aria-live="polite"
@@ -451,16 +465,68 @@ export function QuizPage() {
             </pre>
           )}
           <h2 className="mb-3 mt-6 font-semibold">測驗列表</h2>
+          {quizzes.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm">
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                onClick={() =>
+                  setSelectedQuizIds(deletableQuizzes.map((quiz) => quiz.id))
+                }
+                disabled={deletableQuizzes.length === 0}
+              >
+                全選可刪測驗
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                onClick={() => setSelectedQuizIds([])}
+                disabled={selectedQuizIds.length === 0}
+              >
+                清空
+              </button>
+              <span className="text-xs text-zinc-500">
+                已選 {selectedQuizIds.length} / {deletableQuizzes.length}
+              </span>
+              <LoadingButton
+                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                onClick={deleteSelectedQuizzes}
+                disabled={selectedQuizIds.length === 0}
+                loading={batchDeletingQuizzes}
+                loadingText="刪除中"
+                icon={<Trash2 size={14} />}
+              >
+                批量刪除
+              </LoadingButton>
+            </div>
+          )}
           <div className="space-y-2">
             {quizzes.map((quiz) => (
-              <Link
+              <div
                 key={quiz.id}
                 className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-50"
-                to={`/quiz/${quiz.id}`}
               >
+                <input
+                  type="checkbox"
+                  disabled={quiz.user_id !== user?.id}
+                  checked={selectedQuizIds.includes(quiz.id)}
+                  onChange={(event) =>
+                    setSelectedQuizIds((current) =>
+                      event.target.checked
+                        ? [...current, quiz.id]
+                        : current.filter((id) => id !== quiz.id),
+                    )
+                  }
+                  aria-label={`選取測驗 ${quiz.title}`}
+                />
                 <ListChecks size={16} className="text-zinc-500" />
-                {quiz.title}
-              </Link>
+                <Link className="min-w-0 flex-1 truncate" to={`/quiz/${quiz.id}`}>
+                  <span className="truncate">{quiz.title}</span>
+                  {quiz.user_id !== user?.id && (
+                    <span className="ml-2 text-xs text-zinc-400">課程測驗</span>
+                  )}
+                </Link>
+              </div>
             ))}
           </div>
         </aside>

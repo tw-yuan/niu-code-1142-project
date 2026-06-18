@@ -93,6 +93,21 @@ async def _ensure_sqlite_columns(conn) -> None:
                 text(f"ALTER TABLE course_documents ADD COLUMN {column} {column_type}")
             )
 
+    existing_generation_tasks = {
+        row[1]
+        for row in (await conn.execute(text("PRAGMA table_info(generation_tasks)"))).fetchall()
+    }
+    generation_task_columns = {
+        "progress_current": "INTEGER NOT NULL DEFAULT 0",
+        "progress_total": "INTEGER NOT NULL DEFAULT 1",
+        "progress_message": "TEXT",
+    }
+    for column, column_type in generation_task_columns.items():
+        if column not in existing_generation_tasks:
+            await conn.execute(
+                text(f"ALTER TABLE generation_tasks ADD COLUMN {column} {column_type}")
+            )
+
     existing_question_bank = (
         await conn.execute(text("PRAGMA table_info(course_question_bank_items)"))
     ).fetchall()

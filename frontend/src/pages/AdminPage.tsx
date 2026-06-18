@@ -5,6 +5,7 @@ import {
   BookOpen,
   CheckCircle2,
   FileText,
+  Clock3,
   KeyRound,
   LayoutDashboard,
   MessageSquare,
@@ -29,7 +30,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ApiError, apiFetch, CostStats } from "../lib/api";
+import { GenerationTaskList } from "../components/app/GenerationTaskPanel";
+import { ApiError, apiFetch, CostStats, GenerationTask } from "../lib/api";
 
 interface AdminStats {
   users: number;
@@ -236,6 +238,7 @@ export function AdminPage() {
   const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>(
     [],
   );
+  const [generationTasks, setGenerationTasks] = useState<GenerationTask[]>([]);
   const [adminDocuments, setAdminDocuments] = useState<AdminDocument[]>([]);
   const [adminChats, setAdminChats] = useState<AdminChatSession[]>([]);
   const [adminCourses, setAdminCourses] = useState<AdminCourse[]>([]);
@@ -310,13 +313,16 @@ export function AdminPage() {
 
   async function loadAll() {
     setError("");
-    const [nextStats, nextCost, nextReliability, logs, config] =
+    const [nextStats, nextCost, nextReliability, logs, config, tasks] =
       await Promise.all([
         apiFetch<AdminStats>("/admin/stats"),
         apiFetch<CostStats>("/admin/stats/cost"),
         apiFetch<ReliabilityStats>("/admin/stats/reliability"),
         apiFetch<Array<Record<string, unknown>>>("/admin/audit-logs?limit=20"),
         apiFetch<Record<string, unknown>>("/admin/config"),
+        apiFetch<GenerationTask[]>("/admin/generation-tasks?limit=50").catch(
+          () => [],
+        ),
         loadUsers(),
         loadResources(),
       ]);
@@ -325,6 +331,7 @@ export function AdminPage() {
     setReliability(nextReliability);
     setAuditLogs(logs);
     setConfigText(JSON.stringify(config, null, 2));
+    setGenerationTasks(tasks);
   }
 
   async function loadUsers() {
@@ -669,6 +676,17 @@ export function AdminPage() {
                   </div>
                 </section>
               </div>
+              <section className="mb-6 rounded-lg border border-zinc-200 bg-white shadow-sm">
+                <div className="flex items-center gap-2 border-b border-zinc-200 px-5 py-4">
+                  <Clock3 size={18} className="text-zinc-500" />
+                  <h2 className="font-semibold">全部生成任務</h2>
+                </div>
+                <GenerationTaskList
+                  tasks={generationTasks}
+                  emptyText="目前沒有生成任務"
+                  showUser
+                />
+              </section>
             </>
           )}
 

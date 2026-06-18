@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { BrainCircuit, Plus, Trash2, Wand2 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
+import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
 import { LoadingButton } from "../components/app/LoadingButton";
 import {
   apiFetch,
@@ -31,6 +32,8 @@ export function FlashcardsPage() {
   const [reviewIndex, setReviewIndex] = useState(0);
   const [reviewed, setReviewed] = useState(0);
   const [remembered, setRemembered] = useState(0);
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
+  const [batchDeletingCards, setBatchDeletingCards] = useState(false);
   const location = useLocation();
 
   const dueCards = useMemo(() => {
@@ -151,9 +154,24 @@ export function FlashcardsPage() {
     setDeletingCardId(card.id);
     try {
       await apiFetch(`/flashcards/${card.id}`, { method: "DELETE" });
+      setSelectedCardIds((current) => current.filter((id) => id !== card.id));
       await load();
     } finally {
       setDeletingCardId(null);
+    }
+  }
+
+  async function deleteSelectedCards() {
+    if (selectedCardIds.length === 0) return;
+    setBatchDeletingCards(true);
+    try {
+      for (const cardId of selectedCardIds) {
+        await apiFetch(`/flashcards/${cardId}`, { method: "DELETE" });
+      }
+      setSelectedCardIds([]);
+      await load();
+    } finally {
+      setBatchDeletingCards(false);
     }
   }
 
@@ -350,25 +368,49 @@ export function FlashcardsPage() {
               {preview}
             </pre>
           )}
-          {flashcardGeneration.active && (
-            <div className="mb-4 rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
-              閃卡生成任務執行中，可先離開頁面，完成後回來會顯示在列表。
-            </div>
-          )}
-          {flashcardGeneration.error && (
-            <div
-              role="alert"
-              className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
-            >
-              {flashcardGeneration.error}
-            </div>
-          )}
+          <GenerationTaskStatus
+            task={flashcardGeneration.task}
+            error={flashcardGeneration.error}
+            title="閃卡生成任務"
+          />
           {error && (
             <div
               role="alert"
               className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600"
             >
               {error}
+            </div>
+          )}
+          {cards.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm">
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setSelectedCardIds(cards.map((card) => card.id))}
+              >
+                全選閃卡
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setSelectedCardIds([])}
+                disabled={selectedCardIds.length === 0}
+              >
+                清空
+              </button>
+              <span className="text-xs text-zinc-500">
+                已選 {selectedCardIds.length} / {cards.length}
+              </span>
+              <LoadingButton
+                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                onClick={deleteSelectedCards}
+                disabled={selectedCardIds.length === 0}
+                loading={batchDeletingCards}
+                loadingText="刪除中"
+                icon={<Trash2 size={14} />}
+              >
+                批量刪除
+              </LoadingButton>
             </div>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -379,6 +421,18 @@ export function FlashcardsPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={selectedCardIds.includes(card.id)}
+                      onChange={(event) =>
+                        setSelectedCardIds((current) =>
+                          event.target.checked
+                            ? [...current, card.id]
+                            : current.filter((id) => id !== card.id),
+                        )
+                      }
+                      aria-label={`選取閃卡 ${card.front}`}
+                    />
                     <BrainCircuit
                       size={16}
                       className="shrink-0 text-zinc-500"

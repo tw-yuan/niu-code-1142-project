@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { MindmapNode, MindmapTree } from "../../lib/api";
 import { LoadingButton } from "./LoadingButton";
+import { MathText } from "./MathText";
 
 interface LayoutNode extends MindmapNode {
   x: number;
@@ -292,7 +293,7 @@ export function MindmapCanvas({
                           ].join(" ")}
                         >
                           <div className="line-clamp-2 text-sm font-semibold leading-5">
-                            {node.title}
+                            <MathText>{node.title}</MathText>
                           </div>
                           {!isRoot && (
                             <div
@@ -331,13 +332,13 @@ export function MindmapCanvas({
               <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 目前節點
               </div>
-              <h2 className="mt-1 text-base font-semibold text-zinc-900">
-                {selected?.title}
+              <h2 className="mt-1 text-base font-semibold leading-7 text-zinc-900">
+                <MathText>{selected?.title ?? ""}</MathText>
               </h2>
               {selected?.summary && (
-                <p className="mt-2 text-sm leading-6 text-zinc-600">
-                  {selected.summary}
-                </p>
+                <div className="mt-2 text-sm leading-6 text-zinc-600">
+                  <MathText>{selected.summary}</MathText>
+                </div>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">
@@ -460,7 +461,9 @@ function OutlineTree({
           ].join(" ")}
           onClick={() => onSelect(node.id)}
         >
-          <span className="line-clamp-1">{node.title}</span>
+          <span className="line-clamp-1">
+            <MathText>{node.title}</MathText>
+          </span>
         </button>
       </div>
       {childrenVisible && node.children.length > 0 && (

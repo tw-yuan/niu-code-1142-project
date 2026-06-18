@@ -3,10 +3,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
+    CourseAssignment,
     CourseQuestionBankItem,
     CourseQuiz,
     Document,
@@ -254,6 +255,27 @@ class LearningService:
                 else None
             )
         return data
+
+    async def delete_quiz(self, user_id: str, quiz_id: str) -> None:
+        quiz = (
+            await self.db.execute(
+                select(Quiz).where(and_(Quiz.id == quiz_id, Quiz.user_id == user_id))
+            )
+        ).scalar_one_or_none()
+        if quiz is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        await self.db.execute(delete(QuizAttempt).where(QuizAttempt.quiz_id == quiz.id))
+        await self.db.execute(
+            delete(CourseQuestionBankItem).where(CourseQuestionBankItem.quiz_id == quiz.id)
+        )
+        await self.db.execute(delete(CourseQuiz).where(CourseQuiz.quiz_id == quiz.id))
+        await self.db.execute(
+            update(CourseAssignment)
+            .where(CourseAssignment.quiz_id == quiz.id)
+            .values(quiz_id=None)
+        )
+        await self.db.delete(quiz)
+        await self.db.commit()
 
     async def publish_quiz_to_course(
         self,
@@ -800,12 +822,19 @@ class LearningService:
                         question_type=question_type,
                         question_json=question_json,
                         created_by=user_id,
+                        status="approved",
+                        reviewed_by=user_id,
+                        reviewed_at=datetime.now(UTC).isoformat(),
                     )
                 )
             else:
                 item.course_quiz_id = course_quiz.id
                 item.question_type = question_type
                 item.question_json = question_json
+                if item.status == "draft":
+                    item.status = "approved"
+                    item.reviewed_by = user_id
+                    item.reviewed_at = datetime.now(UTC).isoformat()
                 item.updated_at = datetime.now(UTC).isoformat()
         for item in existing_items:
             if item.question_index not in seen_indexes and item.status != "archived":
@@ -818,6 +847,7 @@ class LearningService:
             questions = [_without_answers(question) for question in questions]
         return {
             "id": quiz.id,
+            "user_id": quiz.user_id,
             "title": quiz.title,
             "course_id": quiz.course_id,
             "doc_ids": json.loads(quiz.doc_ids),
