@@ -84,9 +84,12 @@ export function ChatPage() {
     ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
     : documents.filter((doc) => doc.status === "ready");
   const scopeDocumentIds = scopeDocuments.map((doc) => doc.id);
+  const availableSelectedDocs = selectedDocs.filter((docId) =>
+    scopeDocumentIds.includes(docId),
+  );
   const allScopeDocumentsSelected =
     scopeDocumentIds.length > 0 &&
-    scopeDocumentIds.every((docId) => selectedDocs.includes(docId));
+    scopeDocumentIds.every((docId) => availableSelectedDocs.includes(docId));
 
   useEffect(() => {
     loadSessions().catch(() => undefined);
@@ -181,7 +184,7 @@ export function ChatPage() {
       const session = await apiFetch<ChatSession>("/chat/sessions", {
         method: "POST",
         body: JSON.stringify({
-          doc_ids: selectedDocs,
+          doc_ids: availableSelectedDocs,
           mode,
           course_id: courseId || null,
         }),
@@ -226,7 +229,7 @@ export function ChatPage() {
         const session = await apiFetch<ChatSession>("/chat/sessions", {
           method: "POST",
           body: JSON.stringify({
-            doc_ids: selectedDocs,
+            doc_ids: availableSelectedDocs,
             mode,
             course_id: courseId || null,
           }),

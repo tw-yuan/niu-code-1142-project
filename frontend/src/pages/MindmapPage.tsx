@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { GitBranch, Wand2 } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
 import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
 import { LoadingButton } from "../components/app/LoadingButton";
@@ -19,8 +19,11 @@ import { useAuthStore } from "../store/auth";
 
 export function MindmapPage() {
   const { docId } = useParams();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [doc, setDoc] = useState<DocumentItem | null>(null);
+  const [selectedDocId, setSelectedDocId] = useState("");
   const [content, setContent] = useState("");
   const [tree, setTree] = useState<MindmapTree | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
@@ -46,16 +49,18 @@ export function MindmapPage() {
         setFormat(output.format ?? "tree_json");
         return;
       }
-      if (docId) {
-        const data = await apiFetch<MindmapResponse>(`/mindmap/${docId}`);
+      const activeDocId = docId ?? selectedDocId;
+      if (activeDocId) {
+        const data = await apiFetch<MindmapResponse>(`/mindmap/${activeDocId}`);
         setContent(data.content);
         setTree(data.tree);
         setArtifactId(data.id);
         setFormat(data.format);
       }
     },
-    [docId],
+    [docId, selectedDocId],
   );
+  const activeDocId = docId ?? selectedDocId;
   const matchMindmapTask = useCallback(
     (
       task: GenerationTask<{
@@ -65,8 +70,8 @@ export function MindmapPage() {
         tree?: MindmapTree;
         content?: string;
       }>,
-    ) => task.input.doc_id === docId,
-    [docId],
+    ) => task.input.doc_id === activeDocId,
+    [activeDocId],
   );
   const mindmapGeneration = useGenerationTask<{
     mindmap_id?: string;
@@ -77,11 +82,24 @@ export function MindmapPage() {
   }>("mindmap", handleMindmapGenerated, matchMindmapTask);
 
   useEffect(() => {
-    if (!docId) return;
-    apiFetch<DocumentItem>(`/documents/${docId}`)
+    apiFetch<DocumentItem[]>("/documents")
+      .then((items) => setDocuments(items.filter((item) => item.status === "ready")))
+      .catch(() => setDocuments([]));
+  }, []);
+
+  useEffect(() => {
+    if (!activeDocId) {
+      setDoc(null);
+      setContent("");
+      setTree(null);
+      setArtifactId(null);
+      setFormat(null);
+      return;
+    }
+    apiFetch<DocumentItem>(`/documents/${activeDocId}`)
       .then(setDoc)
       .catch(() => undefined);
-    apiFetch<MindmapResponse>(`/mindmap/${docId}`)
+    apiFetch<MindmapResponse>(`/mindmap/${activeDocId}`)
       .then((data) => {
         setContent(data.content);
         setTree(data.tree);
@@ -89,14 +107,14 @@ export function MindmapPage() {
         setFormat(data.format);
       })
       .catch(() => undefined);
-  }, [docId]);
+  }, [activeDocId]);
 
   useEffect(() => {
     mindmapGeneration.refreshActiveTask().catch(() => undefined);
-  }, [docId]);
+  }, [activeDocId]);
 
   async function generate() {
-    if (!docId || user?.quota_status === "exceeded") return;
+    if (!activeDocId || user?.quota_status === "exceeded") return;
     setStreaming(true);
     setError("");
     setContent("");
@@ -115,7 +133,7 @@ export function MindmapPage() {
         | { task_id: string; status: string }
       >("/mindmap/jobs", {
         method: "POST",
-        body: JSON.stringify({ doc_id: docId, format: "tree_json" }),
+        body: JSON.stringify({ doc_id: activeDocId, format: "tree_json" }),
       });
       mindmapGeneration.watch(task);
     } catch (err) {
@@ -159,14 +177,32 @@ export function MindmapPage() {
         <div>
           <h1 className="text-2xl font-semibold">心智圖</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {doc?.filename ?? "選定文件"}
+            {doc?.filename ?? "選擇一份 ready 文件產生心智圖"}
           </p>
         </div>
+        <select
+          className="min-w-64 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+          value={activeDocId ?? ""}
+          onChange={(event) => {
+            const nextDocId = event.target.value;
+            setSelectedDocId(nextDocId);
+            if (nextDocId) navigate(`/mindmap/${nextDocId}`);
+            else navigate("/mindmap");
+          }}
+        >
+          <option value="">選擇文件</option>
+          {documents.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.filename}
+            </option>
+          ))}
+        </select>
         <LoadingButton
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
           onClick={generate}
           disabled={
             streaming ||
+            !activeDocId ||
             mindmapGeneration.active ||
             user?.quota_status === "exceeded"
           }

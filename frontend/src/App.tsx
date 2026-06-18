@@ -42,6 +42,7 @@ export default function App() {
         <Route path="/flashcards" element={<FlashcardsPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/courses" element={<CoursesPage />} />
+        <Route path="/mindmap" element={<MindmapPage />} />
         <Route path="/mindmap/:docId" element={<MindmapPage />} />
         <Route path="/summary/:docId" element={<SummaryPage />} />
         <Route path="/settings" element={<SettingsPage />} />

@@ -10,6 +10,7 @@ from app.models.tables import ChatMessage, ChatSession, Document, RAGRetrievedCh
 from app.schemas import ChatSessionCreate
 from app.services.chroma_service import ChromaService
 from app.services.courses_service import CoursesService
+from app.services.document_access import DocumentAccessService
 from app.services.json_utils import from_json_list, to_json
 from app.services.llm_client import LLMClient
 from app.services.prompt_loader import load_prompt
@@ -27,7 +28,13 @@ class RAGService:
         if body.course_id:
             shared_doc_ids = await CoursesService(self.db).course_document_ids(user_id, body.course_id)
             if not set(body.doc_ids).issubset(set(shared_doc_ids)):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Selected course documents are no longer available. "
+                        "Please refresh the course document selection."
+                    ),
+                )
         else:
             await self._validate_doc_ids(user_id, body.doc_ids)
         session = ChatSession(
@@ -269,12 +276,20 @@ class RAGService:
             return
         rows = (
             await self.db.execute(
-                select(Document.id).where(and_(Document.user_id == user_id, Document.id.in_(doc_ids)))
+                select(Document.id).where(
+                    and_(
+                        DocumentAccessService(self.db).accessible_document_condition(user_id),
+                        Document.id.in_(doc_ids),
+                    )
+                )
             )
         ).scalars().all()
         allowed = set(rows) | set(shared_doc_ids or [])
         if not set(doc_ids).issubset(allowed):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selected documents are no longer available. Please refresh the document selection.",
+            )
 
     def _build_context(
         self,

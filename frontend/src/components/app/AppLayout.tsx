@@ -8,6 +8,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  Network,
   NotebookPen,
   Settings,
   Shield,
@@ -50,6 +51,11 @@ const flashcardsItem: NavItem = {
   label: "閃卡",
   icon: BrainCircuit,
 };
+const mindmapItem: NavItem = {
+  to: "/mindmap",
+  label: "心智圖",
+  icon: Network,
+};
 const notesItem: NavItem = { to: "/notes", label: "筆記", icon: NotebookPen };
 const coursesItem: NavItem = { to: "/courses", label: "課程", icon: BookOpen };
 const settingsItem: NavItem = {
@@ -69,6 +75,7 @@ function navSectionsForRole(role?: string): NavSection[] {
         chatItem,
         quizItem,
         flashcardsItem,
+        mindmapItem,
         notesItem,
       ],
     },
