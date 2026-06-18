@@ -130,6 +130,18 @@ export function CoursesPage() {
     assigned_to: "",
     q: "",
   });
+  const [progressFilters, setProgressFilters] = useState({
+    q: "",
+    risk: "",
+    sort: "risk",
+  });
+  const [selectedProgressUserId, setSelectedProgressUserId] = useState("");
+  const [questionFilters, setQuestionFilters] = useState({
+    status: "",
+    type: "",
+    quiz_id: "",
+    q: "",
+  });
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
@@ -223,6 +235,74 @@ export function CoursesPage() {
         .some((value) => String(value).toLowerCase().includes(q));
     });
   }, [helpFilters, helpRequests, user?.id]);
+  const filteredProgress = useMemo(() => {
+    const q = progressFilters.q.trim().toLowerCase();
+    return [...progress]
+      .filter((student) => {
+        if (progressFilters.risk && student.risk_level !== progressFilters.risk) {
+          return false;
+        }
+        if (!q) return true;
+        return [student.username, student.email, student.role]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(q));
+      })
+      .sort((left, right) => {
+        if (progressFilters.sort === "quiz") {
+          return right.quiz_avg_score - left.quiz_avg_score;
+        }
+        if (progressFilters.sort === "activity") {
+          return (
+            timestampValue(right.last_activity_at) -
+            timestampValue(left.last_activity_at)
+          );
+        }
+        if (progressFilters.sort === "name") {
+          return left.username.localeCompare(right.username);
+        }
+        return riskWeight(right.risk_level) - riskWeight(left.risk_level);
+      });
+  }, [progress, progressFilters]);
+  const selectedProgressStudent = useMemo(
+    () =>
+      progress.find((student) => student.user_id === selectedProgressUserId) ??
+      filteredProgress[0] ??
+      null,
+    [filteredProgress, progress, selectedProgressUserId],
+  );
+  const questionTypes = useMemo(
+    () =>
+      Array.from(
+        new Set(questionBank.map((item) => item.question_type).filter(Boolean)),
+      ) as string[],
+    [questionBank],
+  );
+  const filteredQuestionBank = useMemo(() => {
+    const q = questionFilters.q.trim().toLowerCase();
+    return questionBank.filter((item) => {
+      if (questionFilters.status && item.status !== questionFilters.status) {
+        return false;
+      }
+      if (questionFilters.type && item.question_type !== questionFilters.type) {
+        return false;
+      }
+      if (questionFilters.quiz_id && item.quiz_id !== questionFilters.quiz_id) {
+        return false;
+      }
+      if (!q) return true;
+      const haystack = [
+        item.course_quiz_title,
+        item.quiz_title,
+        questionText(item.question),
+        ...questionOptions(item.question),
+        item.question.answer,
+        item.question.explanation,
+      ];
+      return haystack
+        .filter((value) => value !== undefined && value !== null)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [questionBank, questionFilters]);
   const unreadAnnouncements = announcements.filter(
     (announcement) => !announcement.read_at,
   ).length;
@@ -359,6 +439,13 @@ export function CoursesPage() {
     setHelpCommentDrafts({});
     setHelpInternalDrafts({});
     setHelpResolutionDrafts({});
+    setSelectedProgressUserId("");
+    setQuestionFilters({
+      status: "",
+      type: "",
+      quiz_id: "",
+      q: "",
+    });
     const visibleTab = normalizeCourseTab(
       nextTab ?? (id === selected?.id ? activeTab : "overview"),
       course,
@@ -1470,9 +1557,9 @@ export function CoursesPage() {
                     activeTab === "people" ? "" : "hidden",
                   ].join(" ")}
                 >
-                  <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <div className="flex items-center justify-between gap-2">
-                      <span>學生進度</span>
+                  <div className="border-b border-zinc-200 px-3 py-2">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="text-sm font-medium">學生進度</div>
                       {canManage && (
                         <LoadingButton
                           className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
@@ -1484,12 +1571,61 @@ export function CoursesPage() {
                         </LoadingButton>
                       )}
                     </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <input
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={progressFilters.q}
+                        onChange={(event) =>
+                          setProgressFilters((current) => ({
+                            ...current,
+                            q: event.target.value,
+                          }))
+                        }
+                        placeholder="搜尋學生"
+                      />
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={progressFilters.risk}
+                        onChange={(event) =>
+                          setProgressFilters((current) => ({
+                            ...current,
+                            risk: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部風險</option>
+                        <option value="high">高風險</option>
+                        <option value="medium">待關注</option>
+                        <option value="ok">正常</option>
+                      </select>
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={progressFilters.sort}
+                        onChange={(event) =>
+                          setProgressFilters((current) => ({
+                            ...current,
+                            sort: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="risk">依風險</option>
+                        <option value="activity">依最近活動</option>
+                        <option value="quiz">依測驗平均</option>
+                        <option value="name">依姓名</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
-                    {progress.map((item) => (
-                      <div
+                    {filteredProgress.map((item) => (
+                      <button
                         key={item.user_id}
-                        className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-sm"
+                        className={[
+                          "grid w-full grid-cols-[1fr_auto] gap-3 px-3 py-2 text-left text-sm hover:bg-zinc-50",
+                          selectedProgressStudent?.user_id === item.user_id
+                            ? "bg-indigo-50"
+                            : "",
+                        ].join(" ")}
+                        onClick={() => setSelectedProgressUserId(item.user_id)}
                       >
                         <div>
                           <div className="font-medium">{item.username}</div>
@@ -1508,14 +1644,61 @@ export function CoursesPage() {
                           <br />
                           閃卡 {item.flashcards_mastered}/{item.flashcards}
                         </div>
-                      </div>
+                      </button>
                     ))}
-                    {progress.length === 0 && (
+                    {filteredProgress.length === 0 && (
                       <div className="px-3 py-8 text-sm text-zinc-500">
-                        {progressError || "目前沒有可顯示的進度"}
+                        {progress.length === 0
+                          ? progressError || "目前沒有可顯示的進度"
+                          : "沒有符合篩選的學生"}
                       </div>
                     )}
                   </div>
+                  {selectedProgressStudent && (
+                    <div className="border-t border-zinc-200 bg-zinc-50 px-3 py-3 text-sm">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="font-medium">
+                            {selectedProgressStudent.username}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {selectedProgressStudent.email ?? "無 email"} ·{" "}
+                            {selectedProgressStudent.role}
+                          </div>
+                        </div>
+                        <span
+                          className={riskClass(
+                            selectedProgressStudent.risk_level,
+                          )}
+                        >
+                          {riskLabel(selectedProgressStudent.risk_level)}
+                        </span>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <ProgressMiniMetric
+                          label="對話"
+                          value={`${selectedProgressStudent.chat_sessions} 場 / ${selectedProgressStudent.chat_messages} 則`}
+                        />
+                        <ProgressMiniMetric
+                          label="測驗"
+                          value={`${selectedProgressStudent.quiz_attempts} 次 / ${Math.round(selectedProgressStudent.quiz_avg_score * 100)}%`}
+                        />
+                        <ProgressMiniMetric
+                          label="閃卡"
+                          value={`${selectedProgressStudent.flashcards_mastered}/${selectedProgressStudent.flashcards} 已熟悉`}
+                        />
+                      </div>
+                      <div className="mt-2 text-xs text-zinc-500">
+                        筆記 {selectedProgressStudent.notes} 則 · 待複習{" "}
+                        {selectedProgressStudent.flashcards_due} 張 · 最近活動{" "}
+                        {selectedProgressStudent.last_activity_at
+                          ? formatDateTime(
+                              selectedProgressStudent.last_activity_at,
+                            )
+                          : "尚無"}
+                      </div>
+                    </div>
+                  )}
                 </section>
               </div>
               {canManage && activeTab === "materials" && (
@@ -2674,24 +2857,32 @@ export function CoursesPage() {
               )}
               {canManage && activeTab === "question-bank" && (
                 <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
-                  <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <ListChecks size={16} className="text-zinc-500" />
-                      題庫審題
-                    </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                  <div className="border-b border-zinc-200 px-3 py-2">
+                    <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <ListChecks size={16} className="text-zinc-500" />
+                        題庫審題
+                        <span className="text-xs font-normal text-zinc-500">
+                          顯示 {filteredQuestionBank.length} /{" "}
+                          {questionBank.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className="text-xs text-zinc-500">
-                        已選 {selectedQuestionIds.length} / {questionBank.length}
+                        已選 {selectedQuestionIds.length} /{" "}
+                        {filteredQuestionBank.length}
                       </span>
                       <button
                         type="button"
                         className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
                         onClick={() =>
-                          setSelectedQuestionIds(questionBank.map((item) => item.id))
+                          setSelectedQuestionIds(
+                            filteredQuestionBank.map((item) => item.id),
+                          )
                         }
-                        disabled={questionBank.length === 0}
+                        disabled={filteredQuestionBank.length === 0}
                       >
-                        全選題目
+                        全選目前題目
                       </button>
                       <button
                         type="button"
@@ -2728,10 +2919,74 @@ export function CoursesPage() {
                       >
                         批量封存
                       </LoadingButton>
+                      </div>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={questionFilters.status}
+                        onChange={(event) =>
+                          setQuestionFilters((current) => ({
+                            ...current,
+                            status: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部狀態</option>
+                        <option value="approved">已核准</option>
+                        <option value="draft">草稿</option>
+                        <option value="rejected">退回</option>
+                        <option value="archived">封存</option>
+                      </select>
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={questionFilters.type}
+                        onChange={(event) =>
+                          setQuestionFilters((current) => ({
+                            ...current,
+                            type: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部題型</option>
+                        {questionTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={questionFilters.quiz_id}
+                        onChange={(event) =>
+                          setQuestionFilters((current) => ({
+                            ...current,
+                            quiz_id: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部測驗</option>
+                        {courseQuizzes.map((quiz) => (
+                          <option key={quiz.id} value={quiz.id}>
+                            {quiz.course_publication?.title ?? quiz.title}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={questionFilters.q}
+                        onChange={(event) =>
+                          setQuestionFilters((current) => ({
+                            ...current,
+                            q: event.target.value,
+                          }))
+                        }
+                        placeholder="搜尋題目、選項、解析"
+                      />
                     </div>
                   </div>
                   <div className="max-h-[520px] overflow-y-auto divide-y divide-zinc-100">
-                    {questionBank.map((item) => (
+                    {filteredQuestionBank.map((item) => (
                       <div key={item.id} className="px-3 py-3 text-sm">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0">
@@ -2860,9 +3115,11 @@ export function CoursesPage() {
                         </div>
                       </div>
                     ))}
-                    {questionBank.length === 0 && (
+                    {filteredQuestionBank.length === 0 && (
                       <div className="px-3 py-8 text-sm text-zinc-500">
-                        發布課程測驗後會自動建立題庫
+                        {questionBank.length === 0
+                          ? "發布課程測驗後會自動建立題庫"
+                          : "沒有符合篩選的題目"}
                       </div>
                     )}
                   </div>
@@ -3226,6 +3483,33 @@ function SummaryMetric({
       </div>
     </div>
   );
+}
+
+function ProgressMiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md bg-white px-3 py-2">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-zinc-900">{value}</div>
+    </div>
+  );
+}
+
+function riskWeight(risk: string) {
+  if (risk === "high") return 3;
+  if (risk === "medium") return 2;
+  return 1;
+}
+
+function timestampValue(value: string | null) {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
 }
 
 function riskClass(risk: string) {
