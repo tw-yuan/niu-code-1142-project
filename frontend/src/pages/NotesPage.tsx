@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Download, NotebookPen, Plus } from "lucide-react";
+import { CheckCircle2, Download, NotebookPen, Pencil, Plus } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { MarkdownContent } from "../components/app/MarkdownContent";
 import { LoadingButton } from "../components/app/LoadingButton";
@@ -25,6 +25,9 @@ export function NotesPage() {
   const [q, setQ] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState("");
+  const [editingContent, setEditingContent] = useState("");
+  const [savingNoteId, setSavingNoteId] = useState("");
   const location = useLocation();
   const scopeDocuments = courseId
     ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
@@ -100,6 +103,31 @@ export function NotesPage() {
     await apiFetch(`/notes/${id}`, { method: "DELETE" });
     setSelectedNoteIds((current) => current.filter((noteId) => noteId !== id));
     await load();
+  }
+
+  function startEditing(note: NoteItem) {
+    setEditingNoteId(note.id);
+    setEditingContent(note.content);
+  }
+
+  function cancelEditing() {
+    setEditingNoteId("");
+    setEditingContent("");
+  }
+
+  async function saveNote(note: NoteItem) {
+    if (!editingContent.trim()) return;
+    setSavingNoteId(note.id);
+    try {
+      await apiFetch<NoteItem>(`/notes/${note.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ content: editingContent }),
+      });
+      cancelEditing();
+      await load();
+    } finally {
+      setSavingNoteId("");
+    }
   }
 
   async function deleteSelectedNotes() {
@@ -257,16 +285,56 @@ export function NotesPage() {
                   {note.source_type ?? "manual"}{" "}
                   {note.source_page ? `· 第 ${note.source_page} 頁` : ""}
                 </div>
-                <button
-                  className="text-xs text-red-600"
-                  onClick={() => deleteNote(note.id)}
-                >
-                  刪除
-                </button>
+                <div className="flex items-center gap-2">
+                  {editingNoteId === note.id ? (
+                    <button
+                      type="button"
+                      className="text-xs text-zinc-600 hover:text-zinc-900"
+                      onClick={cancelEditing}
+                    >
+                      取消
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs text-zinc-600 hover:text-zinc-900"
+                      onClick={() => startEditing(note)}
+                    >
+                      <Pencil size={13} />
+                      編輯
+                    </button>
+                  )}
+                  <button
+                    className="text-xs text-red-600"
+                    onClick={() => deleteNote(note.id)}
+                  >
+                    刪除
+                  </button>
+                </div>
               </div>
-              <MarkdownContent className="text-sm">
-                {note.content}
-              </MarkdownContent>
+              {editingNoteId === note.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    className="min-h-40 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                    value={editingContent}
+                    onChange={(event) => setEditingContent(event.target.value)}
+                  />
+                  <LoadingButton
+                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-zinc-300"
+                    onClick={() => saveNote(note)}
+                    loading={savingNoteId === note.id}
+                    loadingText="儲存中"
+                    disabled={!editingContent.trim()}
+                    icon={<CheckCircle2 size={16} />}
+                  >
+                    儲存
+                  </LoadingButton>
+                </div>
+              ) : (
+                <MarkdownContent className="text-sm">
+                  {note.content}
+                </MarkdownContent>
+              )}
             </article>
           ))}
           {visibleNotes.length === 0 && (
