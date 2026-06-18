@@ -90,6 +90,11 @@ export function ChatPage() {
   const allScopeDocumentsSelected =
     scopeDocumentIds.length > 0 &&
     scopeDocumentIds.every((docId) => availableSelectedDocs.includes(docId));
+  const selectedScopeChanged = activeSession
+    ? !sameStringSet(activeSession.doc_ids, availableSelectedDocs) ||
+      (activeSession.course_id ?? "") !== (courseId || "") ||
+      activeSession.mode !== mode
+    : false;
 
   useEffect(() => {
     loadSessions().catch(() => undefined);
@@ -224,8 +229,9 @@ export function ChatPage() {
     let sessionId = activeId;
     let assistant = "";
     let citations: Citation[] = [];
+    let createdNewScopedSession = false;
     try {
-      if (!sessionId) {
+      if (!sessionId || selectedScopeChanged) {
         const session = await apiFetch<ChatSession>("/chat/sessions", {
           method: "POST",
           body: JSON.stringify({
@@ -236,15 +242,18 @@ export function ChatPage() {
         });
         setSessions((prev) => [session, ...prev]);
         sessionId = session.id;
+        createdNewScopedSession = true;
         setActiveId(session.id);
         navigate(`/chat/${session.id}`);
       }
       setInput("");
-      setMessages((prev) => [
-        ...prev,
+      const draftMessages: ChatMessage[] = [
         { role: "user", content: question },
         { role: "assistant", content: "" },
-      ]);
+      ];
+      setMessages((prev) =>
+        createdNewScopedSession ? draftMessages : [...prev, ...draftMessages],
+      );
       const controller = new AbortController();
       setAborter(controller);
       setSending(false);
@@ -459,6 +468,11 @@ export function ChatPage() {
                   未勾選時會搜尋此課程全部教材
                 </div>
               )}
+            {selectedScopeChanged && (
+              <div className="rounded-md bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                目前勾選範圍和正在看的對話不同；送出後會自動建立一個使用新範圍的對話。
+              </div>
+            )}
           </div>
         </div>
         <div className="max-h-[55vh] overflow-y-auto p-2 scrollbar-thin">
@@ -510,6 +524,16 @@ export function ChatPage() {
                   {courses.find(
                     (course) => course.id === activeSession.course_id,
                   )?.title ?? activeSession.course_id}
+                </div>
+              )}
+              {activeSession && (
+                <div className="mt-1 text-xs text-zinc-500">
+                  此對話使用 {activeSession.doc_ids.length} 個指定文件
+                  {activeSession.doc_ids.length === 0
+                    ? activeSession.course_id
+                      ? "（課程全部教材）"
+                      : "（未指定文件）"
+                    : ""}
                 </div>
               )}
             </div>
@@ -689,6 +713,12 @@ function hasDraftChatScope(search: string) {
   return Boolean(
     params.get("doc") || params.get("docs") || params.get("course"),
   );
+}
+
+function sameStringSet(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((item) => rightSet.has(item));
 }
 
 function supportLabel(status?: string) {

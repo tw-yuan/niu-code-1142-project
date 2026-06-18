@@ -13,6 +13,9 @@ class NotesService:
 
     async def create(self, user_id: str, body: NoteCreate) -> dict:
         await self._validate_refs(user_id, body.doc_id, body.session_id)
+        existing = await self._existing_generated_note(user_id, body)
+        if existing:
+            return self._out(existing)
         note = Note(
             user_id=user_id,
             doc_id=body.doc_id,
@@ -25,6 +28,32 @@ class NotesService:
         await self.db.commit()
         await self.db.refresh(note)
         return self._out(note)
+
+    async def _existing_generated_note(self, user_id: str, body: NoteCreate) -> Note | None:
+        if body.source_type not in {"flashcard", "quiz", "chat", "summary"}:
+            return None
+        return (
+            await self.db.execute(
+                select(Note)
+                .where(
+                    and_(
+                        Note.user_id == user_id,
+                        Note.source_type == body.source_type,
+                        Note.doc_id.is_(None)
+                        if body.doc_id is None
+                        else Note.doc_id == body.doc_id,
+                        Note.session_id.is_(None)
+                        if body.session_id is None
+                        else Note.session_id == body.session_id,
+                        Note.source_page.is_(None)
+                        if body.source_page is None
+                        else Note.source_page == body.source_page,
+                        Note.content == body.content,
+                    )
+                )
+                .order_by(desc(Note.updated_at))
+            )
+        ).scalars().first()
 
     async def list(
         self,

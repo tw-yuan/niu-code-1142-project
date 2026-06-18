@@ -17,6 +17,7 @@ import {
   DocumentItem,
   FlashcardItem,
   GenerationTask,
+  NoteItem,
 } from "../lib/api";
 import { useGenerationTask } from "../lib/generation";
 import { useAuthStore } from "../store/auth";
@@ -73,15 +74,17 @@ export function FlashcardsPage() {
   );
 
   async function load() {
-    const [docs, nextCards, nextCourses] = await Promise.all([
+    const [docs, nextCards, nextCourses, notes] = await Promise.all([
       apiFetch<DocumentItem[]>("/documents"),
       apiFetch<FlashcardItem[]>("/flashcards"),
       apiFetch<CourseItem[]>("/courses").catch(() => []),
+      apiFetch<NoteItem[]>("/notes").catch(() => []),
     ]);
     const ready = docs.filter((doc) => doc.status === "ready");
     setDocuments(ready);
     setCards(nextCards);
     setCourses(nextCourses);
+    setSavedNoteCardIds(cardIdsSavedToNotes(nextCards, notes));
     if (!docId && docIds.length === 0 && ready[0]) {
       setDocId(ready[0].id);
       setDocIds([ready[0].id]);
@@ -228,12 +231,13 @@ export function FlashcardsPage() {
   }
 
   async function saveCardToNote(card: FlashcardItem) {
+    if (savedNoteCardIds.has(card.id)) return;
     setSavingNoteCardId(card.id);
     try {
       await apiFetch("/notes", {
         method: "POST",
         body: JSON.stringify({
-          content: [`# 閃卡：${card.front}`, "", card.back].join("\n"),
+          content: flashcardNoteContent(card),
           doc_id: card.doc_id,
           source_page: card.source_page,
           source_type: "flashcard",
@@ -618,6 +622,7 @@ export function FlashcardsPage() {
                     <LoadingButton
                       className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
                       onClick={() => saveCardToNote(card)}
+                      disabled={savedNoteCardIds.has(card.id)}
                       loading={savingNoteCardId === card.id}
                       loadingText="儲存中"
                       icon={<NotebookPen size={13} />}
@@ -652,4 +657,39 @@ export function FlashcardsPage() {
       </div>
     </div>
   );
+}
+
+function flashcardNoteContent(card: FlashcardItem) {
+  return [`# 閃卡：${card.front}`, "", card.back].join("\n");
+}
+
+function cardIdsSavedToNotes(cards: FlashcardItem[], notes: NoteItem[]) {
+  const noteKeys = new Set(
+    notes
+      .filter((note) => note.source_type === "flashcard")
+      .map((note) =>
+        [
+          note.doc_id ?? "",
+          note.source_page ?? "",
+          normalizeNoteContent(note.content),
+        ].join("::"),
+      ),
+  );
+  return new Set(
+    cards
+      .filter((card) =>
+        noteKeys.has(
+          [
+            card.doc_id ?? "",
+            card.source_page ?? "",
+            normalizeNoteContent(flashcardNoteContent(card)),
+          ].join("::"),
+        ),
+      )
+      .map((card) => card.id),
+  );
+}
+
+function normalizeNoteContent(content: string) {
+  return content.trim().replace(/\r\n/g, "\n");
 }

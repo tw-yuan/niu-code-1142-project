@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  Eye,
+  EyeOff,
   ListChecks,
   NotebookPen,
   Plus,
@@ -48,6 +50,7 @@ export function QuizPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [score, setScore] = useState<number | null>(null);
   const [diagnostics, setDiagnostics] = useState<QuizDiagnostic[]>([]);
+  const [showAllAnswers, setShowAllAnswers] = useState(false);
   const [wrongbook, setWrongbook] = useState<Array<Record<string, unknown>>>(
     [],
   );
@@ -67,6 +70,7 @@ export function QuizPage() {
   const visibleScore = score ?? latestAttempt?.total_score ?? null;
   const visibleDiagnostics =
     score !== null ? diagnostics : (latestAttempt?.diagnostics ?? []);
+  const shouldShowAnswers = showAllAnswers || visibleScore !== null;
   const courseAttemptLimit = activeQuiz?.course_publication
     ? (activeQuiz.course_publication.attempt_limit ?? 1)
     : null;
@@ -169,6 +173,7 @@ export function QuizPage() {
     setAnswers({});
     setScore(null);
     setDiagnostics([]);
+    setShowAllAnswers(false);
   }, [id]);
 
   useEffect(() => {
@@ -682,7 +687,17 @@ export function QuizPage() {
             </div>
           ) : activeQuiz ? (
             <form onSubmit={submit} className="space-y-5">
-              <h2 className="font-semibold">{activeQuiz.title}</h2>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="font-semibold">{activeQuiz.title}</h2>
+                <button
+                  type="button"
+                  className="inline-flex w-fit items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => setShowAllAnswers((current) => !current)}
+                >
+                  {showAllAnswers ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showAllAnswers ? "隱藏全部答案" : "顯示全部答案"}
+                </button>
+              </div>
               {activeQuiz.course_publication && (
                 <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                   {activeQuiz.course_publication.available_from && (
@@ -759,7 +774,7 @@ export function QuizPage() {
                       </label>
                     ))}
                   </div>
-                  {visibleScore !== null && (
+                  {shouldShowAnswers && (
                     <QuestionDiagnostic
                       diagnostic={visibleDiagnostics.find(
                         (item) => item.question_index === index,
@@ -776,6 +791,7 @@ export function QuizPage() {
                       }
                       saving={savingNoteKey === `${activeQuiz.id}-${index}`}
                       saved={savedNoteKeys.has(`${activeQuiz.id}-${index}`)}
+                      showCorrectness={visibleScore !== null}
                     />
                   )}
                 </div>
@@ -857,12 +873,14 @@ function QuestionDiagnostic({
   onSave,
   saving,
   saved,
+  showCorrectness,
 }: {
   diagnostic?: QuizDiagnostic;
   question: Record<string, unknown>;
   onSave: () => void;
   saving: boolean;
   saved: boolean;
+  showCorrectness: boolean;
 }) {
   const isCorrect = diagnostic?.is_correct;
   const explanation = diagnostic?.explanation ?? question.explanation;
@@ -873,10 +891,16 @@ function QuestionDiagnostic({
     <div
       className={[
         "mt-3 rounded-md px-3 py-2 text-xs",
-        isCorrect ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700",
+        !showCorrectness
+          ? "bg-zinc-50 text-zinc-700"
+          : isCorrect
+            ? "bg-emerald-50 text-emerald-800"
+            : "bg-red-50 text-red-700",
       ].join(" ")}
     >
-      <div className="font-medium">{isCorrect ? "答對" : "需複習"}</div>
+      <div className="font-medium">
+        {!showCorrectness ? "參考答案" : isCorrect ? "答對" : "需複習"}
+      </div>
       {hasAnswer ? (
         <div className="mt-1">答案：{String(answer)}</div>
       ) : (
