@@ -474,6 +474,8 @@ data: {"type":"chunk","content":"..."}
 
 前端的主要生成入口使用 `POST /quiz/jobs`，建立 `generation_tasks(kind="quiz")` 後由 Celery worker 執行同一套 LLM 生成與保存流程。頁面會透過 `/generation/tasks`、`/generation/tasks/{task_id}` 與 WebSocket `generation_task` 事件顯示 queued/running/failed/succeeded 狀態與三段式進度：整理教材與題目設定、AI 生成、解析並儲存。因此使用者離開測驗頁後，任務仍會在後端完成，完成後重新進入頁面即可從測驗列表看到結果。`POST /quiz/stream` 保留為相容的串流端點。QuizPage 的文件選擇支援「個人文件 / 課程教材」範圍切換，從 Courses 的整課測驗入口帶入 `course` 與 `docs` query 後，會先載入課程 detail 再限制可選文件。
 
+測驗 prompt 目前要求只生成選擇題、4 個完整選項文字、`answer` 必須完全等於其中一個 option，並附上解析、來源頁、學習目標與難度理由。後端保存新測驗時會正規化 `options` 與 `answer`，把舊式 `answer: "A"` 轉成對應完整選項；作答評分與診斷也會同時接受 A/B/C/D、完整選項文字或去掉選項前綴的文字，避免學生選對但因格式不一致被判錯。課程弱點統計使用同一套答案正規化邏輯。
+
 教師/助教可在 Courses 的任務分頁編輯已發布課程測驗設定，包括標題、開放時間、截止時間、答案公開時間與作答次數。前端呼叫 `PUT /courses/{course_id}/quizzes/{course_quiz_id}`，後端只允許 instructor/ta 更新對應課程的 `CourseQuiz` row。任務分頁也提供測驗多選與 `PUT /courses/{course_id}/quizzes/batch`，可一次套用開放時間、截止時間、答案公開時間與作答次數；批量操作不改標題，避免把多份測驗誤設成同名。
 
 作答流程：

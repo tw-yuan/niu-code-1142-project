@@ -1977,10 +1977,83 @@ def _course_document_ids(body: CourseDocumentRequest) -> list[str]:
     return result
 
 
-def _answers_match(actual: Any, expected: Any) -> bool:
+def _answers_match(
+    actual: Any, expected: Any, question: dict[str, Any] | None = None
+) -> bool:
     if actual is None:
         return False
-    return str(actual).strip() == str(expected).strip()
+    actual_candidates = _answer_candidates(actual, question)
+    expected_candidates = _answer_candidates(expected, question)
+    return bool(actual_candidates & expected_candidates)
+
+
+def _answer_candidates(value: Any, question: dict[str, Any] | None = None) -> set[str]:
+    if value is None:
+        return set()
+    text = str(value).strip()
+    if not text:
+        return set()
+    candidates = {_normalize_answer_text(text)}
+    label = _answer_label(text)
+    if label:
+        candidates.add(label.lower())
+    if question:
+        options = question.get("options")
+        if isinstance(options, list):
+            for index, option in enumerate(options):
+                option_text = str(option).strip()
+                option_label = _option_label_for_index(index)
+                option_prefix = _answer_label(option_text)
+                option_body = _strip_option_prefix(option_text)
+                if _normalize_answer_text(text) in {
+                    option_label.lower(),
+                    _normalize_answer_text(option_text),
+                    _normalize_answer_text(option_body),
+                } or (label and label.lower() == option_label.lower()) or (
+                    label and option_prefix and label.upper() == option_prefix.upper()
+                ):
+                    candidates.update(
+                        {
+                            option_label.lower(),
+                            _normalize_answer_text(option_text),
+                            _normalize_answer_text(option_body),
+                        }
+                    )
+    return {candidate for candidate in candidates if candidate}
+
+
+def _answer_label(text: str) -> str | None:
+    stripped = text.strip()
+    if len(stripped) == 1 and stripped.upper() in {"A", "B", "C", "D"}:
+        return stripped.upper()
+    if len(stripped) >= 2 and stripped[0].upper() in {"A", "B", "C", "D"} and stripped[1] in {
+        ".",
+        "．",
+        ")",
+        "）",
+        "、",
+        ":",
+        "：",
+    }:
+        return stripped[0].upper()
+    return None
+
+
+def _strip_option_prefix(text: str) -> str:
+    stripped = text.strip()
+    label = _answer_label(stripped)
+    if label and len(stripped) > 1 and stripped[1] in {".", "．", ")", "）", "、", ":", "："}:
+        return stripped[2:].strip()
+    return stripped
+
+
+def _normalize_answer_text(text: str) -> str:
+    return " ".join(_strip_option_prefix(text).strip().lower().split())
+
+
+def _option_label_for_index(index: int) -> str:
+    labels = ["A", "B", "C", "D"]
+    return labels[index] if index < len(labels) else str(index + 1)
 
 
 def _item_analysis(
@@ -2004,7 +2077,7 @@ def _item_analysis(
             answered += 1
             key = str(actual).strip()
             distribution[key] = distribution.get(key, 0) + 1
-            if _answers_match(actual, question.get("answer")):
+            if _answers_match(actual, question.get("answer"), question):
                 correct += 1
         stats.append(
             {

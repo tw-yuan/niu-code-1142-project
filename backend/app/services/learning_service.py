@@ -162,6 +162,7 @@ class LearningService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid quiz JSON"
             )
+        questions = _normalize_quiz_questions(questions)
         if course_id:
             from app.services.courses_service import CoursesService
 
@@ -509,7 +510,7 @@ class LearningService:
             doc_ids = json.loads(quiz.doc_ids)
             for idx, question in enumerate(questions):
                 actual = _answer_for(answers, idx)
-                if _answers_match(actual, question.get("answer")):
+                if _answers_match(actual, question.get("answer"), question):
                     continue
                 result.append(
                     {
@@ -1035,9 +1036,61 @@ def _score_quiz(questions: list[dict[str, Any]], answers: dict[str, Any] | list[
     correct = 0
     for idx, question in enumerate(questions):
         actual = _answer_for(answers, idx)
-        if _answers_match(actual, question.get("answer")):
+        if _answers_match(actual, question.get("answer"), question):
             correct += 1
     return correct / len(questions)
+
+
+def _normalize_quiz_questions(questions: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for raw in questions:
+        if not isinstance(raw, dict):
+            continue
+        question = dict(raw)
+        options = _normalize_quiz_options(question)
+        if options:
+            question["type"] = str(question.get("type") or "MC")
+            question["options"] = options
+            question["answer"] = _canonical_option_answer(
+                question.get("answer", question.get("correct_answer")),
+                options,
+            )
+        elif "correct_answer" in question and "answer" not in question:
+            question["answer"] = question.get("correct_answer")
+        if "explanation" not in question and "rationale" in question:
+            question["explanation"] = question.get("rationale")
+        normalized.append(question)
+    return normalized
+
+
+def _normalize_quiz_options(question: dict[str, Any]) -> list[str]:
+    raw_options = question.get("options")
+    if isinstance(raw_options, list):
+        return [str(option).strip() for option in raw_options if str(option).strip()]
+    if isinstance(raw_options, dict):
+        return [
+            f"{key}. {value}".strip()
+            for key, value in raw_options.items()
+            if str(value).strip()
+        ]
+    options = []
+    for key in ("A", "B", "C", "D"):
+        value = question.get(key)
+        if value is not None and str(value).strip():
+            options.append(f"{key}. {value}")
+    return options
+
+
+def _canonical_option_answer(answer: Any, options: list[str]) -> Any:
+    if answer is None:
+        return answer
+    answer_candidates = _answer_candidates(answer, {"options": options})
+    for index, option in enumerate(options):
+        option_candidates = _answer_candidates(option, {"options": options})
+        option_candidates.add(_option_label_for_index(index).lower())
+        if answer_candidates & option_candidates:
+            return option
+    return answer
 
 
 def _answer_for(answers: dict[str, Any] | list[Any], index: int) -> Any:
@@ -1046,10 +1099,81 @@ def _answer_for(answers: dict[str, Any] | list[Any], index: int) -> Any:
     return answers[index] if index < len(answers) else None
 
 
-def _answers_match(actual: Any, expected: Any) -> bool:
+def _answers_match(actual: Any, expected: Any, question: dict[str, Any] | None = None) -> bool:
     if actual is None:
         return False
-    return str(actual).strip() == str(expected).strip()
+    actual_candidates = _answer_candidates(actual, question)
+    expected_candidates = _answer_candidates(expected, question)
+    return bool(actual_candidates & expected_candidates)
+
+
+def _answer_candidates(value: Any, question: dict[str, Any] | None = None) -> set[str]:
+    if value is None:
+        return set()
+    text = str(value).strip()
+    if not text:
+        return set()
+    candidates = {_normalize_answer_text(text)}
+    label = _answer_label(text)
+    if label:
+        candidates.add(label.lower())
+    if question:
+        options = question.get("options")
+        if isinstance(options, list):
+            for index, option in enumerate(options):
+                option_text = str(option).strip()
+                option_label = _option_label_for_index(index)
+                option_prefix = _answer_label(option_text)
+                option_body = _strip_option_prefix(option_text)
+                if _normalize_answer_text(text) in {
+                    option_label.lower(),
+                    _normalize_answer_text(option_text),
+                    _normalize_answer_text(option_body),
+                } or (label and label.lower() == option_label.lower()) or (
+                    label and option_prefix and label.upper() == option_prefix.upper()
+                ):
+                    candidates.update(
+                        {
+                            option_label.lower(),
+                            _normalize_answer_text(option_text),
+                            _normalize_answer_text(option_body),
+                        }
+                    )
+    return {candidate for candidate in candidates if candidate}
+
+
+def _answer_label(text: str) -> str | None:
+    stripped = text.strip()
+    if len(stripped) == 1 and stripped.upper() in {"A", "B", "C", "D"}:
+        return stripped.upper()
+    if len(stripped) >= 2 and stripped[0].upper() in {"A", "B", "C", "D"} and stripped[1] in {
+        ".",
+        "．",
+        ")",
+        "）",
+        "、",
+        ":",
+        "：",
+    }:
+        return stripped[0].upper()
+    return None
+
+
+def _strip_option_prefix(text: str) -> str:
+    stripped = text.strip()
+    label = _answer_label(stripped)
+    if label and len(stripped) > 1 and stripped[1] in {".", "．", ")", "）", "、", ":", "："}:
+        return stripped[2:].strip()
+    return stripped
+
+
+def _normalize_answer_text(text: str) -> str:
+    return " ".join(_strip_option_prefix(text).strip().lower().split())
+
+
+def _option_label_for_index(index: int) -> str:
+    labels = ["A", "B", "C", "D"]
+    return labels[index] if index < len(labels) else str(index + 1)
 
 
 def _quiz_diagnostics(
@@ -1061,7 +1185,7 @@ def _quiz_diagnostics(
     for index, question in enumerate(questions):
         actual = _answer_for(answers, index)
         expected = question.get("answer")
-        is_correct = _answers_match(actual, expected)
+        is_correct = _answers_match(actual, expected, question)
         diagnostics.append(
             {
                 "question_index": index,

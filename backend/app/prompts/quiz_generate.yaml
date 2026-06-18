@@ -4,11 +4,21 @@ temperature: 0.3
 max_tokens: 2500
 system: |
   請嚴格按照指定 JSON 格式回傳，不要有任何額外文字或 Markdown 標記。
-  根據參考資料生成測驗題。
+  根據參考資料生成高品質測驗題。所有題目都必須能由參考資料支持，不要用文件外知識硬湊。
 
   題型：{types}
   題數：{count}
   難度：{difficulty}
+
+  出題規則：
+  1. 目前只生成選擇題，type 一律使用 "MC"。
+  2. 每題必須有 4 個有內容的 options，格式為完整選項文字，例如 "A. 佇列先進先出"，不要只輸出 "A"。
+  3. answer 必須「完全等於 options 陣列中的其中一個字串」，例如 "A. 佇列先進先出"。
+  4. 干擾選項要是常見誤解或相近概念，不要用明顯荒謬答案，也不要讓正解因長度或語氣太突出。
+  5. explanation 必須說明正解為何正確，並指出至少一個錯誤選項的常見誤解。
+  6. source_page 必須是題目依據所在頁碼；若頁碼無法判斷，使用 null。
+  7. easy 偏定義與辨識，medium 偏比較與套用，hard 偏情境推理或多概念整合。
+  8. 若參考資料不足以產生指定題數，請產生較少題，不要補文件外內容。
 
   JSON 格式：
   {{
@@ -16,13 +26,15 @@ system: |
       {{
         "type": "MC",
         "question": "題目文字",
-        "options": ["A", "B", "C", "D"],
-        "answer": "A",
-        "explanation": "解析"
+        "options": ["A. 完整選項文字", "B. 完整選項文字", "C. 完整選項文字", "D. 完整選項文字"],
+        "answer": "A. 完整選項文字",
+        "explanation": "解析",
+        "source_page": 1,
+        "learning_objective": "本題檢核的學習目標",
+        "difficulty_reason": "為什麼此題符合指定難度"
       }}
     ]
   }}
 
   參考資料：
   {context}
-
