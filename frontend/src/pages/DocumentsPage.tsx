@@ -1,4 +1,10 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  KeyboardEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   BookOpenCheck,
   BrainCircuit,
@@ -363,6 +369,22 @@ export function DocumentsPage() {
     }
   }
 
+  function openDocument(doc: DocumentItem) {
+    setSelected(doc);
+    navigate(`/documents/${doc.id}`);
+  }
+
+  function handleDocumentRowKey(
+    event: KeyboardEvent<HTMLDivElement>,
+    doc: DocumentItem,
+  ) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openDocument(doc);
+    }
+  }
+
   function renderDocumentSection(
     title: string,
     docs: DocumentItem[],
@@ -402,12 +424,20 @@ export function DocumentsPage() {
           {docs.map((doc) => (
             <div
               key={doc.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openDocument(doc)}
+              onKeyDown={(event) => handleDocumentRowKey(event, doc)}
               className={[
-                "grid grid-cols-[44px_1fr_120px_120px] items-center px-5 py-4 text-sm hover:bg-zinc-50",
+                "grid cursor-pointer grid-cols-[44px_1fr_120px_120px] items-center px-5 py-4 text-sm outline-none hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
                 selectedDocIds.includes(doc.id) ? "bg-indigo-50/60" : "",
               ].join(" ")}
             >
-              <label className="flex items-center" title="選取文件">
+              <label
+                className="flex items-center"
+                title="選取文件"
+                onClick={(event) => event.stopPropagation()}
+              >
                 <input
                   className="h-4 w-4 rounded border-zinc-300 text-indigo-600"
                   type="checkbox"
@@ -416,13 +446,7 @@ export function DocumentsPage() {
                   aria-label={`選取 ${doc.filename}`}
                 />
               </label>
-              <button
-                className="flex min-w-0 items-center gap-3 text-left"
-                onClick={() => {
-                  setSelected(doc);
-                  navigate(`/documents/${doc.id}`);
-                }}
-              >
+              <div className="flex min-w-0 items-center gap-3 text-left">
                 <FileText size={18} className="shrink-0 text-zinc-500" />
                 <div className="min-w-0">
                   <div className="truncate font-medium">{doc.filename}</div>
@@ -432,7 +456,7 @@ export function DocumentsPage() {
                     {doc.course_status === "removed" ? " · 已移出課程" : ""}
                   </div>
                 </div>
-              </button>
+              </div>
               <span className={statusClass(doc.status)}>
                 {statusLabel(doc.status)}
               </span>

@@ -810,26 +810,31 @@ export function AdminPage() {
                       {users.map((user) => (
                         <tr
                           key={user.id}
-                          className={
+                          className={[
+                            "cursor-pointer outline-none focus-within:bg-zinc-50",
                             selected?.id === user.id
                               ? "bg-indigo-50/60"
-                              : "hover:bg-zinc-50"
-                          }
+                              : "hover:bg-zinc-50",
+                          ].join(" ")}
+                          tabIndex={0}
+                          onClick={() => selectUser(user.id).catch(handleError)}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return;
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              selectUser(user.id).catch(handleError);
+                            }
+                          }}
                         >
                           <td className="px-4 py-3">
-                            <button
-                              className="text-left"
-                              onClick={() =>
-                                selectUser(user.id).catch(handleError)
-                              }
-                            >
+                            <div className="text-left">
                               <div className="font-medium text-zinc-900">
                                 {user.username}
                               </div>
                               <div className="text-xs text-zinc-500">
                                 {user.email}
                               </div>
-                            </button>
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             {userRoleLabel(user.role)}
@@ -861,9 +866,10 @@ export function AdminPage() {
                           <td className="px-4 py-3">
                             <button
                               className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50"
-                              onClick={() =>
-                                toggleActive(user).catch(handleError)
-                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleActive(user).catch(handleError);
+                              }}
                             >
                               {user.is_active ? (
                                 <Ban size={14} />
@@ -1106,15 +1112,22 @@ export function AdminPage() {
                   {adminChats.map((session) => (
                     <div
                       key={session.id}
-                      className="border-b border-zinc-100 p-3 text-sm"
+                      role="button"
+                      tabIndex={0}
+                      className="cursor-pointer border-b border-zinc-100 p-3 text-sm outline-none hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+                      onClick={() =>
+                        openAdminChat(session.id).catch(handleError)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openAdminChat(session.id).catch(handleError);
+                        }
+                      }}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <button
-                          className="min-w-0 text-left"
-                          onClick={() =>
-                            openAdminChat(session.id).catch(handleError)
-                          }
-                        >
+                        <div className="min-w-0 text-left">
                           <div className="truncate font-medium">
                             {session.title ?? "未命名對話"}
                           </div>
@@ -1122,12 +1135,13 @@ export function AdminPage() {
                             {session.username} · {session.mode} ·{" "}
                             {session.message_count} 則
                           </div>
-                        </button>
+                        </div>
                         <button
                           className="shrink-0 rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50"
-                          onClick={() =>
-                            deleteAdminChat(session).catch(handleError)
-                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteAdminChat(session).catch(handleError);
+                          }}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -1181,15 +1195,20 @@ export function AdminPage() {
                 {adminCourses.map((course) => (
                   <div
                     key={course.id}
-                    className="border-b border-zinc-100 p-3 text-sm"
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer border-b border-zinc-100 p-3 text-sm outline-none hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+                    onClick={() => openAdminCourse(course.id).catch(handleError)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openAdminCourse(course.id).catch(handleError);
+                      }
+                    }}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <button
-                        className="min-w-0 text-left"
-                        onClick={() =>
-                          openAdminCourse(course.id).catch(handleError)
-                        }
-                      >
+                      <div className="min-w-0 text-left">
                         <div className="truncate font-medium">
                           {course.title}
                         </div>
@@ -1197,12 +1216,13 @@ export function AdminPage() {
                           {course.owner_username} · {course.member_count} 人 ·{" "}
                           {course.document_count} 文件
                         </div>
-                      </button>
+                      </div>
                       <button
                         className="shrink-0 rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50"
-                        onClick={() =>
-                          deleteAdminCourse(course).catch(handleError)
-                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteAdminCourse(course).catch(handleError);
+                        }}
                       >
                         <Trash2 size={14} />
                       </button>

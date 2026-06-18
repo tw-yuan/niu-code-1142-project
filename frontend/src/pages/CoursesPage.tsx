@@ -786,73 +786,116 @@ export function CoursesPage() {
         <h1 className="text-2xl font-semibold">課程</h1>
         <p className="mt-1 text-sm text-zinc-500">共用教材與課程 RAG 範圍</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="h-fit rounded-lg border border-zinc-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
-          {canCreateCourse ? (
-            <form className="mb-5 space-y-3" onSubmit={create}>
-              <label
-                className="block text-xs font-medium text-zinc-500"
-                htmlFor="new-course-title"
-              >
-                課程名稱
-              </label>
-              <input
-                id="new-course-title"
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-              <LoadingButton
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                loading={busyAction === "create"}
-                loadingText="建立中"
-                icon={<Plus size={16} />}
-              >
-                建立課程
-              </LoadingButton>
-            </form>
-          ) : (
-            <div className="mb-5 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
-              只有教師或管理員可以建立課程。
+      <div className="space-y-4">
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+            <div className="min-w-0">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-zinc-900">
+                    選擇課程
+                  </h2>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {courses.length} 門課程
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                {courses.map((course) => (
+                  <button
+                    key={course.id}
+                    className={[
+                      "inline-flex min-w-[220px] max-w-[320px] items-center gap-2 rounded-lg border px-3 py-3 text-left text-sm",
+                      selected?.id === course.id
+                        ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                        : "border-zinc-200 text-zinc-700 hover:bg-zinc-50",
+                    ].join(" ")}
+                    onClick={() => openCourse(course.id, "overview")}
+                  >
+                    <BookOpen
+                      size={16}
+                      className={
+                        selected?.id === course.id
+                          ? "shrink-0 text-indigo-500"
+                          : "shrink-0 text-zinc-500"
+                      }
+                    />
+                    <span className="min-w-0 truncate font-medium">
+                      {course.title}
+                    </span>
+                  </button>
+                ))}
+                {courses.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">
+                    目前沒有課程
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          <form className="mb-5 flex gap-2" onSubmit={join}>
-            <label className="sr-only" htmlFor="course-join-code">
-              邀請碼
-            </label>
-            <input
-              id="course-join-code"
-              className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-              value={joinCode}
-              onChange={(event) => setJoinCode(event.target.value)}
-              placeholder="邀請碼"
-            />
-            <LoadingButton
-              className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-              loading={busyAction === "join"}
-              loadingText="加入中"
-            >
-              加入
-            </LoadingButton>
-          </form>
-          <div className="max-h-[52vh] space-y-1 overflow-y-auto pr-1 scrollbar-thin">
-            {courses.map((course) => (
-              <button
-                key={course.id}
-                className={[
-                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
-                  selected?.id === course.id
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-zinc-700 hover:bg-zinc-50",
-                ].join(" ")}
-                onClick={() => openCourse(course.id, "overview")}
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              {canCreateCourse ? (
+                <form
+                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                  onSubmit={create}
+                >
+                  <label
+                    className="mb-2 block text-xs font-medium text-zinc-500"
+                    htmlFor="new-course-title"
+                  >
+                    課程名稱
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="new-course-title"
+                      className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                    />
+                    <LoadingButton
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                      loading={busyAction === "create"}
+                      loadingText="建立中"
+                      icon={<Plus size={16} />}
+                    >
+                      建立
+                    </LoadingButton>
+                  </div>
+                </form>
+              ) : (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
+                  只有教師或管理員可以建立課程。
+                </div>
+              )}
+              <form
+                className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"
+                onSubmit={join}
               >
-                <BookOpen size={16} className="text-zinc-500" />
-                <span className="min-w-0 truncate">{course.title}</span>
-              </button>
-            ))}
+                <label
+                  className="mb-2 block text-xs font-medium text-zinc-500"
+                  htmlFor="course-join-code"
+                >
+                  邀請碼
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="course-join-code"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                    value={joinCode}
+                    onChange={(event) => setJoinCode(event.target.value)}
+                    placeholder="輸入邀請碼"
+                  />
+                  <LoadingButton
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                    loading={busyAction === "join"}
+                    loadingText="加入中"
+                  >
+                    加入
+                  </LoadingButton>
+                </div>
+              </form>
+            </div>
           </div>
-        </aside>
+        </section>
         <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm">
           {selected ? (
             <div className="min-w-0">
@@ -860,7 +903,7 @@ export function CoursesPage() {
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1">
                     {canEditCourse ? (
-                      <div className="grid max-w-xl gap-2">
+                      <div className="grid max-w-3xl gap-2">
                         <input
                           className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold"
                           value={courseTitle}
