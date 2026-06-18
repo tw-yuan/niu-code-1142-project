@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, NotebookPen, Pencil, Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Download, Filter, NotebookPen, Pencil } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { MarkdownContent } from "../components/app/MarkdownContent";
 import { LoadingButton } from "../components/app/LoadingButton";
@@ -21,7 +21,6 @@ export function NotesPage() {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [docId, setDocId] = useState("");
   const [courseId, setCourseId] = useState("");
-  const [content, setContent] = useState("");
   const [q, setQ] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -84,21 +83,6 @@ export function NotesPage() {
       });
   }, [courseId]);
 
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (!content.trim()) return;
-    await apiFetch("/notes", {
-      method: "POST",
-      body: JSON.stringify({
-        content,
-        doc_id: docId || null,
-        source_type: "manual",
-      }),
-    });
-    setContent("");
-    await load();
-  }
-
   async function deleteNote(id: string) {
     await apiFetch(`/notes/${id}`, { method: "DELETE" });
     setSelectedNoteIds((current) => current.filter((noteId) => noteId !== id));
@@ -156,7 +140,7 @@ export function NotesPage() {
         <div>
           <h1 className="text-2xl font-semibold">筆記</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            保存 AI 回應、摘要與自己的理解
+            管理從對話、測驗與閃卡保存下來的文字
           </p>
         </div>
         {docId ? (
@@ -179,7 +163,11 @@ export function NotesPage() {
       </div>
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         <aside className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <form className="space-y-3" onSubmit={create}>
+          <div className="space-y-3">
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+              <Filter size={16} />
+              篩選保存內容
+            </div>
             <select
               className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
               value={courseId}
@@ -216,17 +204,11 @@ export function NotesPage() {
               onChange={(event) => setQ(event.target.value)}
               placeholder="搜尋筆記"
             />
-            <textarea
-              className="min-h-40 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              placeholder="新增 Markdown 筆記"
-            />
-            <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-              <Plus size={16} />
-              新增
-            </button>
-          </form>
+            <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-sm leading-6 text-zinc-600">
+              在對話、測驗解析或閃卡頁按「存到筆記」後，內容會出現在這裡。
+              你可以再編輯、刪除、批量整理或依文件匯出 Markdown。
+            </div>
+          </div>
         </aside>
         <section className="space-y-3">
           {notes.length > 0 && (
@@ -282,7 +264,7 @@ export function NotesPage() {
                     aria-label="選取筆記"
                   />
                   <NotebookPen size={16} />
-                  {note.source_type ?? "manual"}{" "}
+                  {sourceTypeLabel(note.source_type)}{" "}
                   {note.source_page ? `· 第 ${note.source_page} 頁` : ""}
                 </div>
                 <div className="flex items-center gap-2">
@@ -369,6 +351,14 @@ function downloadBlob(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function sourceTypeLabel(sourceType?: string | null) {
+  if (sourceType === "chat") return "對話保存";
+  if (sourceType === "summary") return "摘要保存";
+  if (sourceType === "quiz") return "測驗保存";
+  if (sourceType === "flashcard") return "閃卡保存";
+  return "保存內容";
 }
 
 function queryString(params: Record<string, string>) {
