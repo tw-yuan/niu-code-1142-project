@@ -540,6 +540,7 @@ data: {"type":"chunk","content":"..."}
 
 前端的 AI 生成入口使用 `POST /flashcards/jobs` 建立 `generation_tasks(kind="flashcards")`。worker 會更新整理教材、AI 生成、解析儲存三個階段進度，完成後解析 JSON 並建立 `flashcards` rows。頁面收到 `generation_task` succeeded 或輪詢到 succeeded 後重新載入列表。`POST /flashcards/stream` 保留給舊版即時串流流程。
 - 保存 repetition、ease factor、interval days、next review。
+- 前端採 Anki 式翻卡互動：列表與今日複習預設只顯示正面，點擊卡面才翻到背面答案；翻面後才顯示忘記、普通、熟悉的熟悉度按鈕，避免使用者在回想前先看到答案。
 - 閃卡列表支援多選與批量刪除，避免大量整理時一張一張操作。
 
 ### 10.5 筆記

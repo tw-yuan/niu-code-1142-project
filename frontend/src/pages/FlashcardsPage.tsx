@@ -1,5 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, NotebookPen, Plus, Trash2, Wand2 } from "lucide-react";
+import {
+  BrainCircuit,
+  NotebookPen,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { AIGeneratedBadge } from "../components/app/AIGeneratedBadge";
 import { GenerationTaskStatus } from "../components/app/GenerationTaskPanel";
@@ -33,8 +40,13 @@ export function FlashcardsPage() {
   const [deletingCardId, setDeletingCardId] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewTotal, setReviewTotal] = useState(0);
   const [reviewed, setReviewed] = useState(0);
   const [remembered, setRemembered] = useState(0);
+  const [reviewFlipped, setReviewFlipped] = useState(false);
+  const [flippedCardIds, setFlippedCardIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [batchDeletingCards, setBatchDeletingCards] = useState(false);
   const [savingNoteCardId, setSavingNoteCardId] = useState<string | null>(null);
@@ -178,7 +190,12 @@ export function FlashcardsPage() {
       });
       setReviewed((prev) => prev + 1);
       if (quality >= 3) setRemembered((prev) => prev + 1);
-      setReviewIndex((prev) => prev + 1);
+      setReviewFlipped(false);
+      setFlippedCardIds((current) => {
+        const next = new Set(current);
+        next.delete(cardId);
+        return next;
+      });
       await load();
     } finally {
       setReviewingCardId(null);
@@ -229,6 +246,30 @@ export function FlashcardsPage() {
   }
 
   const activeReviewCard = dueCards[reviewIndex];
+  const reviewDisplayTotal = reviewTotal || dueCards.length;
+  const reviewDisplayCurrent = Math.min(reviewed + 1, reviewDisplayTotal);
+
+  useEffect(() => {
+    setReviewFlipped(false);
+  }, [activeReviewCard?.id]);
+
+  useEffect(() => {
+    if (reviewMode && reviewTotal === 0 && dueCards.length > 0) {
+      setReviewTotal(dueCards.length);
+    }
+  }, [dueCards.length, reviewMode, reviewTotal]);
+
+  function toggleCardFlip(cardId: string) {
+    setFlippedCardIds((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) {
+        next.delete(cardId);
+      } else {
+        next.add(cardId);
+      }
+      return next;
+    });
+  }
 
   return (
     <div>
@@ -244,8 +285,10 @@ export function FlashcardsPage() {
           onClick={() => {
             setReviewMode(true);
             setReviewIndex(0);
+            setReviewTotal(dueCards.length);
             setReviewed(0);
             setRemembered(0);
+            setReviewFlipped(false);
           }}
           disabled={dueCards.length === 0}
         >
@@ -254,7 +297,11 @@ export function FlashcardsPage() {
         {reviewMode && (
           <button
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50"
-            onClick={() => setReviewMode(false)}
+            onClick={() => {
+              setReviewMode(false);
+              setReviewFlipped(false);
+              setReviewTotal(0);
+            }}
           >
             回到列表
           </button>
@@ -264,27 +311,52 @@ export function FlashcardsPage() {
         <section className="mb-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           {activeReviewCard ? (
             <div>
-              <div className="mb-2 text-xs text-zinc-500">
-                第 {reviewIndex + 1} / {dueCards.length} 張
+              <div className="mb-4 flex items-center justify-between gap-3 text-xs text-zinc-500">
+                <span>
+                  第 {reviewDisplayCurrent} / {reviewDisplayTotal} 張
+                </span>
+                <span>已複習 {reviewed} 張</span>
               </div>
-              <div className="text-lg font-semibold">
-                {activeReviewCard.front}
-              </div>
-              <div className="mt-4 whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-6 text-zinc-700">
-                {activeReviewCard.back}
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {[1, 3, 5].map((quality) => (
-                  <LoadingButton
-                    key={quality}
-                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                    onClick={() => review(activeReviewCard.id, quality)}
-                    loading={reviewingCardId === activeReviewCard.id}
-                    loadingText="送出中"
-                  >
-                    {quality === 1 ? "忘記" : quality === 3 ? "普通" : "熟悉"}
-                  </LoadingButton>
-                ))}
+              <button
+                type="button"
+                className="flex min-h-72 w-full flex-col justify-between rounded-lg border border-zinc-200 bg-white p-6 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/20 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                onClick={() => setReviewFlipped((current) => !current)}
+                aria-pressed={reviewFlipped}
+              >
+                <span className="inline-flex w-fit items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
+                  <BrainCircuit size={14} />
+                  {reviewFlipped ? "背面" : "正面"}
+                </span>
+                <span className="mx-auto flex max-w-3xl flex-1 items-center whitespace-pre-wrap py-8 text-center text-2xl font-semibold leading-10 text-zinc-900">
+                  {reviewFlipped ? activeReviewCard.back : activeReviewCard.front}
+                </span>
+                <span className="inline-flex w-fit items-center gap-2 self-center rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-500">
+                  <RotateCcw size={14} />
+                  翻面
+                </span>
+              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {reviewFlipped ? (
+                  [1, 3, 5].map((quality) => (
+                    <LoadingButton
+                      key={quality}
+                      className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                      onClick={() => review(activeReviewCard.id, quality)}
+                      loading={reviewingCardId === activeReviewCard.id}
+                      loadingText="送出中"
+                    >
+                      {quality === 1
+                        ? "忘記"
+                        : quality === 3
+                          ? "普通"
+                          : "熟悉"}
+                    </LoadingButton>
+                  ))
+                ) : (
+                  <span className="text-sm text-zinc-500">
+                    翻面後選擇熟悉程度
+                  </span>
+                )}
               </div>
             </div>
           ) : (
@@ -485,75 +557,93 @@ export function FlashcardsPage() {
             </div>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
-            {cards.map((card) => (
-              <article
-                key={card.id}
-                className="rounded-lg border border-zinc-200 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                    <input
-                      type="checkbox"
-                      checked={selectedCardIds.includes(card.id)}
-                      onChange={(event) =>
-                        setSelectedCardIds((current) =>
-                          event.target.checked
-                            ? [...current, card.id]
-                            : current.filter((id) => id !== card.id),
-                        )
-                      }
-                      aria-label={`選取閃卡 ${card.front}`}
-                    />
-                    <BrainCircuit
-                      size={16}
-                      className="shrink-0 text-zinc-500"
-                    />
-                    <span className="break-words">{card.front}</span>
+            {cards.map((card) => {
+              const flipped = flippedCardIds.has(card.id);
+              return (
+                <article
+                  key={card.id}
+                  className="rounded-lg border border-zinc-200 p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={selectedCardIds.includes(card.id)}
+                        onChange={(event) =>
+                          setSelectedCardIds((current) =>
+                            event.target.checked
+                              ? [...current, card.id]
+                              : current.filter((id) => id !== card.id),
+                          )
+                        }
+                        aria-label={`選取閃卡 ${card.front}`}
+                      />
+                      <span className="truncate text-zinc-500">
+                        下次：{card.next_review.slice(0, 10)}
+                      </span>
+                    </label>
+                    <button
+                      className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600"
+                      onClick={() => deleteCard(card)}
+                      disabled={deletingCardId === card.id}
+                      title="刪除閃卡"
+                      aria-label="刪除閃卡"
+                    >
+                      {deletingCardId === card.id ? (
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-red-200 border-t-red-600" />
+                      ) : (
+                        <Trash2 size={16} />
+                      )}
+                    </button>
                   </div>
                   <button
-                    className="shrink-0 rounded-md p-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600"
-                    onClick={() => deleteCard(card)}
-                    disabled={deletingCardId === card.id}
-                    title="刪除閃卡"
-                    aria-label="刪除閃卡"
+                    type="button"
+                    className="mt-3 flex min-h-52 w-full flex-col justify-between rounded-lg border border-zinc-200 bg-white p-4 text-left transition hover:border-indigo-200 hover:bg-indigo-50/20 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onClick={() => toggleCardFlip(card.id)}
+                    aria-pressed={flipped}
                   >
-                    {deletingCardId === card.id ? (
-                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-red-200 border-t-red-600" />
-                    ) : (
-                      <Trash2 size={16} />
-                    )}
+                    <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600">
+                      <BrainCircuit size={13} />
+                      {flipped ? "背面" : "正面"}
+                    </span>
+                    <span className="flex flex-1 items-center whitespace-pre-wrap py-5 text-lg font-semibold leading-8 text-zinc-900">
+                      {flipped ? card.back : card.front}
+                    </span>
+                    <span className="inline-flex w-fit items-center gap-1.5 self-end rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-500">
+                      <RotateCcw size={13} />
+                      翻面
+                    </span>
                   </button>
-                </div>
-                <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
-                  {card.back}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <LoadingButton
-                    className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                    onClick={() => saveCardToNote(card)}
-                    loading={savingNoteCardId === card.id}
-                    loadingText="儲存中"
-                    icon={<NotebookPen size={13} />}
-                  >
-                    {savedNoteCardIds.has(card.id) ? "已存筆記" : "存到筆記"}
-                  </LoadingButton>
-                  {[1, 3, 5].map((quality) => (
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <LoadingButton
-                      key={quality}
                       className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                      onClick={() => review(card.id, quality)}
-                      loading={reviewingCardId === card.id}
-                      loadingText="送出中"
+                      onClick={() => saveCardToNote(card)}
+                      loading={savingNoteCardId === card.id}
+                      loadingText="儲存中"
+                      icon={<NotebookPen size={13} />}
                     >
-                      {quality === 1 ? "忘記" : quality === 3 ? "普通" : "熟悉"}
+                      {savedNoteCardIds.has(card.id) ? "已存筆記" : "存到筆記"}
                     </LoadingButton>
-                  ))}
-                </div>
-                <div className="mt-2 text-xs text-zinc-500">
-                  下次：{card.next_review.slice(0, 10)}
-                </div>
-              </article>
-            ))}
+                    {flipped &&
+                      [1, 3, 5].map((quality) => (
+                        <LoadingButton
+                          key={quality}
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                          onClick={() => review(card.id, quality)}
+                          loading={reviewingCardId === card.id}
+                          loadingText="送出中"
+                        >
+                          {quality === 1
+                            ? "忘記"
+                            : quality === 3
+                              ? "普通"
+                              : "熟悉"}
+                        </LoadingButton>
+                      ))}
+                  </div>
+                </article>
+              );
+            })}
             {cards.length === 0 && (
               <div className="text-sm text-zinc-500">尚無閃卡</div>
             )}
