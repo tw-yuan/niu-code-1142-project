@@ -264,8 +264,30 @@ class CourseHelpRequest(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="open")
     priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
     resolved_at: Mapped[str | None] = mapped_column(String)
+    resolution_summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
     updated_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
+
+
+class CourseHelpRequestEvent(Base):
+    __tablename__ = "course_help_request_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    request_id: Mapped[str] = mapped_column(
+        String, ForeignKey("course_help_requests.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String, nullable=False, default="comment")
+    message: Mapped[str | None] = mapped_column(Text)
+    internal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    from_status: Mapped[str | None] = mapped_column(String)
+    to_status: Mapped[str | None] = mapped_column(String)
+    assigned_to: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
 
 
 class LearningArtifact(Base):
@@ -493,6 +515,11 @@ class CourseDocument(Base):
         String, ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
     )
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    added_by: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    version_label: Mapped[str | None] = mapped_column(String)
+    note: Mapped[str | None] = mapped_column(Text)
     added_at: Mapped[str] = mapped_column(String, nullable=False, default=now_iso)
     removed_at: Mapped[str | None] = mapped_column(String)
     removed_by: Mapped[str | None] = mapped_column(

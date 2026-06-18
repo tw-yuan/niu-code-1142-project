@@ -84,6 +84,9 @@ async def _ensure_sqlite_columns(conn) -> None:
     }
     course_document_columns = {
         "is_active": "INTEGER NOT NULL DEFAULT 1",
+        "added_by": "TEXT",
+        "version_label": "TEXT",
+        "note": "TEXT",
         "removed_at": "TEXT",
         "removed_by": "TEXT",
     }
@@ -125,6 +128,19 @@ async def _ensure_sqlite_columns(conn) -> None:
                         f"ALTER TABLE course_question_bank_items ADD COLUMN {column} {column_type}"
                     )
                 )
+
+    existing_help_requests = {
+        row[1]
+        for row in (await conn.execute(text("PRAGMA table_info(course_help_requests)"))).fetchall()
+    }
+    help_request_columns = {
+        "resolution_summary": "TEXT",
+    }
+    for column, column_type in help_request_columns.items():
+        if column not in existing_help_requests:
+            await conn.execute(
+                text(f"ALTER TABLE course_help_requests ADD COLUMN {column} {column_type}")
+            )
 
     existing_usage = {
         row[1] for row in (await conn.execute(text("PRAGMA table_info(token_usage)"))).fetchall()

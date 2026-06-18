@@ -287,7 +287,7 @@ class LearningService:
         available_from: str | None = None,
         answer_visible_at: str | None = None,
         attempt_limit: int | None = None,
-        status_value: str = "published",
+        status_value: str | None = "published",
     ) -> dict[str, Any]:
         from app.services.courses_service import CoursesService
 
@@ -373,7 +373,8 @@ class LearningService:
         course_quiz.available_from = available_from
         course_quiz.answer_visible_at = answer_visible_at
         course_quiz.attempt_limit = attempt_limit
-        course_quiz.status = status_value
+        if status_value is not None:
+            course_quiz.status = status_value
         await self.db.commit()
         return self._course_quiz_out(course_quiz)
 

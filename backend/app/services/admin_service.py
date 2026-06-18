@@ -742,50 +742,95 @@ class AdminService:
         ).scalar_one_or_none()
         if course is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-        doc = (
-            await self.db.execute(select(Document).where(Document.id == body.doc_id))
-        ).scalar_one_or_none()
-        if doc is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-        if doc.status != "ready":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not ready"
+        doc_ids = _course_document_ids(body)
+        if not doc_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No documents selected")
+        docs = (
+            (
+                await self.db.execute(select(Document).where(Document.id.in_(doc_ids)))
             )
-        owner_member = (
-            await self.db.execute(
-                select(CourseMember).where(
-                    and_(CourseMember.course_id == course_id, CourseMember.user_id == doc.user_id)
+            .scalars()
+            .all()
+        )
+        by_doc_id = {doc.id: doc for doc in docs}
+        missing = [doc_id for doc_id in doc_ids if doc_id not in by_doc_id]
+        if missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        if any(doc.status != "ready" for doc in docs):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Document is not ready")
+        owner_ids = sorted({doc.user_id for doc in docs})
+        member_ids = set(
+            (
+                await self.db.execute(
+                    select(CourseMember.user_id).where(
+                        and_(
+                            CourseMember.course_id == course_id,
+                            CourseMember.user_id.in_(owner_ids),
+                        )
+                    )
                 )
             )
-        ).scalar_one_or_none()
-        if owner_member is None:
+            .scalars()
+            .all()
+        )
+        if set(owner_ids) != member_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Document owner must be a course member",
             )
-        existing = (
-            await self.db.execute(
-                select(CourseDocument).where(
-                    and_(
-                        CourseDocument.course_id == course_id, CourseDocument.doc_id == body.doc_id
+        existing_rows = (
+            (
+                await self.db.execute(
+                    select(CourseDocument).where(
+                        and_(
+                            CourseDocument.course_id == course_id,
+                            CourseDocument.doc_id.in_(doc_ids),
+                        )
                     )
                 )
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            self.db.add(CourseDocument(course_id=course_id, doc_id=body.doc_id))
-            await self.db.commit()
-        elif not existing.is_active:
-            existing.is_active = 1
-            existing.removed_at = None
-            existing.removed_by = None
-            await self.db.commit()
+            .scalars()
+            .all()
+        )
+        existing_by_doc_id = {row.doc_id: row for row in existing_rows}
+        added = 0
+        reactivated = 0
+        skipped = 0
+        for doc_id in doc_ids:
+            existing = existing_by_doc_id.get(doc_id)
+            if existing is None:
+                self.db.add(
+                    CourseDocument(
+                        course_id=course_id,
+                        doc_id=doc_id,
+                        added_by=actor_id,
+                        version_label=body.version_label,
+                        note=body.note,
+                    )
+                )
+                added += 1
+            elif not existing.is_active:
+                existing.is_active = 1
+                existing.removed_at = None
+                existing.removed_by = None
+                existing.added_by = actor_id
+                existing.version_label = body.version_label
+                existing.note = body.note
+                reactivated += 1
+            else:
+                skipped += 1
+        await self.db.commit()
         await AuditService(self.db).log(
             "admin.course_document_add",
             user_id=actor_id,
-            resource=f"course:{course_id}:document:{body.doc_id}",
+            resource=f"course:{course_id}:documents:{','.join(doc_ids)}",
             request=request,
-            detail={"owner_id": doc.user_id, "filename": doc.filename},
+            detail={
+                "doc_ids": doc_ids,
+                "added": added,
+                "reactivated": reactivated,
+                "skipped": skipped,
+            },
         )
         return await self.course_detail(course_id)
 
@@ -1153,3 +1198,13 @@ def _merge_config(current: Any, incoming: Any) -> Any:
     if incoming == "********":
         return current
     return incoming
+
+
+def _course_document_ids(body: CourseDocumentRequest) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for doc_id in [body.doc_id, *body.doc_ids]:
+        if doc_id and doc_id not in seen:
+            seen.add(doc_id)
+            result.append(doc_id)
+    return result

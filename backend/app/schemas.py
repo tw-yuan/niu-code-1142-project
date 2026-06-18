@@ -168,7 +168,22 @@ class CourseQuizPublishRequest(BaseModel):
     status: Literal["published", "draft"] = "published"
 
 
+class CourseQuizBatchUpdateRequest(BaseModel):
+    course_quiz_ids: list[str] = Field(min_length=1, max_length=100)
+    due_at: str | None = None
+    available_from: str | None = None
+    answer_visible_at: str | None = None
+    attempt_limit: int | None = Field(default=None, ge=1, le=20)
+    status: Literal["published", "draft"] | None = None
+
+
 class CourseQuestionReviewUpdate(BaseModel):
+    status: Literal["draft", "approved", "rejected", "archived"]
+    review_note: str | None = Field(default=None, max_length=1000)
+
+
+class CourseQuestionReviewBatchUpdate(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=500)
     status: Literal["draft", "approved", "rejected", "archived"]
     review_note: str | None = Field(default=None, max_length=1000)
 
@@ -281,9 +296,17 @@ class CourseMemberRoleUpdate(BaseModel):
     role: Literal["student", "ta", "instructor"]
 
 
+class CourseMemberBatchUpdate(BaseModel):
+    user_ids: list[str] = Field(min_length=1, max_length=200)
+    role: Literal["student", "ta", "instructor"] | None = None
+    action: Literal["update_role", "remove"] = "update_role"
+
+
 class CourseDocumentRequest(BaseModel):
     doc_id: str | None = None
     doc_ids: list[str] = Field(default_factory=list)
+    version_label: str | None = Field(default=None, max_length=80)
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class CourseAssignmentCreate(BaseModel):
@@ -333,6 +356,14 @@ class CourseHelpRequestUpdate(BaseModel):
     status: Literal["open", "in_progress", "resolved"] | None = None
     assigned_to: str | None = None
     priority: Literal["low", "normal", "high"] | None = None
+    comment: str | None = Field(default=None, max_length=4000)
+    internal: bool = False
+    resolution_summary: str | None = Field(default=None, max_length=4000)
+
+
+class CourseHelpRequestCommentCreate(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    internal: bool = False
 
 
 class LegalConsentRequest(BaseModel):

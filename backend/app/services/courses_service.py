@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
@@ -23,6 +23,7 @@ from app.models.tables import (
     CourseAssignmentSubmission,
     CourseDocument,
     CourseHelpRequest,
+    CourseHelpRequestEvent,
     CourseMember,
     CourseQuestionBankItem,
     CourseQuiz,
@@ -46,7 +47,9 @@ from app.schemas import (
     CourseHelpRequestCreate,
     CourseHelpRequestUpdate,
     CourseJoinRequest,
+    CourseMemberBatchUpdate,
     CourseMemberRoleUpdate,
+    CourseQuestionReviewBatchUpdate,
     CourseQuestionReviewUpdate,
     CourseUpdate,
 )
@@ -200,16 +203,31 @@ class CoursesService:
         for doc_id in doc_ids:
             existing = existing_by_doc_id.get(doc_id)
             if existing is None:
-                self.db.add(CourseDocument(course_id=course_id, doc_id=doc_id))
+                self.db.add(
+                    CourseDocument(
+                        course_id=course_id,
+                        doc_id=doc_id,
+                        added_by=user_id,
+                        version_label=body.version_label,
+                        note=body.note,
+                    )
+                )
                 added += 1
             elif not existing.is_active:
                 existing.is_active = 1
                 existing.removed_at = None
                 existing.removed_by = None
+                existing.added_by = user_id
+                existing.version_label = body.version_label
+                existing.note = body.note
                 reactivated += 1
             else:
+                if body.version_label is not None:
+                    existing.version_label = body.version_label
+                if body.note is not None:
+                    existing.note = body.note
                 skipped += 1
-        if added or reactivated:
+        if added or reactivated or skipped:
             await self.db.commit()
         return {
             "ok": True,
@@ -237,6 +255,54 @@ class CoursesService:
         item.removed_by = user_id
         await self.db.commit()
 
+    async def remove_documents(
+        self, user_id: str, course_id: str, doc_ids: list[str]
+    ) -> dict[str, Any]:
+        if not doc_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No documents selected",
+            )
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        rows = (
+            (
+                await self.db.execute(
+                    select(CourseDocument).where(
+                        and_(
+                            CourseDocument.course_id == course_id,
+                            CourseDocument.doc_id.in_(doc_ids),
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_doc_id = {row.doc_id: row for row in rows}
+        missing = [doc_id for doc_id in doc_ids if doc_id not in by_doc_id]
+        now = now_iso()
+        removed = 0
+        skipped = 0
+        for doc_id in doc_ids:
+            item = by_doc_id.get(doc_id)
+            if item is None:
+                continue
+            if item.is_active:
+                item.is_active = 0
+                item.removed_at = now
+                item.removed_by = user_id
+                removed += 1
+            else:
+                skipped += 1
+        await self.db.commit()
+        return {
+            "ok": True,
+            "doc_ids": doc_ids,
+            "removed": removed,
+            "skipped": skipped,
+            "missing": missing,
+        }
+
     async def update_member_role(
         self,
         user_id: str,
@@ -260,6 +326,54 @@ class CoursesService:
         member.role = body.role
         await self.db.commit()
         return {"ok": True}
+
+    async def batch_members(
+        self,
+        user_id: str,
+        course_id: str,
+        body: CourseMemberBatchUpdate,
+    ) -> dict[str, Any]:
+        if body.action == "remove":
+            removed = 0
+            skipped: list[str] = []
+            for member_user_id in body.user_ids:
+                try:
+                    await self.remove_member(user_id, course_id, member_user_id)
+                    removed += 1
+                except HTTPException as exc:
+                    if exc.status_code in {
+                        status.HTTP_400_BAD_REQUEST,
+                        status.HTTP_403_FORBIDDEN,
+                        status.HTTP_404_NOT_FOUND,
+                    }:
+                        skipped.append(member_user_id)
+                    else:
+                        raise
+            return {"ok": True, "action": "remove", "removed": removed, "skipped": skipped}
+
+        if body.role is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role is required")
+        updated = 0
+        skipped = []
+        for member_user_id in body.user_ids:
+            try:
+                await self.update_member_role(
+                    user_id,
+                    course_id,
+                    member_user_id,
+                    CourseMemberRoleUpdate(role=body.role),
+                )
+                updated += 1
+            except HTTPException as exc:
+                if exc.status_code in {
+                    status.HTTP_400_BAD_REQUEST,
+                    status.HTTP_403_FORBIDDEN,
+                    status.HTTP_404_NOT_FOUND,
+                }:
+                    skipped.append(member_user_id)
+                else:
+                    raise
+        return {"ok": True, "action": "update_role", "updated": updated, "skipped": skipped}
 
     async def remove_member(self, user_id: str, course_id: str, member_user_id: str) -> None:
         course = await self._get_course(course_id)
@@ -623,12 +737,35 @@ class CoursesService:
         await self.db.commit()
         return {"ok": True}
 
-    async def help_requests(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
+    async def help_requests(
+        self,
+        user_id: str,
+        course_id: str,
+        status_filter: str | None = None,
+        priority: str | None = None,
+        assigned_to: str | None = None,
+        q: str | None = None,
+    ) -> list[dict[str, Any]]:
         course = await self._get_course(course_id)
         member = await self.require_member(user_id, course_id)
         conditions = [CourseHelpRequest.course_id == course_id]
         if course.owner_id != user_id and member.role not in {"instructor", "ta"}:
             conditions.append(CourseHelpRequest.user_id == user_id)
+        if status_filter:
+            conditions.append(CourseHelpRequest.status == status_filter)
+        if priority:
+            conditions.append(CourseHelpRequest.priority == priority)
+        if assigned_to == "me":
+            conditions.append(CourseHelpRequest.assigned_to == user_id)
+        elif assigned_to == "unassigned":
+            conditions.append(CourseHelpRequest.assigned_to.is_(None))
+        elif assigned_to:
+            conditions.append(CourseHelpRequest.assigned_to == assigned_to)
+        if q:
+            like = f"%{q}%"
+            conditions.append(
+                or_(CourseHelpRequest.title.ilike(like), CourseHelpRequest.content.ilike(like))
+            )
         rows = (
             await self.db.execute(
                 select(CourseHelpRequest, User.username)
@@ -637,7 +774,7 @@ class CoursesService:
                 .order_by(desc(CourseHelpRequest.updated_at))
             )
         ).all()
-        return [await self._help_request_out(row, username) for row, username in rows]
+        return [await self._help_request_out(row, username, user_id) for row, username in rows]
 
     async def create_help_request(
         self,
@@ -671,6 +808,17 @@ class CoursesService:
             priority=body.priority,
         )
         self.db.add(request)
+        await self.db.flush()
+        self.db.add(
+            CourseHelpRequestEvent(
+                request_id=request.id,
+                actor_id=user_id,
+                event_type="created",
+                message=body.content,
+                internal=0,
+                to_status="open",
+            )
+        )
         await self.db.commit()
         await self.db.refresh(request)
         await self._push_course_manager_event(
@@ -685,7 +833,7 @@ class CoursesService:
         username = (
             await self.db.execute(select(User.username).where(User.id == user_id))
         ).scalar_one_or_none()
-        return await self._help_request_out(request, username)
+        return await self._help_request_out(request, username, user_id)
 
     async def update_help_request(
         self,
@@ -696,6 +844,9 @@ class CoursesService:
     ) -> dict[str, Any]:
         await self.require_role(user_id, course_id, {"instructor", "ta"})
         help_request = await self._get_help_request(course_id, request_id)
+        from_status = help_request.status
+        event_type = "updated"
+        event_assigned_to = None
         if "assigned_to" in body.model_fields_set and body.assigned_to:
             assignee = await self._get_member(course_id, body.assigned_to)
             if assignee.role not in {"instructor", "ta"}:
@@ -706,11 +857,37 @@ class CoursesService:
         if "status" in body.model_fields_set and body.status is not None:
             help_request.status = body.status
             help_request.resolved_at = now_iso() if body.status == "resolved" else None
+            event_type = "status_changed"
         if "assigned_to" in body.model_fields_set:
             help_request.assigned_to = body.assigned_to
+            event_assigned_to = body.assigned_to
+            if event_type == "updated":
+                event_type = "assigned"
         if "priority" in body.model_fields_set and body.priority is not None:
             help_request.priority = body.priority
+            if event_type == "updated":
+                event_type = "priority_changed"
+        if "resolution_summary" in body.model_fields_set:
+            help_request.resolution_summary = body.resolution_summary
         help_request.updated_at = now_iso()
+        if (
+            body.comment
+            or body.resolution_summary
+            or from_status != help_request.status
+            or event_assigned_to is not None
+        ):
+            self.db.add(
+                CourseHelpRequestEvent(
+                    request_id=help_request.id,
+                    actor_id=user_id,
+                    event_type=event_type,
+                    message=body.comment or body.resolution_summary,
+                    internal=1 if body.internal else 0,
+                    from_status=from_status if from_status != help_request.status else None,
+                    to_status=help_request.status if from_status != help_request.status else None,
+                    assigned_to=event_assigned_to,
+                )
+            )
         await self.db.commit()
         await self.db.refresh(help_request)
         with contextlib.suppress(Exception):
@@ -726,9 +903,48 @@ class CoursesService:
         username = (
             await self.db.execute(select(User.username).where(User.id == help_request.user_id))
         ).scalar_one_or_none()
-        return await self._help_request_out(help_request, username)
+        return await self._help_request_out(help_request, username, user_id)
 
-    async def question_bank(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
+    async def create_help_request_comment(
+        self,
+        user_id: str,
+        course_id: str,
+        request_id: str,
+        message: str,
+        internal: bool = False,
+    ) -> dict[str, Any]:
+        member = await self.require_member(user_id, course_id)
+        help_request = await self._get_help_request(course_id, request_id)
+        is_manager = member.role in {"instructor", "ta"} or help_request.user_id == user_id
+        if not is_manager:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Course member only")
+        if internal and member.role not in {"instructor", "ta"}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Manager only")
+        event = CourseHelpRequestEvent(
+            request_id=help_request.id,
+            actor_id=user_id,
+            event_type="comment",
+            message=message,
+            internal=1 if internal else 0,
+        )
+        help_request.updated_at = now_iso()
+        self.db.add(event)
+        await self.db.commit()
+        username = (
+            await self.db.execute(select(User.username).where(User.id == help_request.user_id))
+        ).scalar_one_or_none()
+        return await self._help_request_out(help_request, username, user_id)
+
+    async def question_bank(
+        self,
+        user_id: str,
+        course_id: str,
+        status_filter: str | None = None,
+        question_type: str | None = None,
+        quiz_id: str | None = None,
+        q: str | None = None,
+        include_archived: bool = False,
+    ) -> list[dict[str, Any]]:
         await self.require_role(user_id, course_id, {"instructor", "ta"})
         course_quiz_rows = (
             await self.db.execute(
@@ -746,17 +962,31 @@ class CoursesService:
         for course_quiz, quiz in course_quiz_rows:
             await self._ensure_question_bank_items(course_quiz, quiz)
         await self.db.commit()
+        conditions = [CourseQuestionBankItem.course_id == course_id]
+        if status_filter:
+            conditions.append(CourseQuestionBankItem.status == status_filter)
+        elif not include_archived:
+            conditions.append(CourseQuestionBankItem.status != "archived")
+        if question_type:
+            conditions.append(CourseQuestionBankItem.question_type == question_type)
+        if quiz_id:
+            conditions.append(CourseQuestionBankItem.quiz_id == quiz_id)
+        if q:
+            like = f"%{q}%"
+            conditions.append(
+                or_(
+                    CourseQuestionBankItem.question_json.ilike(like),
+                    CourseQuestionBankItem.review_note.ilike(like),
+                    Quiz.title.ilike(like),
+                    CourseQuiz.title.ilike(like),
+                )
+            )
         rows = (
             await self.db.execute(
                 select(CourseQuestionBankItem, Quiz.title, CourseQuiz.title)
                 .join(Quiz, Quiz.id == CourseQuestionBankItem.quiz_id)
                 .join(CourseQuiz, CourseQuiz.id == CourseQuestionBankItem.course_quiz_id)
-                .where(
-                    and_(
-                        CourseQuestionBankItem.course_id == course_id,
-                        CourseQuestionBankItem.status != "archived",
-                    )
-                )
+                .where(and_(*conditions))
                 .order_by(
                     desc(CourseQuestionBankItem.updated_at), CourseQuestionBankItem.question_index
                 )
@@ -802,6 +1032,44 @@ class CoursesService:
             item.reviewed_at = None
         await self.db.commit()
         return self._question_bank_out(item, quiz_title, course_quiz_title)
+
+    async def update_question_reviews(
+        self,
+        user_id: str,
+        course_id: str,
+        body: CourseQuestionReviewBatchUpdate,
+    ) -> dict[str, Any]:
+        await self.require_role(user_id, course_id, {"instructor", "ta"})
+        rows = (
+            await self.db.execute(
+                select(CourseQuestionBankItem).where(
+                    and_(
+                        CourseQuestionBankItem.course_id == course_id,
+                        CourseQuestionBankItem.id.in_(body.item_ids),
+                    )
+                )
+            )
+        ).scalars().all()
+        by_id = {row.id: row for row in rows}
+        missing = [item_id for item_id in body.item_ids if item_id not in by_id]
+        now = now_iso()
+        for item in rows:
+            item.status = body.status
+            item.review_note = body.review_note
+            item.updated_at = now
+            if body.status in {"approved", "rejected"}:
+                item.reviewed_by = user_id
+                item.reviewed_at = now
+            elif body.status == "draft":
+                item.reviewed_by = None
+                item.reviewed_at = None
+        await self.db.commit()
+        return {
+            "ok": True,
+            "updated": len(rows),
+            "missing": missing,
+            "status": body.status,
+        }
 
     async def dashboard(self, user_id: str) -> dict[str, Any]:
         course_ids = (
@@ -864,7 +1132,7 @@ class CoursesService:
             ],
             "help_requests": [
                 {
-                    **await self._help_request_out(help_request, username),
+                    **await self._help_request_out(help_request, username, user_id),
                     "course_title": course_title,
                 }
                 for help_request, course_title, username in help_rows
@@ -1200,8 +1468,15 @@ class CoursesService:
         self,
         help_request: CourseHelpRequest,
         username: str | None,
+        viewer_id: str | None = None,
     ) -> dict[str, Any]:
         session_messages = await self._help_request_session_messages(help_request)
+        assignee_username = None
+        if help_request.assigned_to:
+            assignee_username = (
+                await self.db.execute(select(User.username).where(User.id == help_request.assigned_to))
+            ).scalar_one_or_none()
+        events = await self._help_request_events(help_request, viewer_id)
         return {
             "id": help_request.id,
             "course_id": help_request.course_id,
@@ -1209,15 +1484,63 @@ class CoursesService:
             "username": username,
             "session_id": help_request.session_id,
             "assigned_to": help_request.assigned_to,
+            "assigned_to_username": assignee_username,
             "title": help_request.title,
             "content": help_request.content,
             "status": help_request.status,
             "priority": help_request.priority,
             "resolved_at": help_request.resolved_at,
+            "resolution_summary": help_request.resolution_summary,
             "created_at": help_request.created_at,
             "updated_at": help_request.updated_at,
             "session_messages": session_messages,
+            "events": events,
         }
+
+    async def _help_request_events(
+        self,
+        help_request: CourseHelpRequest,
+        viewer_id: str | None,
+    ) -> list[dict[str, Any]]:
+        can_view_internal = False
+        if viewer_id:
+            member = (
+                await self.db.execute(
+                    select(CourseMember).where(
+                        and_(
+                            CourseMember.course_id == help_request.course_id,
+                            CourseMember.user_id == viewer_id,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            can_view_internal = bool(member and member.role in {"instructor", "ta"})
+        conditions = [CourseHelpRequestEvent.request_id == help_request.id]
+        if not can_view_internal:
+            conditions.append(CourseHelpRequestEvent.internal == 0)
+        rows = (
+            await self.db.execute(
+                select(CourseHelpRequestEvent, User.username)
+                .outerjoin(User, User.id == CourseHelpRequestEvent.actor_id)
+                .where(and_(*conditions))
+                .order_by(CourseHelpRequestEvent.created_at)
+            )
+        ).all()
+        return [
+            {
+                "id": event.id,
+                "actor_id": event.actor_id,
+                "actor_username": actor_username,
+                "event_type": event.event_type,
+                "message": event.message,
+                "internal": bool(event.internal),
+                "from_status": event.from_status,
+                "to_status": event.to_status,
+                "assigned_to": event.assigned_to,
+                "created_at": event.created_at,
+            }
+            for event, actor_username in rows
+        ]
 
     async def _help_request_session_messages(
         self,

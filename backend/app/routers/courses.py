@@ -13,10 +13,14 @@ from app.schemas import (
     CourseCreate,
     CourseDocumentRequest,
     CourseHelpRequestCreate,
+    CourseHelpRequestCommentCreate,
     CourseHelpRequestUpdate,
     CourseJoinRequest,
+    CourseMemberBatchUpdate,
     CourseMemberRoleUpdate,
+    CourseQuestionReviewBatchUpdate,
     CourseQuestionReviewUpdate,
+    CourseQuizBatchUpdateRequest,
     CourseQuizPublishRequest,
     CourseUpdate,
 )
@@ -190,6 +194,25 @@ async def remove_member(
     return {"ok": True}
 
 
+@router.post("/{course_id}/members/batch")
+async def batch_course_members(
+    course_id: str,
+    body: CourseMemberBatchUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await CoursesService(db).batch_members(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.members_batch",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:members",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return result
+
+
 @router.post("/{course_id}/leave")
 async def leave_course(
     course_id: str,
@@ -246,6 +269,39 @@ async def course_quizzes(
     return await LearningService(db).course_quizzes(current_user.id, course_id)
 
 
+@router.put("/{course_id}/quizzes/batch")
+async def update_course_quizzes_batch(
+    course_id: str,
+    body: CourseQuizBatchUpdateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    items = []
+    for course_quiz_id in body.course_quiz_ids:
+        items.append(
+            await LearningService(db).update_course_quiz(
+                current_user.id,
+                course_id,
+                course_quiz_id,
+                title=None,
+                due_at=body.due_at,
+                available_from=body.available_from,
+                answer_visible_at=body.answer_visible_at,
+                attempt_limit=body.attempt_limit,
+                status_value=body.status,
+            )
+        )
+    await AuditService(db).log(
+        "course.quizzes_batch_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:quizzes",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return {"ok": True, "updated": len(items), "items": items}
+
+
 @router.put("/{course_id}/quizzes/{course_quiz_id}")
 async def update_course_quiz(
     course_id: str,
@@ -279,10 +335,42 @@ async def update_course_quiz(
 @router.get("/{course_id}/question-bank")
 async def course_question_bank(
     course_id: str,
+    status_filter: str | None = None,
+    question_type: str | None = None,
+    quiz_id: str | None = None,
+    q: str | None = None,
+    include_archived: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await CoursesService(db).question_bank(current_user.id, course_id)
+    return await CoursesService(db).question_bank(
+        current_user.id,
+        course_id,
+        status_filter=status_filter,
+        question_type=question_type,
+        quiz_id=quiz_id,
+        q=q,
+        include_archived=include_archived,
+    )
+
+
+@router.put("/{course_id}/question-bank/batch")
+async def update_course_question_reviews_batch(
+    course_id: str,
+    body: CourseQuestionReviewBatchUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await CoursesService(db).update_question_reviews(current_user.id, course_id, body)
+    await AuditService(db).log(
+        "course.question_reviews_batch_update",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:question_bank",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return result
 
 
 @router.put("/{course_id}/question-bank/{item_id}")
@@ -393,10 +481,21 @@ async def mark_course_announcement_read(
 @router.get("/{course_id}/help-requests")
 async def course_help_requests(
     course_id: str,
+    status_filter: str | None = None,
+    priority: str | None = None,
+    assigned_to: str | None = None,
+    q: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await CoursesService(db).help_requests(current_user.id, course_id)
+    return await CoursesService(db).help_requests(
+        current_user.id,
+        course_id,
+        status_filter=status_filter,
+        priority=priority,
+        assigned_to=assigned_to,
+        q=q,
+    )
 
 
 @router.post("/{course_id}/help-requests")
@@ -412,6 +511,32 @@ async def create_course_help_request(
         "course.help_request_create",
         user_id=current_user.id,
         resource=f"course:{course_id}:help_request:{help_request['id']}",
+        request=request,
+        detail=body.model_dump(exclude_none=True),
+    )
+    return help_request
+
+
+@router.post("/{course_id}/help-requests/{request_id}/comments")
+async def create_course_help_request_comment(
+    course_id: str,
+    request_id: str,
+    body: CourseHelpRequestCommentCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    help_request = await CoursesService(db).create_help_request_comment(
+        current_user.id,
+        course_id,
+        request_id,
+        body.message,
+        internal=body.internal,
+    )
+    await AuditService(db).log(
+        "course.help_request_comment",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:help_request:{request_id}",
         request=request,
         detail=body.model_dump(exclude_none=True),
     )
@@ -567,3 +692,23 @@ async def remove_course_document(
         request=request,
     )
     return {"ok": True}
+
+
+@router.post("/{course_id}/documents/batch-remove")
+async def remove_course_documents_batch(
+    course_id: str,
+    body: CourseDocumentRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    doc_ids = body.doc_ids or ([body.doc_id] if body.doc_id else [])
+    result = await CoursesService(db).remove_documents(current_user.id, course_id, doc_ids)
+    await AuditService(db).log(
+        "course.documents_batch_remove",
+        user_id=current_user.id,
+        resource=f"course:{course_id}:documents:{','.join(doc_ids)}",
+        request=request,
+        detail={"doc_ids": doc_ids},
+    )
+    return result
