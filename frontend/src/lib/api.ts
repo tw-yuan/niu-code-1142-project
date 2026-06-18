@@ -304,6 +304,7 @@ export interface CourseAssignmentItem {
     source: string | null;
     is_late: boolean;
     score: number | null;
+    response?: string | null;
   };
 }
 

@@ -16,6 +16,7 @@ import {
   Network,
   NotebookPen,
   Plus,
+  Pencil,
   Trash2,
   Users,
 } from "lucide-react";
@@ -45,6 +46,16 @@ type CourseQuizSettingsForm = {
   due_at: string;
   answer_visible_at: string;
   attempt_limit: string;
+};
+
+type AssignmentFormState = {
+  title: string;
+  description: string;
+  kind: CourseAssignmentItem["kind"];
+  doc_id: string;
+  quiz_id: string;
+  due_at: string;
+  status: "published" | "draft" | "archived";
 };
 
 type CourseTab =
@@ -124,6 +135,9 @@ export function CoursesPage() {
   const [helpResolutionDrafts, setHelpResolutionDrafts] = useState<
     Record<string, string>
   >({});
+  const [assignmentResponseDrafts, setAssignmentResponseDrafts] = useState<
+    Record<string, string>
+  >({});
   const [helpFilters, setHelpFilters] = useState({
     status: "",
     priority: "",
@@ -142,6 +156,23 @@ export function CoursesPage() {
     quiz_id: "",
     q: "",
   });
+  const [assignmentFilters, setAssignmentFilters] = useState({
+    q: "",
+    kind: "",
+    status: "",
+    completion: "",
+  });
+  const [editingAssignmentId, setEditingAssignmentId] = useState("");
+  const [assignmentEditForm, setAssignmentEditForm] =
+    useState<AssignmentFormState>({
+      title: "",
+      description: "",
+      kind: "custom",
+      doc_id: "",
+      quiz_id: "",
+      due_at: "",
+      status: "published",
+    });
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
@@ -214,6 +245,37 @@ export function CoursesPage() {
   const selectedEditableCourseQuizIds = selectedCourseQuizIds.filter((id) =>
     editableCourseQuizIds.includes(id),
   );
+  const filteredAssignments = useMemo(() => {
+    const q = assignmentFilters.q.trim().toLowerCase();
+    return assignments.filter((assignment) => {
+      if (assignmentFilters.kind && assignment.kind !== assignmentFilters.kind) {
+        return false;
+      }
+      if (
+        assignmentFilters.status &&
+        assignment.status !== assignmentFilters.status
+      ) {
+        return false;
+      }
+      if (
+        assignmentFilters.completion &&
+        assignment.completion.status !== assignmentFilters.completion
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return [
+        assignment.title,
+        assignment.description,
+        assignment.doc_filename,
+        assignment.quiz_title,
+        assignmentKindLabel(assignment.kind),
+        assignmentCompletionLabel(assignment.completion.status),
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [assignmentFilters, assignments]);
   const filteredHelpRequests = useMemo(() => {
     const q = helpFilters.q.trim().toLowerCase();
     return helpRequests.filter((request) => {
@@ -446,6 +508,7 @@ export function CoursesPage() {
       quiz_id: "",
       q: "",
     });
+    setEditingAssignmentId("");
     const visibleTab = normalizeCourseTab(
       nextTab ?? (id === selected?.id ? activeTab : "overview"),
       course,
@@ -723,6 +786,68 @@ export function CoursesPage() {
     }
   }
 
+  function startEditingAssignment(assignment: CourseAssignmentItem) {
+    setEditingAssignmentId(assignment.id);
+    setAssignmentEditForm({
+      title: assignment.title,
+      description: assignment.description ?? "",
+      kind: assignment.kind,
+      doc_id: assignment.doc_id ?? "",
+      quiz_id: assignment.quiz_id ?? "",
+      due_at: dateTimeInputValue(assignment.due_at),
+      status:
+        assignment.status === "draft" || assignment.status === "archived"
+          ? assignment.status
+          : "published",
+    });
+  }
+
+  function cancelEditingAssignment() {
+    setEditingAssignmentId("");
+    setAssignmentEditForm({
+      title: "",
+      description: "",
+      kind: "custom",
+      doc_id: "",
+      quiz_id: "",
+      due_at: "",
+      status: "published",
+    });
+  }
+
+  async function saveAssignment(event: FormEvent, assignment: CourseAssignmentItem) {
+    event.preventDefault();
+    if (!selected || !canManage || !assignmentEditForm.title.trim()) return;
+    const needsDoc = assignmentNeedsDocument(assignmentEditForm.kind);
+    if (needsDoc && !assignmentEditForm.doc_id) return;
+    if (assignmentEditForm.kind === "quiz" && !assignmentEditForm.quiz_id) return;
+    setBusyAction(`save-assignment-${assignment.id}`);
+    try {
+      await apiFetch<CourseAssignmentItem>(
+        `/courses/${selected.id}/assignments/${assignment.id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            title: assignmentEditForm.title.trim(),
+            description: assignmentEditForm.description.trim() || null,
+            kind: assignmentEditForm.kind,
+            doc_id: needsDoc ? assignmentEditForm.doc_id : null,
+            quiz_id:
+              assignmentEditForm.kind === "quiz"
+                ? assignmentEditForm.quiz_id
+                : null,
+            due_at: normalizeDateTimeInput(assignmentEditForm.due_at),
+            status: assignmentEditForm.status,
+          }),
+        },
+      );
+      cancelEditingAssignment();
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function submitAssignment(assignment: CourseAssignmentItem) {
     if (!selected) return;
     setBusyAction(`submit-assignment-${assignment.id}`);
@@ -731,9 +856,15 @@ export function CoursesPage() {
         `/courses/${selected.id}/assignments/${assignment.id}/submit`,
         {
           method: "POST",
-          body: JSON.stringify({ response: "" }),
+          body: JSON.stringify({
+            response: assignmentResponseDrafts[assignment.id]?.trim() || null,
+          }),
         },
       );
+      setAssignmentResponseDrafts((current) => ({
+        ...current,
+        [assignment.id]: "",
+      }));
       await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
@@ -2274,9 +2405,78 @@ export function CoursesPage() {
               )}
               {activeTab === "tasks" && (
                 <section className="mx-5 mb-5 mt-5 rounded-lg border border-zinc-200">
-                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <ListChecks size={16} className="text-zinc-500" />
-                    課程任務
+                  <div className="border-b border-zinc-200 px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <ListChecks size={16} className="text-zinc-500" />
+                        課程任務
+                        <span className="text-xs font-normal text-zinc-500">
+                          顯示 {filteredAssignments.length} /{" "}
+                          {assignments.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <input
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentFilters.q}
+                        onChange={(event) =>
+                          setAssignmentFilters((current) => ({
+                            ...current,
+                            q: event.target.value,
+                          }))
+                        }
+                        placeholder="搜尋任務、文件、測驗"
+                      />
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentFilters.kind}
+                        onChange={(event) =>
+                          setAssignmentFilters((current) => ({
+                            ...current,
+                            kind: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部類型</option>
+                        <option value="custom">自訂</option>
+                        <option value="quiz">測驗</option>
+                        <option value="read_summary">閱讀摘要</option>
+                        <option value="note">筆記</option>
+                        <option value="flashcards">閃卡</option>
+                      </select>
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentFilters.status}
+                        onChange={(event) =>
+                          setAssignmentFilters((current) => ({
+                            ...current,
+                            status: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部發布狀態</option>
+                        <option value="published">已發布</option>
+                        {canManage && <option value="draft">草稿</option>}
+                        {canManage && <option value="archived">封存</option>}
+                      </select>
+                      <select
+                        className="rounded-md border border-zinc-200 px-3 py-2 text-sm"
+                        value={assignmentFilters.completion}
+                        onChange={(event) =>
+                          setAssignmentFilters((current) => ({
+                            ...current,
+                            completion: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">全部完成狀態</option>
+                        <option value="pending">待完成</option>
+                        <option value="overdue">已逾期</option>
+                        <option value="completed">已完成</option>
+                        <option value="late">逾期完成</option>
+                      </select>
+                    </div>
                   </div>
                   {canManage && (
                     <form
@@ -2419,109 +2619,307 @@ export function CoursesPage() {
                     </form>
                   )}
                   <div className="divide-y divide-zinc-100">
-                    {assignments.map((assignment) => {
+                    {filteredAssignments.map((assignment) => {
                       const action = assignmentAction(assignment);
                       return (
                         <div
                           key={assignment.id}
-                          className="flex flex-col gap-3 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between"
+                          className="px-3 py-3 text-sm"
                         >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-medium">
-                                {assignment.title}
-                              </span>
-                              <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
-                                {assignmentKindLabel(assignment.kind)}
-                              </span>
-                              <span
-                                className={assignmentCompletionClass(
-                                  assignment.completion.status,
-                                )}
-                              >
-                                {assignmentCompletionLabel(
-                                  assignment.completion.status,
-                                )}
-                              </span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                              {assignment.due_at && (
-                                <span className="inline-flex items-center gap-1">
-                                  <CalendarClock size={13} />
-                                  {formatDateTime(assignment.due_at)}
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="truncate font-medium">
+                                  {assignment.title}
                                 </span>
-                              )}
-                              {assignment.doc_filename && (
-                                <span>{assignment.doc_filename}</span>
-                              )}
-                              {assignment.quiz_title && (
-                                <span>{assignment.quiz_title}</span>
-                              )}
-                              {assignment.completion.score !== null && (
-                                <span>
-                                  分數{" "}
-                                  {Math.round(
-                                    Number(assignment.completion.score) * 100,
+                                <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">
+                                  {assignmentKindLabel(assignment.kind)}
+                                </span>
+                                <span
+                                  className={assignmentStatusClass(
+                                    assignment.status,
                                   )}
-                                  %
+                                >
+                                  {assignmentStatusLabel(assignment.status)}
                                 </span>
+                                <span
+                                  className={assignmentCompletionClass(
+                                    assignment.completion.status,
+                                  )}
+                                >
+                                  {assignmentCompletionLabel(
+                                    assignment.completion.status,
+                                  )}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                {assignment.due_at && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <CalendarClock size={13} />
+                                    {formatDateTime(assignment.due_at)}
+                                  </span>
+                                )}
+                                {assignment.doc_filename && (
+                                  <span>{assignment.doc_filename}</span>
+                                )}
+                                {assignment.quiz_title && (
+                                  <span>{assignment.quiz_title}</span>
+                                )}
+                                {assignment.completion.score !== null && (
+                                  <span>
+                                    分數{" "}
+                                    {Math.round(
+                                      Number(assignment.completion.score) * 100,
+                                    )}
+                                    %
+                                  </span>
+                                )}
+                              </div>
+                              {assignment.description && (
+                                <div className="mt-2 text-xs leading-5 text-zinc-600">
+                                  {assignment.description}
+                                </div>
+                              )}
+                              {assignment.kind === "custom" && (
+                                <div className="mt-2 max-w-3xl">
+                                  <textarea
+                                    className="min-h-16 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm disabled:bg-zinc-50"
+                                    value={
+                                      assignmentResponseDrafts[assignment.id] ??
+                                      ""
+                                    }
+                                    onChange={(event) =>
+                                      setAssignmentResponseDrafts((current) => ({
+                                        ...current,
+                                        [assignment.id]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="填寫完成內容、連結或備註"
+                                    disabled={
+                                      assignment.completion.status ===
+                                        "completed" ||
+                                      assignment.completion.status === "late"
+                                    }
+                                  />
+                                  {assignment.completion.response && (
+                                    <div className="mt-2 rounded-md bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600">
+                                      已提交：{assignment.completion.response}
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
-                            {assignment.description && (
-                              <div className="mt-2 text-xs leading-5 text-zinc-600">
-                                {assignment.description}
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                              {assignment.kind === "custom" ? (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                                  onClick={() => submitAssignment(assignment)}
+                                  loading={
+                                    busyAction ===
+                                    `submit-assignment-${assignment.id}`
+                                  }
+                                  loadingText="完成中"
+                                  icon={<CheckCircle2 size={14} />}
+                                  disabled={
+                                    assignment.completion.status ===
+                                      "completed" ||
+                                    assignment.completion.status === "late"
+                                  }
+                                >
+                                  標記完成
+                                </LoadingButton>
+                              ) : action ? (
+                                <Link
+                                  className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+                                  to={action.href}
+                                >
+                                  <ListChecks size={14} />
+                                  {action.label}
+                                </Link>
+                              ) : null}
+                              {canManage && (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50"
+                                  onClick={() => startEditingAssignment(assignment)}
+                                >
+                                  <Pencil size={14} />
+                                  設定
+                                </button>
+                              )}
+                              {canManage && (
+                                <LoadingButton
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                                  onClick={() => deleteAssignment(assignment)}
+                                  loading={
+                                    busyAction ===
+                                    `delete-assignment-${assignment.id}`
+                                  }
+                                  loadingText="刪除中"
+                                  icon={<Trash2 size={14} />}
+                                >
+                                  刪除
+                                </LoadingButton>
+                              )}
+                            </div>
+                          </div>
+                          {canManage && editingAssignmentId === assignment.id && (
+                            <form
+                              className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 lg:grid-cols-[1.4fr_150px_1fr_170px_150px]"
+                              onSubmit={(event) => saveAssignment(event, assignment)}
+                            >
+                              <input
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                value={assignmentEditForm.title}
+                                onChange={(event) =>
+                                  setAssignmentEditForm((current) => ({
+                                    ...current,
+                                    title: event.target.value,
+                                  }))
+                                }
+                                placeholder="任務名稱"
+                              />
+                              <select
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                value={assignmentEditForm.kind}
+                                onChange={(event) => {
+                                  const nextKind = event.target
+                                    .value as CourseAssignmentItem["kind"];
+                                  setAssignmentEditForm((current) => ({
+                                    ...current,
+                                    kind: nextKind,
+                                    doc_id: assignmentNeedsDocument(nextKind)
+                                      ? current.doc_id
+                                      : "",
+                                    quiz_id:
+                                      nextKind === "quiz"
+                                        ? current.quiz_id
+                                        : "",
+                                  }));
+                                }}
+                              >
+                                <option value="custom">自訂</option>
+                                <option value="quiz">測驗</option>
+                                <option value="read_summary">閱讀摘要</option>
+                                <option value="note">筆記</option>
+                                <option value="flashcards">閃卡</option>
+                              </select>
+                              {assignmentEditForm.kind === "quiz" ? (
+                                <select
+                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                  value={assignmentEditForm.quiz_id}
+                                  onChange={(event) =>
+                                    setAssignmentEditForm((current) => ({
+                                      ...current,
+                                      quiz_id: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">選擇測驗</option>
+                                  {courseQuizzes.map((quiz) => (
+                                    <option key={quiz.id} value={quiz.id}>
+                                      {quiz.course_publication?.title ??
+                                        quiz.title}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <select
+                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:bg-zinc-100"
+                                  value={assignmentEditForm.doc_id}
+                                  onChange={(event) =>
+                                    setAssignmentEditForm((current) => ({
+                                      ...current,
+                                      doc_id: event.target.value,
+                                    }))
+                                  }
+                                  disabled={
+                                    !assignmentNeedsDocument(
+                                      assignmentEditForm.kind,
+                                    )
+                                  }
+                                >
+                                  <option value="">
+                                    {assignmentNeedsDocument(
+                                      assignmentEditForm.kind,
+                                    )
+                                      ? "選擇文件"
+                                      : "不需文件"}
+                                  </option>
+                                  {(selected.documents ?? []).map((doc) => (
+                                    <option key={doc.id} value={doc.id}>
+                                      {doc.filename}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <input
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                type="datetime-local"
+                                value={assignmentEditForm.due_at}
+                                onChange={(event) =>
+                                  setAssignmentEditForm((current) => ({
+                                    ...current,
+                                    due_at: event.target.value,
+                                  }))
+                                }
+                              />
+                              <select
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                value={assignmentEditForm.status}
+                                onChange={(event) =>
+                                  setAssignmentEditForm((current) => ({
+                                    ...current,
+                                    status: event.target
+                                      .value as AssignmentFormState["status"],
+                                  }))
+                                }
+                              >
+                                <option value="published">已發布</option>
+                                <option value="draft">草稿</option>
+                                <option value="archived">封存</option>
+                              </select>
+                              <textarea
+                                className="min-h-16 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm lg:col-span-4"
+                                value={assignmentEditForm.description}
+                                onChange={(event) =>
+                                  setAssignmentEditForm((current) => ({
+                                    ...current,
+                                    description: event.target.value,
+                                  }))
+                                }
+                                placeholder="任務說明"
+                              />
+                              <div className="flex flex-wrap items-start justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-zinc-200 px-3 py-2 text-xs text-zinc-700 hover:bg-white"
+                                  onClick={cancelEditingAssignment}
+                                >
+                                  取消
+                                </button>
+                                <LoadingButton
+                                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:bg-zinc-300"
+                                  loading={
+                                    busyAction ===
+                                    `save-assignment-${assignment.id}`
+                                  }
+                                  loadingText="儲存中"
+                                  icon={<CheckCircle2 size={14} />}
+                                >
+                                  儲存
+                                </LoadingButton>
                               </div>
-                            )}
-                          </div>
-                          <div className="flex shrink-0 flex-wrap items-center gap-2">
-                            {assignment.kind === "custom" ? (
-                              <LoadingButton
-                                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                                onClick={() => submitAssignment(assignment)}
-                                loading={
-                                  busyAction ===
-                                  `submit-assignment-${assignment.id}`
-                                }
-                                loadingText="完成中"
-                                icon={<CheckCircle2 size={14} />}
-                                disabled={
-                                  assignment.completion.status ===
-                                    "completed" ||
-                                  assignment.completion.status === "late"
-                                }
-                              >
-                                標記完成
-                              </LoadingButton>
-                            ) : action ? (
-                              <Link
-                                className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-                                to={action.href}
-                              >
-                                <ListChecks size={14} />
-                                {action.label}
-                              </Link>
-                            ) : null}
-                            {canManage && (
-                              <LoadingButton
-                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
-                                onClick={() => deleteAssignment(assignment)}
-                                loading={
-                                  busyAction ===
-                                  `delete-assignment-${assignment.id}`
-                                }
-                                loadingText="刪除中"
-                                icon={<Trash2 size={14} />}
-                              >
-                                刪除
-                              </LoadingButton>
-                            )}
-                          </div>
+                            </form>
+                          )}
                         </div>
                       );
                     })}
-                    {assignments.length === 0 && (
+                    {filteredAssignments.length === 0 && (
                       <div className="px-3 py-8 text-sm text-zinc-500">
-                        目前沒有課程任務
+                        {assignments.length === 0
+                          ? "目前沒有課程任務"
+                          : "沒有符合篩選的任務"}
                       </div>
                     )}
                   </div>
@@ -3596,6 +3994,19 @@ function assignmentKindLabel(kind: string) {
   if (kind === "note") return "筆記";
   if (kind === "flashcards") return "閃卡";
   return "自訂";
+}
+
+function assignmentStatusLabel(status: string) {
+  if (status === "draft") return "草稿";
+  if (status === "archived") return "封存";
+  return "已發布";
+}
+
+function assignmentStatusClass(status: string) {
+  const base = "rounded-md px-2 py-0.5 text-xs";
+  if (status === "draft") return `${base} bg-amber-50 text-amber-700`;
+  if (status === "archived") return `${base} bg-zinc-100 text-zinc-500`;
+  return `${base} bg-indigo-50 text-indigo-700`;
 }
 
 function assignmentCompletionLabel(status: string) {

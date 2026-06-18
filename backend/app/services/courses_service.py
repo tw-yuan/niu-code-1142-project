@@ -1672,6 +1672,7 @@ class CoursesService:
     ) -> dict[str, Any]:
         completed_at: str | None = None
         source: str | None = None
+        response: str | None = None
         score: float | None = None
         manual = (
             await self.db.execute(
@@ -1689,6 +1690,7 @@ class CoursesService:
         if manual:
             completed_at = manual.submitted_at
             source = "manual"
+            response = manual.response
             score = manual.score
         if assignment.kind == "quiz" and assignment.quiz_id:
             attempt = (
@@ -1767,6 +1769,7 @@ class CoursesService:
             "source": source,
             "is_late": is_late,
             "score": score,
+            "response": response,
         }
 
     async def _out_for_member(
