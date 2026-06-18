@@ -35,6 +35,8 @@ import {
 } from "../lib/api";
 import { useAuthStore } from "../store/auth";
 
+type CopyStatus = "idle" | "copying" | "copied" | "failed";
+
 type CourseTab =
   | "overview"
   | "materials"
@@ -92,6 +94,7 @@ export function CoursesPage() {
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -200,7 +203,7 @@ export function CoursesPage() {
     );
     const params = new URLSearchParams(location.search);
     const requestedCourseId = params.get("course");
-    const requestedTab = parseCourseTab(params.get("tab")) ?? "overview";
+    const requestedTab = parseCourseTab(params.get("tab"));
     const targetCourseId =
       requestedCourseId || (!selected ? nextCourses[0]?.id : null);
     if (targetCourseId) await openCourse(targetCourseId, requestedTab, false);
@@ -208,7 +211,7 @@ export function CoursesPage() {
 
   async function openCourse(
     id: string,
-    nextTab: CourseTab = "overview",
+    nextTab?: CourseTab | null,
     syncUrl = true,
   ) {
     const course = await apiFetch<CourseItem>(`/courses/${id}`);
@@ -262,7 +265,10 @@ export function CoursesPage() {
     setQuizSummary(nextProgress.quiz_summary);
     setSelectedMaterialIds([]);
     setAddDocumentIds([]);
-    const visibleTab = normalizeCourseTab(nextTab, course);
+    const visibleTab = normalizeCourseTab(
+      nextTab ?? (id === selected?.id ? activeTab : "overview"),
+      course,
+    );
     setActiveTab(visibleTab);
     if (syncUrl) navigate(coursePath(id, visibleTab));
   }
@@ -276,7 +282,7 @@ export function CoursesPage() {
     const requestedCourseId = params.get("course");
     const requestedTab = parseCourseTab(params.get("tab"));
     if (requestedCourseId && requestedCourseId !== selected?.id) {
-      openCourse(requestedCourseId, requestedTab ?? "overview", false).catch(
+      openCourse(requestedCourseId, requestedTab, false).catch(
         () => undefined,
       );
       return;
@@ -285,6 +291,16 @@ export function CoursesPage() {
       setActiveTab(normalizeCourseTab(requestedTab, selected));
     }
   }, [location.search, selected?.id]);
+
+  useEffect(() => {
+    setCopyStatus("idle");
+  }, [selected?.id, selected?.join_code]);
+
+  useEffect(() => {
+    if (!["copied", "failed"].includes(copyStatus)) return;
+    const timer = window.setTimeout(() => setCopyStatus("idle"), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
 
   function setCourseTab(tab: CourseTab) {
     const nextTab = selected ? normalizeCourseTab(tab, selected) : tab;
@@ -303,7 +319,7 @@ export function CoursesPage() {
       });
       setTitle("");
       await load();
-      await openCourse(course.id);
+      await openCourse(course.id, "overview");
     } finally {
       setBusyAction("");
     }
@@ -320,7 +336,7 @@ export function CoursesPage() {
       });
       setJoinCode("");
       await load();
-      await openCourse(course.id);
+      await openCourse(course.id, "overview");
     } finally {
       setBusyAction("");
     }
@@ -352,7 +368,7 @@ export function CoursesPage() {
         }),
       });
       await load();
-      await openCourse(updated.id);
+      await openCourse(updated.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -367,9 +383,20 @@ export function CoursesPage() {
         { method: "POST" },
       );
       await load();
-      await openCourse(updated.id);
+      await openCourse(updated.id, activeTab);
     } finally {
       setBusyAction("");
+    }
+  }
+
+  async function copyJoinCode() {
+    if (!selected?.join_code || copyStatus === "copying") return;
+    setCopyStatus("copying");
+    try {
+      await navigator.clipboard.writeText(selected.join_code);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
     }
   }
 
@@ -755,7 +782,7 @@ export function CoursesPage() {
                     ? "bg-indigo-50 text-indigo-700"
                     : "text-zinc-700 hover:bg-zinc-50",
                 ].join(" ")}
-                onClick={() => openCourse(course.id)}
+                onClick={() => openCourse(course.id, "overview")}
               >
                 <BookOpen size={16} className="text-zinc-500" />
                 <span className="min-w-0 truncate">{course.title}</span>
@@ -807,17 +834,25 @@ export function CoursesPage() {
                     )}
                     {selected.join_code && (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <button
+                        <LoadingButton
                           className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700"
-                          onClick={() =>
-                            navigator.clipboard.writeText(
-                              selected.join_code ?? "",
+                          onClick={copyJoinCode}
+                          loading={copyStatus === "copying"}
+                          loadingText="複製中"
+                          icon={
+                            copyStatus === "copied" ? (
+                              <CheckCircle2 size={14} />
+                            ) : (
+                              <Copy size={14} />
                             )
                           }
                         >
-                          <Copy size={14} />
-                          {selected.join_code}
-                        </button>
+                          {copyStatus === "copied"
+                            ? "已複製"
+                            : copyStatus === "failed"
+                              ? "複製失敗"
+                              : selected.join_code}
+                        </LoadingButton>
                         {isOwner && (
                           <LoadingButton
                             className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"

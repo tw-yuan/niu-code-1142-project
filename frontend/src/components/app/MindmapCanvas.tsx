@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -9,6 +9,7 @@ import {
   Layers,
   LocateFixed,
   Maximize2,
+  Minimize2,
   Minus,
   Plus,
   Search,
@@ -59,6 +60,8 @@ export function MindmapCanvas({
   const [selectedId, setSelectedId] = useState("root");
   const [query, setQuery] = useState("");
   const [showOutline, setShowOutline] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const searchMatches = useMemo(
     () => findMatches(parsedTree, query),
@@ -78,6 +81,28 @@ export function MindmapCanvas({
         : null,
     [parsedTree, selectedId],
   );
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(fullscreenElement() === containerRef.current);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && isFullscreen && !fullscreenElement()) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFullscreen]);
 
   if (!parsedTree || !layout || layout.nodes.length === 0) {
     return (
@@ -102,13 +127,40 @@ export function MindmapCanvas({
     });
   }
 
+  async function toggleFullscreen() {
+    const container = containerRef.current;
+    if (!container) return;
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      await exitFullscreen().catch(() => undefined);
+      return;
+    }
+    try {
+      await requestFullscreen(container);
+    } catch {
+      setIsFullscreen(true);
+    }
+    setIsFullscreen(true);
+  }
+
   const canExpandSelected =
     Boolean(artifactId && canAiExpand && selected && selected.id !== "root") &&
     (selected?.expandable ?? true) &&
     (selected?.depth ?? 0) < 5;
+  const paneHeightClass = isFullscreen
+    ? "h-full min-h-0"
+    : "h-[min(70vh,720px)] min-h-[420px]";
 
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+    <div
+      ref={containerRef}
+      className={[
+        "overflow-hidden bg-white",
+        isFullscreen
+          ? "fixed inset-0 z-50 flex h-screen flex-col rounded-none border-0"
+          : "rounded-lg border border-zinc-200",
+      ].join(" ")}
+    >
       <div className="flex flex-col gap-2 border-b border-zinc-200 bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <GitBranch size={17} className="shrink-0 text-indigo-600" />
@@ -147,19 +199,25 @@ export function MindmapCanvas({
             <ChevronsUpDown size={16} />
           </IconButton>
           <IconButton
-            label="縮小"
+            label="縮小視圖"
             onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - 0.1))}
           >
             <Minus size={16} />
           </IconButton>
-          <IconButton label="重設縮放" onClick={() => setZoom(1)}>
-            <Maximize2 size={16} />
+          <IconButton label="重設視圖" onClick={() => setZoom(1)}>
+            <LocateFixed size={16} />
           </IconButton>
           <IconButton
-            label="放大"
+            label="放大視圖"
             onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + 0.1))}
           >
             <Plus size={16} />
+          </IconButton>
+          <IconButton
+            label={isFullscreen ? "離開全螢幕" : "全螢幕"}
+            onClick={toggleFullscreen}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </IconButton>
           <button
             className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm text-zinc-700 hover:bg-zinc-50 lg:hidden"
@@ -177,14 +235,14 @@ export function MindmapCanvas({
         </div>
       )}
 
-      <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div
           className={[
             showOutline ? "hidden lg:block" : "block",
             "min-w-0 bg-zinc-50",
           ].join(" ")}
         >
-          <div className="h-[min(70vh,720px)] min-h-[420px] overflow-auto p-4">
+          <div className={`${paneHeightClass} overflow-auto p-4`}>
             <svg
               width={layout.width * zoom}
               height={layout.height * zoom}
@@ -327,7 +385,7 @@ export function MindmapCanvas({
             "border-l border-zinc-200 bg-white",
           ].join(" ")}
         >
-          <div className="h-[min(70vh,720px)] min-h-[420px] overflow-auto">
+          <div className={`${paneHeightClass} overflow-auto`}>
             <div className="border-b border-zinc-200 p-4">
               <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 目前節點
@@ -396,6 +454,44 @@ export function MindmapCanvas({
       </div>
     </div>
   );
+}
+
+type WebkitFullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type WebkitFullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function fullscreenElement() {
+  const doc = document as WebkitFullscreenDocument;
+  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+}
+
+async function requestFullscreen(element: HTMLElement) {
+  if (element.requestFullscreen) {
+    await element.requestFullscreen();
+    return;
+  }
+  const request = (element as WebkitFullscreenElement).webkitRequestFullscreen;
+  if (request) {
+    await request.call(element);
+    return;
+  }
+  throw new Error("Fullscreen API is not available");
+}
+
+async function exitFullscreen() {
+  const doc = document as WebkitFullscreenDocument;
+  if (document.exitFullscreen && document.fullscreenElement) {
+    await document.exitFullscreen();
+    return;
+  }
+  if (doc.webkitExitFullscreen && doc.webkitFullscreenElement) {
+    await doc.webkitExitFullscreen();
+  }
 }
 
 function IconButton({
