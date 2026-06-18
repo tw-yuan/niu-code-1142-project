@@ -329,14 +329,30 @@ export interface CourseHelpRequestItem {
   username: string | null;
   session_id: string | null;
   assigned_to: string | null;
+  assigned_to_username?: string | null;
   title: string;
   content: string | null;
   status: "open" | "in_progress" | "resolved" | string;
   priority: "low" | "normal" | "high" | string;
   resolved_at: string | null;
+  resolution_summary?: string | null;
   created_at: string;
   updated_at: string;
   session_messages?: ChatMessage[];
+  events?: CourseHelpRequestEvent[];
+}
+
+export interface CourseHelpRequestEvent {
+  id: string;
+  actor_id: string | null;
+  actor_username: string | null;
+  event_type: string;
+  message: string | null;
+  internal: boolean;
+  from_status: string | null;
+  to_status: string | null;
+  assigned_to: string | null;
+  created_at: string;
 }
 
 export interface CourseDashboard {
@@ -386,6 +402,14 @@ export interface CourseItem {
       | "chunk_count"
       | "created_at"
     >
+    & {
+      added_at?: string | null;
+      removed_at?: string | null;
+      added_by?: string | null;
+      added_by_username?: string | null;
+      version_label?: string | null;
+      note?: string | null;
+    }
   >;
 }
 

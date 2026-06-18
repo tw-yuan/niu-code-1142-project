@@ -102,6 +102,34 @@ export function CoursesPage() {
   const [activeTab, setActiveTab] = useState<CourseTab>("overview");
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [selectedCourseQuizIds, setSelectedCourseQuizIds] = useState<string[]>(
+    [],
+  );
+  const [batchMemberRole, setBatchMemberRole] =
+    useState<"student" | "ta" | "instructor">("student");
+  const [batchQuizSettings, setBatchQuizSettings] =
+    useState<Omit<CourseQuizSettingsForm, "title">>({
+      available_from: "",
+      due_at: "",
+      answer_visible_at: "",
+      attempt_limit: "",
+    });
+  const [helpCommentDrafts, setHelpCommentDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [helpInternalDrafts, setHelpInternalDrafts] = useState<
+    Record<string, boolean>
+  >({});
+  const [helpResolutionDrafts, setHelpResolutionDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [helpFilters, setHelpFilters] = useState({
+    status: "",
+    priority: "",
+    assigned_to: "",
+    q: "",
+  });
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
@@ -154,6 +182,47 @@ export function CoursesPage() {
   const selectedActiveMaterialIds = selectedMaterialIds.filter((docId) =>
     courseDocuments.some((doc) => doc.id === docId && doc.course_status !== "removed"),
   );
+  const selectableMembers = useMemo(
+    () =>
+      members.filter(
+        (member) => selected && member.user_id !== selected.owner_id,
+      ),
+    [members, selected],
+  );
+  const selectedManageableMemberIds = selectedMemberIds.filter((memberId) =>
+    selectableMembers.some((member) => member.user_id === memberId),
+  );
+  const editableCourseQuizIds = useMemo(
+    () =>
+      courseQuizzes
+        .map((quiz) => quiz.course_publication?.id)
+        .filter((id): id is string => Boolean(id)),
+    [courseQuizzes],
+  );
+  const selectedEditableCourseQuizIds = selectedCourseQuizIds.filter((id) =>
+    editableCourseQuizIds.includes(id),
+  );
+  const filteredHelpRequests = useMemo(() => {
+    const q = helpFilters.q.trim().toLowerCase();
+    return helpRequests.filter((request) => {
+      if (helpFilters.status && request.status !== helpFilters.status) {
+        return false;
+      }
+      if (helpFilters.priority && request.priority !== helpFilters.priority) {
+        return false;
+      }
+      if (helpFilters.assigned_to === "me" && request.assigned_to !== user?.id) {
+        return false;
+      }
+      if (helpFilters.assigned_to === "unassigned" && request.assigned_to) {
+        return false;
+      }
+      if (!q) return true;
+      return [request.title, request.content, request.username]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [helpFilters, helpRequests, user?.id]);
   const unreadAnnouncements = announcements.filter(
     (announcement) => !announcement.read_at,
   ).length;
@@ -283,8 +352,13 @@ export function CoursesPage() {
     setProgress(nextProgress.students);
     setQuizSummary(nextProgress.quiz_summary);
     setSelectedMaterialIds([]);
+    setSelectedMemberIds([]);
+    setSelectedCourseQuizIds([]);
     setAddDocumentIds([]);
     setEditingCourseQuizId("");
+    setHelpCommentDrafts({});
+    setHelpInternalDrafts({});
+    setHelpResolutionDrafts({});
     const visibleTab = normalizeCourseTab(
       nextTab ?? (id === selected?.id ? activeTab : "overview"),
       course,
@@ -441,10 +515,60 @@ export function CoursesPage() {
     if (!selected || !canManage) return;
     setBusyAction(`remove-member-${member.user_id}`);
     try {
-      await apiFetch(`/courses/${selected.id}/members/${member.user_id}`, {
-        method: "DELETE",
+      await apiFetch(`/courses/${selected.id}/members/batch`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_ids: [member.user_id],
+          action: "remove",
+        }),
       });
-      await openCourse(selected.id);
+      setSelectedMemberIds((current) =>
+        current.filter((id) => id !== member.user_id),
+      );
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function updateSelectedMemberRoles() {
+    if (
+      !selected ||
+      !canManageMemberRoles ||
+      selectedManageableMemberIds.length === 0
+    )
+      return;
+    setBusyAction("member-batch-role");
+    try {
+      await apiFetch(`/courses/${selected.id}/members/batch`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_ids: selectedManageableMemberIds,
+          action: "update_role",
+          role: batchMemberRole,
+        }),
+      });
+      setSelectedMemberIds([]);
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function removeSelectedMembers() {
+    if (!selected || !canManage || selectedManageableMemberIds.length === 0)
+      return;
+    setBusyAction("member-batch-remove");
+    try {
+      await apiFetch(`/courses/${selected.id}/members/batch`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_ids: selectedManageableMemberIds,
+          action: "remove",
+        }),
+      });
+      setSelectedMemberIds([]);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -454,8 +578,9 @@ export function CoursesPage() {
     if (!selected) return;
     setBusyAction(`remove-document-${id}`);
     try {
-      await apiFetch(`/courses/${selected.id}/documents/${id}`, {
-        method: "DELETE",
+      await apiFetch(`/courses/${selected.id}/documents/batch-remove`, {
+        method: "POST",
+        body: JSON.stringify({ doc_ids: [id] }),
       });
       setSelectedMaterialIds((current) => current.filter((docId) => docId !== id));
       await openCourse(selected.id, "materials");
@@ -468,11 +593,10 @@ export function CoursesPage() {
     if (!selected || !canManage || selectedActiveMaterialIds.length === 0) return;
     setBusyAction("remove-selected-materials");
     try {
-      for (const docId of selectedActiveMaterialIds) {
-        await apiFetch(`/courses/${selected.id}/documents/${docId}`, {
-          method: "DELETE",
-        });
-      }
+      await apiFetch(`/courses/${selected.id}/documents/batch-remove`, {
+        method: "POST",
+        body: JSON.stringify({ doc_ids: selectedActiveMaterialIds }),
+      });
       setSelectedMaterialIds([]);
       await openCourse(selected.id, "materials");
     } finally {
@@ -506,7 +630,7 @@ export function CoursesPage() {
       setAssignmentTitle("");
       setAssignmentDescription("");
       setAssignmentDueAt("");
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -523,7 +647,7 @@ export function CoursesPage() {
           body: JSON.stringify({ response: "" }),
         },
       );
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -536,7 +660,7 @@ export function CoursesPage() {
       await apiFetch(`/courses/${selected.id}/assignments/${assignment.id}`, {
         method: "DELETE",
       });
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -566,7 +690,7 @@ export function CoursesPage() {
       );
       setAnnouncementTitle("");
       setAnnouncementContent("");
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -580,7 +704,7 @@ export function CoursesPage() {
         `/courses/${selected.id}/announcements/${announcement.id}`,
         { method: "DELETE" },
       );
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -594,7 +718,7 @@ export function CoursesPage() {
         `/courses/${selected.id}/announcements/${announcement.id}/read`,
         { method: "POST" },
       );
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -632,11 +756,63 @@ export function CoursesPage() {
     if (!selected || !canManage) return;
     setBusyAction(`help-status-${request.id}`);
     try {
+      const resolutionSummary =
+        status === "resolved"
+          ? helpResolutionDrafts[request.id]?.trim() || undefined
+          : undefined;
       await apiFetch(`/courses/${selected.id}/help-requests/${request.id}`, {
         method: "PUT",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          resolution_summary: resolutionSummary,
+        }),
       });
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function assignHelpRequestToMe(request: CourseHelpRequestItem) {
+    if (!selected || !canManage || !user) return;
+    setBusyAction(`help-assign-${request.id}`);
+    try {
+      await apiFetch(`/courses/${selected.id}/help-requests/${request.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          assigned_to: user.id,
+          comment: "已指派給自己處理。",
+          internal: true,
+        }),
+      });
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function createHelpComment(request: CourseHelpRequestItem) {
+    if (!selected) return;
+    const message = helpCommentDrafts[request.id]?.trim();
+    if (!message) return;
+    setBusyAction(`help-comment-${request.id}`);
+    try {
+      await apiFetch(
+        `/courses/${selected.id}/help-requests/${request.id}/comments`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            message,
+            internal: Boolean(helpInternalDrafts[request.id]),
+          }),
+        },
+      );
+      setHelpCommentDrafts((current) => ({ ...current, [request.id]: "" }));
+      setHelpInternalDrafts((current) => ({
+        ...current,
+        [request.id]: false,
+      }));
+      await openCourse(selected.id, activeTab);
     } finally {
       setBusyAction("");
     }
@@ -668,20 +844,53 @@ export function CoursesPage() {
     if (!selected || !canManage || selectedQuestionIds.length === 0) return;
     setBusyAction(`review-selected-${status}`);
     try {
-      const selectedItems = questionBank.filter((item) =>
-        selectedQuestionIds.includes(item.id),
-      );
-      for (const item of selectedItems) {
-        await apiFetch(`/courses/${selected.id}/question-bank/${item.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            status,
-            review_note: item.review_note,
-          }),
-        });
-      }
+      await apiFetch(`/courses/${selected.id}/question-bank/batch`, {
+        method: "PUT",
+        body: JSON.stringify({
+          item_ids: selectedQuestionIds,
+          status,
+        }),
+      });
       setSelectedQuestionIds([]);
-      await openCourse(selected.id);
+      await openCourse(selected.id, activeTab);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function saveSelectedCourseQuizSettings() {
+    if (!selected || !canManage || selectedEditableCourseQuizIds.length === 0)
+      return;
+    const attemptLimit = batchQuizSettings.attempt_limit
+      ? Number(batchQuizSettings.attempt_limit)
+      : null;
+    if (
+      attemptLimit !== null &&
+      (!Number.isInteger(attemptLimit) || attemptLimit < 1 || attemptLimit > 20)
+    )
+      return;
+    setBusyAction("course-quiz-batch-settings");
+    try {
+      await apiFetch(`/courses/${selected.id}/quizzes/batch`, {
+        method: "PUT",
+        body: JSON.stringify({
+          course_quiz_ids: selectedEditableCourseQuizIds,
+          available_from: normalizeDateTimeInput(batchQuizSettings.available_from),
+          due_at: normalizeDateTimeInput(batchQuizSettings.due_at),
+          answer_visible_at: normalizeDateTimeInput(
+            batchQuizSettings.answer_visible_at,
+          ),
+          attempt_limit: attemptLimit,
+        }),
+      });
+      setSelectedCourseQuizIds([]);
+      setBatchQuizSettings({
+        available_from: "",
+        due_at: "",
+        answer_visible_at: "",
+        attempt_limit: "",
+      });
+      await openCourse(selected.id, "tasks");
     } finally {
       setBusyAction("");
     }
@@ -1108,19 +1317,109 @@ export function CoursesPage() {
                     activeTab === "people" ? "" : "hidden",
                   ].join(" ")}
                 >
-                  <div className="border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    成員
+                  <div className="border-b border-zinc-200 px-3 py-2">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="text-sm font-medium">成員</div>
+                      {canManage && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-zinc-500">
+                            已選 {selectedManageableMemberIds.length} /{" "}
+                            {selectableMembers.length}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                            onClick={() =>
+                              setSelectedMemberIds(
+                                selectableMembers.map((member) => member.user_id),
+                              )
+                            }
+                            disabled={selectableMembers.length === 0}
+                          >
+                            全選成員
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                            onClick={() => setSelectedMemberIds([])}
+                            disabled={selectedManageableMemberIds.length === 0}
+                          >
+                            清空
+                          </button>
+                          {canManageMemberRoles && (
+                            <>
+                              <select
+                                className="rounded-md border border-zinc-200 px-2 py-1 text-xs"
+                                value={batchMemberRole}
+                                onChange={(event) =>
+                                  setBatchMemberRole(
+                                    event.target.value as
+                                      | "student"
+                                      | "ta"
+                                      | "instructor",
+                                  )
+                                }
+                              >
+                                <option value="student">student</option>
+                                <option value="ta">ta</option>
+                                <option value="instructor">instructor</option>
+                              </select>
+                              <LoadingButton
+                                className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                onClick={updateSelectedMemberRoles}
+                                disabled={selectedManageableMemberIds.length === 0}
+                                loading={busyAction === "member-batch-role"}
+                                loadingText="更新中"
+                              >
+                                批量改角色
+                              </LoadingButton>
+                            </>
+                          )}
+                          <LoadingButton
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:text-zinc-400"
+                            onClick={removeSelectedMembers}
+                            disabled={selectedManageableMemberIds.length === 0}
+                            loading={busyAction === "member-batch-remove"}
+                            loadingText="移除中"
+                          >
+                            批量移除
+                          </LoadingButton>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="max-h-64 overflow-y-auto divide-y divide-zinc-100">
                     {members.map((member) => (
                       <div key={member.user_id} className="px-3 py-2 text-sm">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
+                          <div className="flex min-w-0 items-start gap-2">
+                            {canManage &&
+                              member.user_id !== selected.owner_id && (
+                                <input
+                                  className="mt-1"
+                                  type="checkbox"
+                                  checked={selectedMemberIds.includes(
+                                    member.user_id,
+                                  )}
+                                  onChange={(event) =>
+                                    setSelectedMemberIds((current) =>
+                                      event.target.checked
+                                        ? [...current, member.user_id]
+                                        : current.filter(
+                                            (id) => id !== member.user_id,
+                                          ),
+                                    )
+                                  }
+                                  aria-label={`選取成員 ${member.username ?? member.user_id}`}
+                                />
+                              )}
+                            <div className="min-w-0">
                             <div className="truncate font-medium">
                               {member.username ?? member.user_id}
                             </div>
                             <div className="truncate text-xs text-zinc-500">
                               {member.email ?? ""} · {member.role}
+                            </div>
                             </div>
                           </div>
                           {canManage &&
@@ -1409,12 +1708,20 @@ export function CoursesPage() {
                     </div>
                   </section>
                   <section className="rounded-lg border border-zinc-200">
-                    <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                      <MessageCircleQuestion
-                        size={16}
-                        className="text-zinc-500"
-                      />
-                      求助佇列
+                    <div className="border-b border-zinc-200 px-3 py-2">
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <MessageCircleQuestion
+                            size={16}
+                            className="text-zinc-500"
+                          />
+                          求助佇列
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          顯示 {filteredHelpRequests.length} /{" "}
+                          {helpRequests.length}
+                        </div>
+                      </div>
                     </div>
                     {!canManage && (
                       <form
@@ -1460,11 +1767,71 @@ export function CoursesPage() {
                         </div>
                       </form>
                     )}
+                    {canManage && (
+                      <div className="grid gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <select
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                          value={helpFilters.status}
+                          onChange={(event) =>
+                            setHelpFilters((current) => ({
+                              ...current,
+                              status: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">全部狀態</option>
+                          <option value="open">待處理</option>
+                          <option value="in_progress">處理中</option>
+                          <option value="resolved">已結案</option>
+                        </select>
+                        <select
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                          value={helpFilters.priority}
+                          onChange={(event) =>
+                            setHelpFilters((current) => ({
+                              ...current,
+                              priority: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">全部優先度</option>
+                          <option value="high">高</option>
+                          <option value="normal">一般</option>
+                          <option value="low">低</option>
+                        </select>
+                        <select
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                          value={helpFilters.assigned_to}
+                          onChange={(event) =>
+                            setHelpFilters((current) => ({
+                              ...current,
+                              assigned_to: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">全部負責人</option>
+                          <option value="me">指派給我</option>
+                          <option value="unassigned">尚未指派</option>
+                        </select>
+                        <input
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                          value={helpFilters.q}
+                          onChange={(event) =>
+                            setHelpFilters((current) => ({
+                              ...current,
+                              q: event.target.value,
+                            }))
+                          }
+                          placeholder="搜尋求助"
+                        />
+                      </div>
+                    )}
                     <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
-                      {helpRequests.map((request) => (
+                      {filteredHelpRequests.map((request) => (
                         <div key={request.id} className="px-3 py-3 text-sm">
-                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="min-w-0">
+                          <div className="flex flex-col gap-3">
+                            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-medium">
                                   {request.title}
@@ -1480,6 +1847,23 @@ export function CoursesPage() {
                                   {priorityLabel(request.priority)}
                                 </span>
                               </div>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                <span>
+                                  {formatDateTime(request.updated_at)}
+                                </span>
+                                {request.username && (
+                                  <span>學生：{request.username}</span>
+                                )}
+                                <span>
+                                  負責人：
+                                  {request.assigned_to_username ?? "未指派"}
+                                </span>
+                                {request.resolved_at && (
+                                  <span>
+                                    結案：{formatDateTime(request.resolved_at)}
+                                  </span>
+                                )}
+                              </div>
                               {request.content && (
                                 <div className="mt-2 rounded-md bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-700">
                                   <div className="mb-1 font-medium text-zinc-500">
@@ -1487,6 +1871,16 @@ export function CoursesPage() {
                                   </div>
                                   <div className="whitespace-pre-wrap">
                                     {request.content}
+                                  </div>
+                                </div>
+                              )}
+                              {request.resolution_summary && (
+                                <div className="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
+                                  <div className="mb-1 font-medium text-emerald-700">
+                                    結案摘要
+                                  </div>
+                                  <div className="whitespace-pre-wrap">
+                                    {request.resolution_summary}
                                   </div>
                                 </div>
                               )}
@@ -1526,15 +1920,23 @@ export function CoursesPage() {
                                     </div>
                                   </div>
                                 )}
-                              <div className="mt-2 text-xs text-zinc-500">
-                                {formatDateTime(request.updated_at)}
-                                {request.username
-                                  ? ` · ${request.username}`
-                                  : ""}
-                              </div>
                             </div>
                             {canManage && (
                               <div className="flex shrink-0 flex-wrap gap-2">
+                                {request.assigned_to !== user?.id && (
+                                  <LoadingButton
+                                    className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                                    onClick={() =>
+                                      assignHelpRequestToMe(request)
+                                    }
+                                    loading={
+                                      busyAction === `help-assign-${request.id}`
+                                    }
+                                    loadingText="指派中"
+                                  >
+                                    指派給我
+                                  </LoadingButton>
+                                )}
                                 {request.status !== "in_progress" && (
                                   <LoadingButton
                                     className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
@@ -1565,12 +1967,122 @@ export function CoursesPage() {
                                 )}
                               </div>
                             )}
+                            </div>
+                            {request.events && request.events.length > 0 && (
+                              <div className="rounded-md border border-zinc-200 bg-white">
+                                <div className="border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-500">
+                                  處理紀錄
+                                </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {request.events.map((event) => (
+                                    <div
+                                      key={event.id}
+                                      className="px-3 py-2 text-xs leading-5"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2 text-zinc-500">
+                                        <span className="font-medium text-zinc-700">
+                                          {event.actor_username ?? "系統"}
+                                        </span>
+                                        <span>
+                                          {helpEventLabel(event.event_type)}
+                                        </span>
+                                        {event.internal && (
+                                          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">
+                                            內部
+                                          </span>
+                                        )}
+                                        <span>
+                                          {formatDateTime(event.created_at)}
+                                        </span>
+                                      </div>
+                                      {event.from_status && event.to_status && (
+                                        <div className="mt-1 text-zinc-500">
+                                          {helpStatusLabel(event.from_status)} →{" "}
+                                          {helpStatusLabel(event.to_status)}
+                                        </div>
+                                      )}
+                                      {event.message && (
+                                        <div className="mt-1 whitespace-pre-wrap text-zinc-700">
+                                          {event.message}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="grid gap-2 rounded-md bg-zinc-50 p-3">
+                              <textarea
+                                className="min-h-16 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                value={helpCommentDrafts[request.id] ?? ""}
+                                onChange={(event) =>
+                                  setHelpCommentDrafts((current) => ({
+                                    ...current,
+                                    [request.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder={
+                                  canManage ? "回覆或處理註記" : "補充說明"
+                                }
+                              />
+                              {canManage && request.status !== "resolved" && (
+                                <textarea
+                                  className="min-h-14 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                  value={helpResolutionDrafts[request.id] ?? ""}
+                                  onChange={(event) =>
+                                    setHelpResolutionDrafts((current) => ({
+                                      ...current,
+                                      [request.id]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="結案摘要"
+                                />
+                              )}
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                {canManage ? (
+                                  <label className="inline-flex items-center gap-2 text-xs text-zinc-600">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(
+                                        helpInternalDrafts[request.id],
+                                      )}
+                                      onChange={(event) =>
+                                        setHelpInternalDrafts((current) => ({
+                                          ...current,
+                                          [request.id]: event.target.checked,
+                                        }))
+                                      }
+                                    />
+                                    內部註記
+                                  </label>
+                                ) : (
+                                  <span className="text-xs text-zinc-500">
+                                    老師與助教會看到這則補充
+                                  </span>
+                                )}
+                                <LoadingButton
+                                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:bg-zinc-300"
+                                  onClick={() => createHelpComment(request)}
+                                  disabled={
+                                    !helpCommentDrafts[request.id]?.trim()
+                                  }
+                                  loading={
+                                    busyAction === `help-comment-${request.id}`
+                                  }
+                                  loadingText="送出中"
+                                >
+                                  送出留言
+                                </LoadingButton>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))}
-                      {helpRequests.length === 0 && (
+                      {filteredHelpRequests.length === 0 && (
                         <div className="px-3 py-8 text-sm text-zinc-500">
-                          目前沒有求助單
+                          {helpRequests.length === 0
+                            ? "目前沒有求助單"
+                            : "沒有符合篩選的求助單"}
                         </div>
                       )}
                     </div>
@@ -1834,9 +2346,113 @@ export function CoursesPage() {
               )}
               {activeTab === "tasks" && (
                 <section className="mx-5 mb-5 rounded-lg border border-zinc-200">
-                  <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 text-sm font-medium">
-                    <ListChecks size={16} className="text-zinc-500" />
-                    課程測驗
+                  <div className="border-b border-zinc-200 px-3 py-2">
+                    <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <ListChecks size={16} className="text-zinc-500" />
+                        課程測驗
+                      </div>
+                      {canManage && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-zinc-500">
+                            已選 {selectedEditableCourseQuizIds.length} /{" "}
+                            {editableCourseQuizIds.length}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                            onClick={() =>
+                              setSelectedCourseQuizIds(editableCourseQuizIds)
+                            }
+                            disabled={editableCourseQuizIds.length === 0}
+                          >
+                            全選測驗
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+                            onClick={() => setSelectedCourseQuizIds([])}
+                            disabled={selectedEditableCourseQuizIds.length === 0}
+                          >
+                            清空
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {canManage && selectedEditableCourseQuizIds.length > 0 && (
+                      <div className="mt-3 grid gap-2 rounded-lg bg-zinc-50 p-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_120px_auto]">
+                        <label className="text-xs font-medium text-zinc-500">
+                          開放時間
+                          <input
+                            className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                            type="datetime-local"
+                            value={batchQuizSettings.available_from}
+                            onChange={(event) =>
+                              setBatchQuizSettings((current) => ({
+                                ...current,
+                                available_from: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="text-xs font-medium text-zinc-500">
+                          截止時間
+                          <input
+                            className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                            type="datetime-local"
+                            value={batchQuizSettings.due_at}
+                            onChange={(event) =>
+                              setBatchQuizSettings((current) => ({
+                                ...current,
+                                due_at: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="text-xs font-medium text-zinc-500">
+                          答案公開時間
+                          <input
+                            className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                            type="datetime-local"
+                            value={batchQuizSettings.answer_visible_at}
+                            onChange={(event) =>
+                              setBatchQuizSettings((current) => ({
+                                ...current,
+                                answer_visible_at: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="text-xs font-medium text-zinc-500">
+                          作答次數
+                          <input
+                            className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={batchQuizSettings.attempt_limit}
+                            onChange={(event) =>
+                              setBatchQuizSettings((current) => ({
+                                ...current,
+                                attempt_limit: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <div className="flex items-end">
+                          <LoadingButton
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:bg-zinc-300"
+                            onClick={saveSelectedCourseQuizSettings}
+                            loading={
+                              busyAction === "course-quiz-batch-settings"
+                            }
+                            loadingText="儲存中"
+                          >
+                            批量儲存
+                          </LoadingButton>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="divide-y divide-zinc-100">
                     {courseQuizzes.map((quiz) => (
@@ -1846,8 +2462,33 @@ export function CoursesPage() {
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0">
-                            <div className="truncate font-medium">
-                              {quiz.course_publication?.title ?? quiz.title}
+                            <div className="flex min-w-0 items-center gap-2">
+                              {canManage && quiz.course_publication && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedCourseQuizIds.includes(
+                                    quiz.course_publication.id,
+                                  )}
+                                  onChange={(event) =>
+                                    setSelectedCourseQuizIds((current) =>
+                                      event.target.checked
+                                        ? [
+                                            ...current,
+                                            quiz.course_publication!.id,
+                                          ]
+                                        : current.filter(
+                                            (id) =>
+                                              id !==
+                                              quiz.course_publication!.id,
+                                          ),
+                                    )
+                                  }
+                                  aria-label={`選取測驗 ${quiz.course_publication?.title ?? quiz.title}`}
+                                />
+                              )}
+                              <div className="truncate font-medium">
+                                {quiz.course_publication?.title ?? quiz.title}
+                              </div>
                             </div>
                             <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
                               <span>{quiz.questions.length} 題</span>
@@ -2356,7 +2997,27 @@ export function CoursesPage() {
                               {doc.course_status === "removed"
                                 ? " · 已移除"
                                 : ""}
+                              {doc.added_by_username
+                                ? ` · ${doc.added_by_username}`
+                                : ""}
+                              {doc.added_at
+                                ? ` · ${formatDateTime(doc.added_at)}`
+                                : ""}
                             </div>
+                            {(doc.version_label || doc.note) && (
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                                {doc.version_label && (
+                                  <span className="rounded bg-indigo-50 px-2 py-0.5 text-indigo-700">
+                                    {doc.version_label}
+                                  </span>
+                                )}
+                                {doc.note && (
+                                  <span className="line-clamp-2 max-w-xl">
+                                    {doc.note}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -2725,6 +3386,15 @@ function helpStatusClass(status: string) {
   if (status === "resolved") return `${base} bg-emerald-50 text-emerald-700`;
   if (status === "in_progress") return `${base} bg-indigo-50 text-indigo-700`;
   return `${base} bg-amber-50 text-amber-700`;
+}
+
+function helpEventLabel(type: string) {
+  if (type === "created") return "建立求助單";
+  if (type === "status_changed") return "更新狀態";
+  if (type === "assigned") return "指派負責人";
+  if (type === "priority_changed") return "調整優先度";
+  if (type === "comment") return "新增留言";
+  return "更新";
 }
 
 function priorityLabel(priority: string) {

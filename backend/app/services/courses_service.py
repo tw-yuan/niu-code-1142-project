@@ -1794,8 +1794,9 @@ class CoursesService:
                 doc_conditions.extend([CourseDocument.is_active == 1, Document.status == "ready"])
             docs = (
                 await self.db.execute(
-                    select(Document, CourseDocument)
+                    select(Document, CourseDocument, User.username)
                     .join(CourseDocument, CourseDocument.doc_id == Document.id)
+                    .outerjoin(User, User.id == CourseDocument.added_by)
                     .where(and_(*doc_conditions))
                     .order_by(desc(CourseDocument.added_at))
                 )
@@ -1811,8 +1812,12 @@ class CoursesService:
                     "created_at": doc.created_at,
                     "added_at": course_doc.added_at,
                     "removed_at": course_doc.removed_at,
+                    "added_by": course_doc.added_by,
+                    "added_by_username": added_by_username,
+                    "version_label": course_doc.version_label,
+                    "note": course_doc.note,
                 }
-                for doc, course_doc in docs
+                for doc, course_doc, added_by_username in docs
             ]
         return data
 
