@@ -141,6 +141,14 @@ export interface MindmapResponse {
   content: string;
 }
 
+export interface MindmapDocumentStatus {
+  document: DocumentItem;
+  has_mindmap: boolean;
+  mindmap_id: string | null;
+  format: "tree_json" | "markdown" | string | null;
+  updated_at: string | null;
+}
+
 export interface GenerationTask<TOutput = Record<string, unknown>> {
   id: string;
   kind: "quiz" | "flashcards" | "mindmap" | string;

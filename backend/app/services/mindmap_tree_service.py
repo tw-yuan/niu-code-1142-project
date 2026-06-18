@@ -98,6 +98,60 @@ class MindmapTreeService:
             "content": markdown_artifact.content,
         }
 
+    async def list_document_status(self, user_id: str) -> list[dict[str, Any]]:
+        documents = [
+            doc
+            for doc in await DocumentAccessService(self.db).list_accessible_documents(user_id)
+            if doc.status != "archived"
+        ]
+        doc_ids = [doc.id for doc in documents]
+        artifacts_by_doc: dict[str, LearningArtifact] = {}
+        if doc_ids:
+            artifacts = (
+                await self.db.execute(
+                    select(LearningArtifact)
+                    .where(
+                        and_(
+                            LearningArtifact.user_id == user_id,
+                            LearningArtifact.doc_id.in_(doc_ids),
+                            LearningArtifact.kind.in_(
+                                [MINDMAP_TREE_KIND, MINDMAP_MARKDOWN_KIND]
+                            ),
+                        )
+                    )
+                    .order_by(desc(LearningArtifact.created_at))
+                )
+            ).scalars().all()
+            for artifact in artifacts:
+                if artifact.doc_id not in artifacts_by_doc:
+                    artifacts_by_doc[artifact.doc_id] = artifact
+
+        rows = []
+        for doc in documents:
+            artifact = artifacts_by_doc.get(doc.id)
+            rows.append(
+                {
+                    "document": {
+                        "id": doc.id,
+                        "user_id": doc.user_id,
+                        "filename": doc.filename,
+                        "file_type": doc.file_type,
+                        "file_size": doc.file_size,
+                        "status": doc.status,
+                        "page_count": doc.page_count,
+                        "chunk_count": doc.chunk_count,
+                        "error_msg": doc.error_msg,
+                        "created_at": doc.created_at,
+                        "updated_at": doc.updated_at,
+                    },
+                    "has_mindmap": artifact is not None,
+                    "mindmap_id": artifact.id if artifact else None,
+                    "format": _artifact_format(artifact) if artifact else None,
+                    "updated_at": artifact.updated_at if artifact else None,
+                }
+            )
+        return rows
+
     async def stream_expand_node(
         self,
         user_id: str,
@@ -242,7 +296,7 @@ class MindmapTreeService:
                 )
                 .order_by(desc(LearningArtifact.created_at))
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
 
     async def _get_tree_artifact(self, user_id: str, artifact_id: str) -> LearningArtifact:
         artifact = (
@@ -316,6 +370,16 @@ def normalize_mindmap_tree(parsed: dict[str, Any], doc_id: str, fallback_title: 
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
+
+
+def _artifact_format(artifact: LearningArtifact | None) -> str | None:
+    if artifact is None:
+        return None
+    if artifact.kind == MINDMAP_TREE_KIND:
+        return "tree_json"
+    if artifact.kind == MINDMAP_MARKDOWN_KIND:
+        return "markdown"
+    return artifact.kind
 
 
 def _parse_mindmap_json(text: str, fallback_title: str) -> dict[str, Any]:

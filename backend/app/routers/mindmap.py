@@ -90,6 +90,14 @@ async def stream_mindmap(
     )
 
 
+@router.get("")
+async def list_mindmap_documents(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await MindmapTreeService(db).list_document_status(current_user.id)
+
+
 @router.get("/{doc_id}")
 async def get_mindmap(
     doc_id: str,
