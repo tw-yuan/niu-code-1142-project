@@ -80,9 +80,12 @@ export function ChatPage() {
     [sessions, activeId],
   );
   const helpCourseId = activeSession?.course_id ?? "";
+  const personalDocuments = documents.filter(
+    (doc) => doc.status === "ready" && doc.user_id === user?.id,
+  );
   const scopeDocuments = courseId
     ? (selectedCourse?.documents ?? []).filter((doc) => doc.status === "ready")
-    : documents.filter((doc) => doc.status === "ready");
+    : personalDocuments;
   const scopeDocumentIds = scopeDocuments.map((doc) => doc.id);
   const availableSelectedDocs = selectedDocs.filter((docId) =>
     scopeDocumentIds.includes(docId),
