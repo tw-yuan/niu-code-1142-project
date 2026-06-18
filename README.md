@@ -49,7 +49,7 @@ SECRET_KEY=
 LLM_API_KEY=
 ```
 
-`LLM_API_KEY` 與 `LLM_BASE_URL` 是三種 LLM 功能的共用 fallback。若要分開控成本，可另外設定 `LLM_CHAT_API_KEY` / `LLM_CHAT_BASE_URL`、`LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL`、`LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL`。
+`LLM_API_KEY` 與 `LLM_BASE_URL` 是三種 LLM 功能的共用 fallback。若要分開控成本，可另外設定 `LLM_CHAT_API_KEY` / `LLM_CHAT_BASE_URL`、`LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL`、`LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL`。逾時也可分開控制：`LLM_TIMEOUT_SECONDS` 是共用預設，`LLM_CHAT_TIMEOUT_SECONDS`、`LLM_VISION_TIMEOUT_SECONDS`、`LLM_EMBED_TIMEOUT_SECONDS` 可覆蓋單一功能；OCR 圖片請求建議 vision timeout 至少 120 秒。
 
 如果 Admin 後台已存過 LLM 設定，DB 會覆蓋 `.env`。可在 Admin 的 LLM / Fallback 設定中按「重設為 .env 預設值」清除 DB override。
 

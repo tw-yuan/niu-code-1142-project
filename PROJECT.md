@@ -1208,9 +1208,13 @@ LLM_VISION_MODEL=gpt-4o
 LLM_EMBED_BASE_URL=
 LLM_EMBED_API_KEY=
 LLM_EMBED_MODEL=text-embedding-3-small
+LLM_TIMEOUT_SECONDS=30
+LLM_CHAT_TIMEOUT_SECONDS=
+LLM_VISION_TIMEOUT_SECONDS=120
+LLM_EMBED_TIMEOUT_SECONDS=60
 ```
 
-如果 `admin_config.key = "llm_config"` 存在，DB 設定會覆蓋預設值。設定結構仍以 `chat`、`vision`、`embedding` 三段分開，每段都可有自己的 `base_url`、`api_key`、`model` 與功能專屬參數。
+如果 `admin_config.key = "llm_config"` 存在，DB 設定會覆蓋預設值。設定結構仍以 `chat`、`vision`、`embedding` 三段分開，每段都可有自己的 `base_url`、`api_key`、`model`、`timeout` 與功能專屬參數。圖片 OCR 的 Vision 請求通常比一般文字生成慢，預設 `LLM_VISION_TIMEOUT_SECONDS=120`，避免全頁 PPTX/DOCX/PDF 圖片在 10 秒內被過早中止。
 
 ### 18.2 支援的 LLM 能力
 
@@ -1406,6 +1410,10 @@ LLM_VISION_MODEL=gpt-4o
 LLM_EMBED_BASE_URL=
 LLM_EMBED_API_KEY=
 LLM_EMBED_MODEL=text-embedding-3-small
+LLM_TIMEOUT_SECONDS=30
+LLM_CHAT_TIMEOUT_SECONDS=
+LLM_VISION_TIMEOUT_SECONDS=120
+LLM_EMBED_TIMEOUT_SECONDS=60
 
 MAX_UPLOAD_SIZE_MB=50
 MAX_PAGES_PER_DOC=100

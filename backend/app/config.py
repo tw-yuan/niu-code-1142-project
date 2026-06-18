@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,10 @@ class Settings(BaseSettings):
     LLM_EMBED_API_KEY: str = ""
     LLM_EMBED_BASE_URL: str = ""
     LLM_EMBED_MODEL: str = "text-embedding-3-small"
+    LLM_TIMEOUT_SECONDS: float = 30
+    LLM_CHAT_TIMEOUT_SECONDS: float | None = None
+    LLM_VISION_TIMEOUT_SECONDS: float | None = 120
+    LLM_EMBED_TIMEOUT_SECONDS: float | None = 60
 
     MAX_UPLOAD_SIZE_MB: int = 50
     MAX_PAGES_PER_DOC: int = 100
@@ -41,6 +46,18 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    @field_validator(
+        "LLM_CHAT_TIMEOUT_SECONDS",
+        "LLM_VISION_TIMEOUT_SECONDS",
+        "LLM_EMBED_TIMEOUT_SECONDS",
+        mode="before",
+    )
+    @classmethod
+    def empty_timeout_to_none(cls, value: Any) -> Any:
+        if value == "":
+            return None
+        return value
 
     @property
     def allowed_origins(self) -> list[str]:

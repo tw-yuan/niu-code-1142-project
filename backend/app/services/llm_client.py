@@ -199,6 +199,16 @@ class LLMClient:
     async def _get_config(self, feature: str) -> dict[str, Any]:
         return (await self._load_config())[feature]
 
+    async def provider_summary(self, feature: str) -> dict[str, Any]:
+        providers = await self._get_providers(feature)
+        primary = providers[0]
+        return {
+            "base_url": primary.get("base_url"),
+            "model": primary.get("model"),
+            "timeout": primary.get("timeout", 10),
+            "fallback_count": max(0, len(providers) - 1),
+        }
+
     async def _load_config(self) -> dict[str, Any]:
         defaults = default_llm_config()
         if self.db is not None:
@@ -251,8 +261,11 @@ class LLMClient:
                     {
                         "feature": feature,
                         "model": provider.get("model"),
+                        "base_url": provider.get("base_url"),
+                        "timeout": provider.get("timeout", 10),
                         "reason": exc.__class__.__name__,
                         "fallback_available": index < len(providers) - 1,
+                        "message": str(exc)[:1000],
                     },
                 )
                 if index == len(providers) - 1:

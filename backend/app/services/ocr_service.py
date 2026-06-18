@@ -21,6 +21,7 @@ async def ocr_document(
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     cache = _load_cache(cache_file)
     llm = LLMClient(db)
+    provider = await llm.provider_summary("vision")
     prompt = load_ocr_prompt()
     texts: list[str] = []
 
@@ -29,8 +30,27 @@ async def ocr_document(
         if page_key not in cache:
             with open(img_path, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
-            text = await llm.vision(b64, prompt, user_id=user_id)
-            cache[page_key] = {"text": text, "model": "vision", "cached_at": now_iso()}
+            try:
+                text = await llm.vision(b64, prompt, user_id=user_id)
+            except Exception as exc:
+                fallback_text = (
+                    "no fallback provider"
+                    if provider["fallback_count"] == 0
+                    else f"{provider['fallback_count']} fallback provider(s)"
+                )
+                raise RuntimeError(
+                    "OCR failed on "
+                    f"page {i}/{len(image_paths)} ({Path(img_path).name}) "
+                    f"using vision model {provider['model']} via {provider['base_url']} "
+                    f"with timeout {provider['timeout']}s and {fallback_text}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ) from exc
+            cache[page_key] = {
+                "text": text,
+                "model": provider["model"] or "vision",
+                "provider": provider["base_url"] or "",
+                "cached_at": now_iso(),
+            }
             _save_cache(cache_file, cache)
         texts.append(f"=== 第 {i} 頁 ===\n{cache[page_key]['text']}")
         if on_progress:
