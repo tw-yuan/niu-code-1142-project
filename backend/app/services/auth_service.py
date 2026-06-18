@@ -21,13 +21,24 @@ class AuthService:
         self.db = db
 
     async def register(self, body: RegisterRequest) -> User:
-        existing = (
+        existing_username = (
             await self.db.execute(
-                select(User).where(or_(User.username == body.username, User.email == body.email))
+                select(User.id).where(User.username == body.username)
             )
         ).scalar_one_or_none()
-        if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        if existing_username:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists",
+            )
+        existing_email = (
+            await self.db.execute(select(User.id).where(User.email == body.email))
+        ).scalar_one_or_none()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already exists",
+            )
 
         user_count = (await self.db.execute(select(func.count(User.id)))).scalar_one()
         role = "admin" if user_count == 0 else "student"

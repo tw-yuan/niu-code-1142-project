@@ -4,6 +4,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public detail?: unknown,
   ) {
     super(message);
   }
@@ -442,11 +443,16 @@ export async function apiFetch<T>(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw networkError(err);
+  }
   if (res.status === 401 && path !== "/auth/refresh") {
     const refreshed = await refreshToken();
     if (refreshed) return apiFetch<T>(path, options);
@@ -454,10 +460,7 @@ export async function apiFetch<T>(
     window.location.href = "/login";
     throw new ApiError(401, "Unauthorized");
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, errorMessage(err));
-  }
+  if (!res.ok) throw await responseError(res);
   return res.json() as Promise<T>;
 }
 
@@ -470,11 +473,16 @@ export async function apiBlob(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw networkError(err);
+  }
   if (res.status === 401 && path !== "/auth/refresh") {
     const refreshed = await refreshToken();
     if (refreshed) return apiBlob(path, options);
@@ -482,10 +490,7 @@ export async function apiBlob(
     window.location.href = "/login";
     throw new ApiError(401, "Unauthorized");
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, errorMessage(err));
-  }
+  if (!res.ok) throw await responseError(res);
   return res.blob();
 }
 
@@ -512,7 +517,11 @@ export async function apiUploadWithProgress<T>(
   onProgress: (percent: number) => void,
 ): Promise<T> {
   const runUpload = () =>
-    new Promise<{ status: number; responseText: string }>((resolve, reject) => {
+    new Promise<{
+      status: number;
+      responseText: string;
+      statusText: string;
+    }>((resolve, reject) => {
       const form = new FormData();
       form.append("file", file);
 
@@ -528,9 +537,16 @@ export async function apiUploadWithProgress<T>(
         );
       };
       xhr.onload = () =>
-        resolve({ status: xhr.status, responseText: xhr.responseText });
-      xhr.onerror = () => reject(new Error("Upload failed"));
-      xhr.onabort = () => reject(new Error("Upload cancelled"));
+        resolve({
+          status: xhr.status,
+          responseText: xhr.responseText,
+          statusText: xhr.statusText,
+        });
+      xhr.onerror = () =>
+        reject(new ApiError(0, "網路錯誤：檔案上傳請求沒有收到回應"));
+      xhr.ontimeout = () =>
+        reject(new ApiError(0, "檔案上傳逾時：請求超過瀏覽器等待時間"));
+      xhr.onabort = () => reject(new ApiError(0, "檔案上傳已取消"));
       xhr.send(form);
     });
 
@@ -546,8 +562,12 @@ export async function apiUploadWithProgress<T>(
     }
   }
   if (res.status < 200 || res.status >= 300) {
-    const err = res.responseText ? safeJsonParse(res.responseText) : {};
-    throw new ApiError(res.status, errorMessage(err));
+    const parsed = res.responseText ? safeJsonParse(res.responseText) : {};
+    const message = errorMessage(
+      parsed,
+      cleanErrorText(res.responseText, res.statusText || "Request failed"),
+    );
+    throw new ApiError(res.status, withHttpStatus(res.status, message), parsed);
   }
   onProgress(100);
   return safeJsonParse(res.responseText) as T;
@@ -562,11 +582,61 @@ export async function apiUploadMany<T>(
   return apiFetch<T>(path, { method: "POST", body: form });
 }
 
-function errorMessage(err: any) {
+async function responseError(res: Response) {
+  const text = await res.text().catch(() => "");
+  const parsed = text ? safeJsonParse(text) : {};
+  const message = errorMessage(parsed, cleanErrorText(text, res.statusText));
+  return new ApiError(res.status, withHttpStatus(res.status, message), parsed);
+}
+
+function errorMessage(err: any, fallback = "Request failed") {
+  if (typeof err === "string" && err.trim()) return err.trim();
+  if (Array.isArray(err?.detail)) return validationMessage(err.detail);
   if (typeof err?.detail === "string") return err.detail;
   if (typeof err?.detail?.message === "string") return err.detail.message;
   if (typeof err?.message === "string") return err.message;
-  return "Request failed";
+  if (typeof err?.error === "string") return err.error;
+  return fallback;
+}
+
+function validationMessage(detail: any[]) {
+  const items = detail
+    .map((item) => {
+      const field = Array.isArray(item?.loc)
+        ? item.loc.filter((part: unknown) => part !== "body").join(".")
+        : "";
+      const msg = typeof item?.msg === "string" ? item.msg : "";
+      const type = typeof item?.type === "string" ? item.type : "";
+      return [field, msg || type].filter(Boolean).join(": ");
+    })
+    .filter(Boolean);
+  return items.length ? items.join("；") : "Validation failed";
+}
+
+function withHttpStatus(status: number, message: string) {
+  if (status <= 0) return message;
+  if (message.startsWith(`HTTP ${status}:`)) return message;
+  return `HTTP ${status}: ${message}`;
+}
+
+function networkError(err: unknown) {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return new ApiError(0, "請求已取消或逾時");
+  }
+  if (err instanceof Error && err.message) {
+    return new ApiError(0, `網路錯誤：${err.message}`);
+  }
+  return new ApiError(0, "網路錯誤：請求沒有收到回應");
+}
+
+function cleanErrorText(text: string, fallback = "Request failed") {
+  const stripped = text
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (stripped || fallback).slice(0, 1200);
 }
 
 function safeJsonParse(text: string) {

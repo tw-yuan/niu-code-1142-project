@@ -34,10 +34,12 @@ const MAX_UPLOAD_FILES = 10;
 
 type UploadQueueItem = {
   id: string;
+  docId?: string;
   filename: string;
   size: number;
   progress: number;
   status: "queued" | "uploading" | "processing" | "done" | "error";
+  stage?: string;
   error?: string;
 };
 
@@ -94,6 +96,7 @@ export function DocumentsPage() {
     try {
       const data = await apiFetch<DocumentItem[]>("/documents");
       setDocuments(data);
+      syncUploadQueueWithDocuments(data);
       const active = id ? data.find((doc) => doc.id === id) : null;
       setSelected(active ?? data[0] ?? null);
     } finally {
@@ -112,12 +115,14 @@ export function DocumentsPage() {
       .catch(() => undefined);
     const token = localStorage.getItem("access_token");
     if (token) wsManager.connect(token);
-    const offStatus = wsManager.on("doc_status", () =>
-      loadDocuments().catch(() => undefined),
-    );
-    const offReady = wsManager.on("doc_ready", () =>
-      loadDocuments().catch(() => undefined),
-    );
+    const offStatus = wsManager.on("doc_status", (message) => {
+      handleDocumentStatusMessage(message);
+      loadDocuments().catch(() => undefined);
+    });
+    const offReady = wsManager.on("doc_ready", (message) => {
+      handleDocumentStatusMessage({ ...message, status: "ready" });
+      loadDocuments().catch(() => undefined);
+    });
     return () => {
       offStatus();
       offReady();
@@ -183,10 +188,17 @@ export function DocumentsPage() {
               "/documents/upload",
               file,
               (progress) => setUploadQueueItem(itemId, { progress }),
+            ).then((doc) =>
+              setUploadQueueItem(itemId, {
+                docId: doc.id,
+                filename: doc.filename,
+                stage: statusLabel(doc.status),
+              }),
             );
             setUploadQueueItem(itemId, {
               status: "processing",
               progress: 100,
+              stage: "已上傳，等待文件處理",
             });
           } catch (err) {
             const message = err instanceof Error ? err.message : "上傳失敗";
@@ -203,14 +215,6 @@ export function DocumentsPage() {
         setError(failures.join("；"));
       }
       await loadDocuments();
-      setUploadQueue((current) =>
-        current.map((item) =>
-          queueItems.some((queued) => queued.id === item.id) &&
-          item.status === "processing"
-            ? { ...item, status: "done" }
-            : item,
-        ),
-      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "上傳失敗");
     } finally {
@@ -222,6 +226,86 @@ export function DocumentsPage() {
   function setUploadQueueItem(id: string, patch: Partial<UploadQueueItem>) {
     setUploadQueue((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function syncUploadQueueWithDocuments(nextDocuments: DocumentItem[]) {
+    setUploadQueue((current) =>
+      current.map((item) => {
+        if (!item.docId) return item;
+        const doc = nextDocuments.find((candidate) => candidate.id === item.docId);
+        if (!doc) return item;
+        if (doc.status === "ready") {
+          return {
+            ...item,
+            status: "done",
+            stage: "文件處理完成",
+            error: undefined,
+            progress: 100,
+          };
+        }
+        if (doc.status === "error") {
+          return {
+            ...item,
+            status: "error",
+            stage: "文件處理失敗",
+            error: doc.error_msg ?? "文件處理失敗，但後端沒有提供錯誤內容",
+            progress: 100,
+          };
+        }
+        return {
+          ...item,
+          status: "processing",
+          stage: statusLabel(doc.status),
+          progress: Math.max(item.progress, 100),
+        };
+      }),
+    );
+  }
+
+  function handleDocumentStatusMessage(message: unknown) {
+    if (!isRecord(message)) return;
+    const docId = typeof message.doc_id === "string" ? message.doc_id : "";
+    const status = typeof message.status === "string" ? message.status : "";
+    const progress =
+      typeof message.progress === "number" && Number.isFinite(message.progress)
+        ? Math.max(0, Math.min(100, Math.round(message.progress)))
+        : undefined;
+    const detail =
+      typeof message.error === "string"
+        ? message.error
+        : typeof message.message === "string"
+          ? message.message
+          : "";
+    if (!docId && !status) return;
+    setUploadQueue((current) =>
+      current.map((item) => {
+        if (item.docId !== docId) return item;
+        if (status === "error") {
+          return {
+            ...item,
+            status: "error",
+            stage: "文件處理失敗",
+            error: detail || "文件處理失敗，但後端沒有提供錯誤內容",
+            progress: 100,
+          };
+        }
+        if (status === "ready") {
+          return {
+            ...item,
+            status: "done",
+            stage: "文件處理完成",
+            error: undefined,
+            progress: 100,
+          };
+        }
+        return {
+          ...item,
+          status: "processing",
+          stage: statusLabel(status),
+          progress: progress ?? item.progress,
+        };
+      }),
     );
   }
 
@@ -455,6 +539,11 @@ export function DocumentsPage() {
                     {doc.user_id !== user?.id ? " · 課程共享" : ""}
                     {doc.course_status === "removed" ? " · 已移出課程" : ""}
                   </div>
+                  {doc.status === "error" && doc.error_msg && (
+                    <div className="mt-1 line-clamp-2 text-xs text-red-600">
+                      {doc.error_msg}
+                    </div>
+                  )}
                 </div>
               </div>
               <span className={statusClass(doc.status)}>
@@ -562,8 +651,28 @@ export function DocumentsPage() {
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
                     {formatBytes(item.size)}
-                    {item.error ? ` · ${item.error}` : ""}
+                    {item.stage ? ` · ${item.stage}` : ""}
                   </div>
+                  {item.error && (
+                    <div className="mt-1 whitespace-pre-wrap break-words rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+                      {item.error}
+                    </div>
+                  )}
+                  {item.docId && (
+                    <div className="mt-1 font-mono text-[11px] text-zinc-400">
+                      document_id: {item.docId}
+                    </div>
+                  )}
+                  {item.status === "processing" && (
+                    <div className="mt-1 text-xs text-amber-700">
+                      已上傳，後端正在轉檔/OCR/索引。若失敗，這裡會顯示 worker 回傳的錯誤。
+                    </div>
+                  )}
+                  {item.status === "error" && !item.docId && (
+                    <div className="mt-1 text-xs text-red-600">
+                      上傳請求失敗，尚未建立文件紀錄。
+                    </div>
+                  )}
                 </div>
                 <span className={uploadStatusClass(item.status)}>
                   {uploadStatusLabel(item.status)}
@@ -725,7 +834,10 @@ export function DocumentsPage() {
                 )}
                 {selected.status === "error" && selected.error_msg && (
                   <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                    {selected.error_msg}
+                    <div className="font-medium">文件處理錯誤</div>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs">
+                      {selected.error_msg}
+                    </pre>
                   </div>
                 )}
                 {previewUrl ? (
@@ -876,6 +988,10 @@ function statusLabel(status: string) {
   if (status === "ready") return "可用";
   if (status === "archived") return "封存";
   if (status === "error") return "錯誤";
+  if (status === "uploading") return "上傳中";
+  if (status === "converting") return "轉檔中";
+  if (status === "ocr_processing") return "OCR 處理中";
+  if (status === "embedding") return "建立索引中";
   return status;
 }
 
@@ -898,6 +1014,10 @@ function uploadStatusClass(status: UploadQueueItem["status"]) {
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function loadAuthorizedBlob(path: string): Promise<Blob> {
