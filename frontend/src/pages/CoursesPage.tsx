@@ -107,9 +107,6 @@ export function CoursesPage() {
   const [announcementContent, setAnnouncementContent] = useState("");
   const [helpTitle, setHelpTitle] = useState("");
   const [helpContent, setHelpContent] = useState("");
-  const [helpPriority, setHelpPriority] = useState<"low" | "normal" | "high">(
-    "normal",
-  );
   const [activeTab, setActiveTab] = useState<CourseTab>("overview");
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
@@ -954,13 +951,11 @@ export function CoursesPage() {
           body: JSON.stringify({
             title: helpTitle.trim(),
             content: helpContent.trim() || null,
-            priority: helpPriority,
           }),
         },
       );
       setHelpTitle("");
       setHelpContent("");
-      setHelpPriority("normal");
       await openCourse(selected.id);
     } finally {
       setBusyAction("");
@@ -2049,27 +2044,14 @@ export function CoursesPage() {
                           placeholder="問題標題"
                         />
                         <textarea
-                          className="min-h-16 rounded-lg border border-zinc-200 px-3 py-2 text-sm"
+                          className="min-h-36 rounded-lg border border-zinc-200 px-3 py-2 text-sm leading-6"
                           value={helpContent}
                           onChange={(event) =>
                             setHelpContent(event.target.value)
                           }
-                          placeholder="補充說明"
+                          placeholder="把卡住的地方、試過的做法或希望老師看的內容寫在這裡"
                         />
                         <div className="flex flex-wrap items-center gap-2">
-                          <select
-                            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-                            value={helpPriority}
-                            onChange={(event) =>
-                              setHelpPriority(
-                                event.target.value as "low" | "normal" | "high",
-                              )
-                            }
-                          >
-                            <option value="low">低</option>
-                            <option value="normal">一般</option>
-                            <option value="high">高</option>
-                          </select>
                           <LoadingButton
                             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
                             loading={busyAction === "create-help"}

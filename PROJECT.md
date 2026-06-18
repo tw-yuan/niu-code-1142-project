@@ -679,7 +679,7 @@ Courses 的成員分頁提供多選操作。教師可以一次選取多名非 ow
 - `PUT /courses/{course_id}/help-requests/{request_id}`
 - `POST /courses/{course_id}/help-requests/{request_id}/comments`
 
-學生可以建立 help request，也可以從 ChatPage 針對對話內容建立求助。教師/TA 可以更新狀態、優先級、指派對象、結案摘要等。`course_help_request_events` 保存 ticket 歷程與留言，支援公開留言與教師/TA 內部備註；學生讀取時不會看到 internal events。列表支援 `status_filter`、`priority`、`assigned_to`、`q` 篩選，供工作台與 saved views 使用。
+學生可以建立 help request，也可以從 ChatPage 針對對話內容建立求助。學生端建立表單不要求判斷優先度，送出時使用後端預設 `normal`；教師/TA 仍可在後續處理流程中更新狀態、優先級、指派對象、結案摘要等。`course_help_request_events` 保存 ticket 歷程與留言，支援公開留言與教師/TA 內部備註；學生讀取時不會看到 internal events。列表支援 `status_filter`、`priority`、`assigned_to`、`q` 篩選，供工作台與 saved views 使用。
 
 Courses 的求助佇列前端會顯示學生補充、相關聊天紀錄、負責人、處理事件時間線與結案摘要。教師/TA 可以在同一張 ticket 上「指派給我」、標記處理中、填寫結案摘要後結案，或新增公開留言/內部註記。學生也能在自己的求助單下補充留言，但看不到 internal 事件。
 
