@@ -474,7 +474,7 @@ data: {"type":"chunk","content":"..."}
 
 前端的主要生成入口使用 `POST /quiz/jobs`，建立 `generation_tasks(kind="quiz")` 後由 Celery worker 執行同一套 LLM 生成與保存流程。頁面會透過 `/generation/tasks`、`/generation/tasks/{task_id}` 與 WebSocket `generation_task` 事件顯示 queued/running/failed/succeeded 狀態與三段式進度：整理教材與題目設定、AI 生成、解析並儲存。因此使用者離開測驗頁後，任務仍會在後端完成，完成後重新進入頁面即可從測驗列表看到結果。`POST /quiz/stream` 保留為相容的串流端點。QuizPage 的文件選擇支援「個人文件 / 課程教材」範圍切換，從 Courses 的整課測驗入口帶入 `course` 與 `docs` query 後，會先載入課程 detail 再限制可選文件。
 
-測驗 prompt 目前要求只生成選擇題、4 個完整選項文字、`answer` 必須完全等於其中一個 option，並附上解析、來源頁、學習目標與難度理由。後端保存新測驗時會正規化 `options` 與 `answer`，把舊式 `answer: "A"` 轉成對應完整選項；作答評分與診斷也會同時接受 A/B/C/D、完整選項文字或去掉選項前綴的文字，避免學生選對但因格式不一致被判錯。課程弱點統計使用同一套答案正規化邏輯。
+測驗 prompt 目前要求只生成選擇題、4 個完整選項文字、`answer` 必須完全等於其中一個 option，並附上解析、來源頁、學習目標與難度理由。教材 context 會放在 user message 的 `<reference_material>` 區塊，system prompt 明確說明教材是未受信任內容而不是指令，避免教材文字影響 JSON 契約。後端保存新測驗時會正規化 `options` 與 `answer`，把舊式 `answer: "A"` 轉成對應完整選項；同時會丟掉空題、非 4 選項、重複選項、沒有解析或 answer 無法對應 option 的題目，若沒有任何有效題目會回錯而不是建立壞測驗。作答評分與診斷也會同時接受 A/B/C/D、完整選項文字或去掉選項前綴的文字，避免學生選對但因格式不一致被判錯。課程弱點統計使用同一套答案正規化邏輯。
 
 教師/助教可在 Courses 的任務分頁編輯已發布課程測驗設定，包括標題、開放時間、截止時間、答案公開時間與作答次數。前端呼叫 `PUT /courses/{course_id}/quizzes/{course_quiz_id}`，後端只允許 instructor/ta 更新對應課程的 `CourseQuiz` row。任務分頁也提供測驗多選與 `PUT /courses/{course_id}/quizzes/batch`，可一次套用開放時間、截止時間、答案公開時間與作答次數；批量操作不改標題，避免把多份測驗誤設成同名。
 
@@ -505,6 +505,7 @@ data: {"type":"chunk","content":"..."}
 - 每次延伸最多子節點：6
 - 總節點預設上限：80
 - 節點標題、右側摘要與大綱文字會使用 `MathText` 走 `remark-math` + `rehype-katex`，因此像 `$index = j \times r + i$` 這類公式不只 Markdown 原文會轉，心智圖畫面上的節點資訊也會轉。
+- Prompt 要求主分支依資料量彈性生成，通常 4 到 6 個，資料少時可降到 2 到 3 個；這和後端 `MAX_CHILDREN=6` 一致，避免模型輸出 8 個主分支後被靜默裁掉。
 
 流程：
 
@@ -540,6 +541,7 @@ data: {"type":"chunk","content":"..."}
 
 前端的 AI 生成入口使用 `POST /flashcards/jobs` 建立 `generation_tasks(kind="flashcards")`。worker 會更新整理教材、AI 生成、解析儲存三個階段進度，完成後解析 JSON 並建立 `flashcards` rows。頁面收到 `generation_task` succeeded 或輪詢到 succeeded 後重新載入列表。`POST /flashcards/stream` 保留給舊版即時串流流程。
 - 保存 repetition、ease factor、interval days、next review。
+- 閃卡 prompt 要求教材 context 放在 `<reference_material>`，每張卡只考一個知識點，front 不洩漏答案，back 以 1 到 3 句回答；後端會跳過缺少 front/back 的卡片，若全部無效則回錯。
 - 前端採 Anki 式翻卡互動：列表與今日複習預設只顯示正面，點擊卡面才翻到背面答案；翻面後才顯示忘記、普通、熟悉的熟悉度按鈕，避免使用者在回想前先看到答案。
 - 閃卡列表支援多選與批量刪除，避免大量整理時一張一張操作。
 

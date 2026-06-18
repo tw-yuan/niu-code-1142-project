@@ -126,11 +126,18 @@ class LearningService:
             types=", ".join(types),
             count=count,
             difficulty=difficulty,
-            context=context,
         )
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": "請依照 system 指示，只回傳測驗 JSON object。"},
+            {
+                "role": "user",
+                "content": (
+                    "請依照 system 指示，只回傳測驗 JSON object。\n\n"
+                    "<reference_material>\n"
+                    f"{context}\n"
+                    "</reference_material>"
+                ),
+            },
         ]
         async for chunk in LLMClient(self.db).stream_chat(
             messages,
@@ -163,6 +170,11 @@ class LearningService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid quiz JSON"
             )
         questions = _normalize_quiz_questions(questions)
+        if not questions:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Quiz generation returned no valid questions",
+            )
         if course_id:
             from app.services.courses_service import CoursesService
 
@@ -574,7 +586,15 @@ class LearningService:
         system, cfg = load_prompt("flashcard_generate", document_title=document_title, count=count)
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"參考資料：\n{context}"},
+            {
+                "role": "user",
+                "content": (
+                    "請依照 system 指示，只回傳閃卡 JSON object。\n\n"
+                    "<reference_material>\n"
+                    f"{context}\n"
+                    "</reference_material>"
+                ),
+            },
         ]
         async for chunk in LLMClient(self.db).stream_chat(
             messages,
@@ -602,18 +622,28 @@ class LearningService:
         default_doc_id = doc_ids[0] if len(doc_ids) == 1 else None
         allowed_doc_ids = set(doc_ids)
         for card in cards:
+            if not isinstance(card, dict):
+                continue
             source_doc_id = card.get("doc_id")
             doc_id = source_doc_id if source_doc_id in allowed_doc_ids else default_doc_id
+            front = str(card.get("front", "")).strip()
+            back = str(card.get("back", "")).strip()
+            if not front or not back:
+                continue
             flashcard = Flashcard(
                 user_id=user_id,
                 doc_id=doc_id,
-                front=str(card.get("front", "")),
-                back=str(card.get("back", "")),
+                front=front,
+                back=back,
                 source_page=card.get("source_page"),
             )
-            if flashcard.front and flashcard.back:
-                self.db.add(flashcard)
-                result.append(flashcard)
+            self.db.add(flashcard)
+            result.append(flashcard)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Flashcard generation returned no valid cards",
+            )
         await self.db.commit()
         return result
 
@@ -1047,18 +1077,28 @@ def _normalize_quiz_questions(questions: list[Any]) -> list[dict[str, Any]]:
         if not isinstance(raw, dict):
             continue
         question = dict(raw)
+        question_text = str(question.get("question") or question.get("prompt") or "").strip()
+        if not question_text:
+            continue
+        question["question"] = question_text
         options = _normalize_quiz_options(question)
         if options:
+            if len(options) != 4 or len({_normalize_answer_text(option) for option in options}) != 4:
+                continue
             question["type"] = str(question.get("type") or "MC")
             question["options"] = options
             question["answer"] = _canonical_option_answer(
                 question.get("answer", question.get("correct_answer")),
                 options,
             )
+            if str(question.get("answer") or "") not in options:
+                continue
         elif "correct_answer" in question and "answer" not in question:
             question["answer"] = question.get("correct_answer")
         if "explanation" not in question and "rationale" in question:
             question["explanation"] = question.get("rationale")
+        if not str(question.get("explanation") or "").strip():
+            continue
         normalized.append(question)
     return normalized
 

@@ -122,10 +122,7 @@ class RAGService:
             "strict": "rag_strict",
             "socratic": "rag_socratic",
         }.get(session.mode, "rag_chat")
-        if prompt_name == "rag_socratic":
-            system_prompt, cfg = load_prompt(prompt_name, context=context, question=question)
-        else:
-            system_prompt, cfg = load_prompt(prompt_name, context=context)
+        system_prompt, cfg = load_prompt(prompt_name, context=context)
         run = RAGRun(
             user_id=user_id,
             session_id=session.id,

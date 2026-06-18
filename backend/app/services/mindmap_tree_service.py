@@ -34,7 +34,18 @@ class MindmapTreeService:
         doc = await self._get_document(user_id, doc_id)
         context = await self._context(user_id, [doc_id])
         system, cfg = load_prompt("mindmap_tree", document_title=doc.filename)
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": f"參考資料：\n{context}"}]
+        messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": (
+                    "請依照 system 指示，只回傳心智圖 JSON object。\n\n"
+                    "<reference_material>\n"
+                    f"{context}\n"
+                    "</reference_material>"
+                ),
+            },
+        ]
         async for chunk in LLMClient(self.db).stream_chat(
             messages,
             temperature=cfg.get("temperature"),
@@ -169,7 +180,18 @@ class MindmapTreeService:
             node_path=" > ".join(node_path),
             max_children=max_children,
         )
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": f"參考資料：\n{context}"}]
+        messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": (
+                    "請依照 system 指示，只回傳節點展開 JSON object。\n\n"
+                    "<reference_material>\n"
+                    f"{context}\n"
+                    "</reference_material>"
+                ),
+            },
+        ]
         async for chunk in LLMClient(self.db).stream_chat(
             messages,
             temperature=cfg.get("temperature"),
