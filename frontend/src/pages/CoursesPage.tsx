@@ -108,6 +108,9 @@ export function CoursesPage() {
   const [helpTitle, setHelpTitle] = useState("");
   const [helpContent, setHelpContent] = useState("");
   const [activeTab, setActiveTab] = useState<CourseTab>("overview");
+  const [highlightedHelpId, setHighlightedHelpId] = useState("");
+  const [highlightedAnnouncementId, setHighlightedAnnouncementId] =
+    useState("");
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -431,9 +434,18 @@ export function CoursesPage() {
     const params = new URLSearchParams(location.search);
     const requestedCourseId = params.get("course");
     const requestedTab = parseCourseTab(params.get("tab"));
+    const requestedHelpId = params.get("help") ?? "";
+    const requestedAnnouncementId = params.get("announcement") ?? "";
+    const targetTab =
+      requestedHelpId || requestedAnnouncementId ? "interaction" : requestedTab;
+    setHighlightedHelpId(requestedHelpId);
+    setHighlightedAnnouncementId(requestedAnnouncementId);
+    if (requestedHelpId) {
+      setHelpFilters({ status: "", priority: "", assigned_to: "", q: "" });
+    }
     const targetCourseId =
       requestedCourseId || (!selected ? nextCourses[0]?.id : null);
-    if (targetCourseId) await openCourse(targetCourseId, requestedTab, false);
+    if (targetCourseId) await openCourse(targetCourseId, targetTab, false);
   }
 
   async function openCourse(
@@ -522,14 +534,29 @@ export function CoursesPage() {
     const params = new URLSearchParams(location.search);
     const requestedCourseId = params.get("course");
     const requestedTab = parseCourseTab(params.get("tab"));
+    const requestedHelpId = params.get("help") ?? "";
+    const requestedAnnouncementId = params.get("announcement") ?? "";
+    const targetTab =
+      requestedHelpId || requestedAnnouncementId ? "interaction" : requestedTab;
+    setHighlightedHelpId(requestedHelpId);
+    setHighlightedAnnouncementId(requestedAnnouncementId);
+    if (requestedHelpId) {
+      setHelpFilters({ status: "", priority: "", assigned_to: "", q: "" });
+    }
     if (requestedCourseId && requestedCourseId !== selected?.id) {
-      openCourse(requestedCourseId, requestedTab, false).catch(
+      openCourse(requestedCourseId, targetTab, false).catch(
         () => undefined,
       );
       return;
     }
-    if (requestedTab && selected) {
-      setActiveTab(normalizeCourseTab(requestedTab, selected));
+    if (targetTab && selected) {
+      setActiveTab(normalizeCourseTab(targetTab, selected));
+    }
+    if (requestedHelpId) {
+      setActiveTab("interaction");
+    }
+    if (requestedAnnouncementId) {
+      setActiveTab("interaction");
     }
   }, [location.search, selected?.id]);
 
@@ -543,9 +570,33 @@ export function CoursesPage() {
     return () => window.clearTimeout(timer);
   }, [copyStatus]);
 
+  useEffect(() => {
+    if (activeTab !== "interaction") return;
+    const targetId = highlightedHelpId
+      ? `help-request-${highlightedHelpId}`
+      : highlightedAnnouncementId
+        ? `announcement-${highlightedAnnouncementId}`
+        : "";
+    if (!targetId) return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(targetId)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeTab,
+    announcements.length,
+    filteredHelpRequests.length,
+    highlightedAnnouncementId,
+    highlightedHelpId,
+  ]);
+
   function setCourseTab(tab: CourseTab) {
     const nextTab = selected ? normalizeCourseTab(tab, selected) : tab;
     setActiveTab(nextTab);
+    setHighlightedHelpId("");
+    setHighlightedAnnouncementId("");
     if (selected) navigate(coursePath(selected.id, nextTab), { replace: true });
   }
 
@@ -1948,8 +1999,14 @@ export function CoursesPage() {
                     <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
                       {announcements.map((announcement) => (
                         <div
+                          id={`announcement-${announcement.id}`}
                           key={announcement.id}
-                          className="px-3 py-3 text-sm"
+                          className={[
+                            "px-3 py-3 text-sm",
+                            highlightedAnnouncementId === announcement.id
+                              ? "bg-indigo-50 ring-2 ring-inset ring-indigo-200"
+                              : "",
+                          ].join(" ")}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -2124,7 +2181,16 @@ export function CoursesPage() {
                     )}
                     <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100">
                       {filteredHelpRequests.map((request) => (
-                        <div key={request.id} className="px-3 py-3 text-sm">
+                        <div
+                          id={`help-request-${request.id}`}
+                          key={request.id}
+                          className={[
+                            "px-3 py-3 text-sm",
+                            highlightedHelpId === request.id
+                              ? "bg-indigo-50 ring-2 ring-inset ring-indigo-200"
+                              : "",
+                          ].join(" ")}
+                        >
                           <div className="flex flex-col gap-3">
                             <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                               <div className="min-w-0">

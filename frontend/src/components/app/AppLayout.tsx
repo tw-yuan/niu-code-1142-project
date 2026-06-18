@@ -3,6 +3,7 @@ import {
   BrainCircuit,
   BookOpen,
   Check,
+  ExternalLink,
   FileText,
   Layers3,
   LogOut,
@@ -18,6 +19,11 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { wsManager } from "../../lib/ws";
 import { useAuthStore } from "../../store/auth";
+
+type AppNotice = {
+  message: string;
+  to?: string;
+};
 
 interface NavItem {
   to: string;
@@ -99,7 +105,7 @@ export function AppLayout() {
   const { user, logout, loadMe } = useAuthStore();
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<AppNotice | null>(null);
   const navSections = navSectionsForRole(user?.role);
   const mobileMoreSections = navSections
     .map((section) => ({
@@ -117,13 +123,34 @@ export function AppLayout() {
       loadMe().catch(() => undefined),
     );
     const offAnnouncement = wsManager.on("course_announcement", (message) => {
-      setNotice(`新公告：${String(message.title ?? "")}`);
+      const courseId = stringValue(message.course_id);
+      const announcementId = stringValue(message.announcement_id);
+      setNotice({
+        message: `新公告：${String(message.title ?? "")}`,
+        to: courseInteractionPath(courseId, { announcement: announcementId }),
+      });
     });
     const offHelp = wsManager.on("course_help_request", (message) => {
-      setNotice(`新求助：${String(message.title ?? "")}`);
+      const courseId = stringValue(message.course_id);
+      const helpId = stringValue(message.help_request_id);
+      setNotice({
+        message: `新求助：${String(message.title ?? "")}`,
+        to: courseInteractionPath(courseId, { help: helpId }),
+      });
     });
-    const offHelpUpdate = wsManager.on("course_help_update", () => {
-      setNotice("求助狀態已更新");
+    const offHelpUpdate = wsManager.on("course_help_update", (message) => {
+      const courseId = stringValue(message.course_id);
+      const helpId = stringValue(message.help_request_id);
+      const title = stringValue(message.title);
+      setNotice({
+        message: helpUpdateNoticeText({
+          title,
+          eventType: stringValue(message.event_type),
+          status: stringValue(message.status),
+          message: stringValue(message.message),
+        }),
+        to: courseInteractionPath(courseId, { help: helpId }),
+      });
     });
     return () => {
       off();
@@ -190,14 +217,40 @@ export function AppLayout() {
           )}
           {notice && (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-              <span>{notice}</span>
-              <button
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-indigo-100"
-                onClick={() => setNotice("")}
-              >
-                <Check size={14} />
-                已讀
-              </button>
+              {notice.to ? (
+                <button
+                  className="min-w-0 flex-1 truncate text-left font-medium hover:underline"
+                  onClick={() => {
+                    navigate(notice.to ?? "/courses");
+                    setNotice(null);
+                  }}
+                >
+                  {notice.message}
+                </button>
+              ) : (
+                <span className="min-w-0 flex-1 truncate">{notice.message}</span>
+              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {notice.to && (
+                  <button
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-indigo-100"
+                    onClick={() => {
+                      navigate(notice.to ?? "/courses");
+                      setNotice(null);
+                    }}
+                  >
+                    <ExternalLink size={14} />
+                    查看
+                  </button>
+                )}
+                <button
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-indigo-100"
+                  onClick={() => setNotice(null)}
+                >
+                  <Check size={14} />
+                  已讀
+                </button>
+              </div>
             </div>
           )}
           <Outlet />
@@ -301,4 +354,42 @@ function roleLabel(role?: string) {
   if (role === "admin") return "管理員";
   if (role === "teacher") return "教師";
   return "學生";
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function courseInteractionPath(
+  courseId: string,
+  target?: { help?: string; announcement?: string },
+) {
+  if (!courseId) return undefined;
+  const params = new URLSearchParams({ course: courseId, tab: "interaction" });
+  if (target?.help) params.set("help", target.help);
+  if (target?.announcement) params.set("announcement", target.announcement);
+  return `/courses?${params.toString()}`;
+}
+
+function helpStatusLabel(status: string) {
+  if (status === "open") return "待處理";
+  if (status === "in_progress") return "處理中";
+  if (status === "resolved") return "已結案";
+  return status || "已更新";
+}
+
+function helpUpdateNoticeText(input: {
+  title: string;
+  eventType: string;
+  status: string;
+  message: string;
+}) {
+  const suffix = input.title ? `：${input.title}` : "";
+  if (input.eventType === "status_changed") {
+    return `求助狀態改為${helpStatusLabel(input.status)}${suffix}`;
+  }
+  if (input.eventType === "assigned") return `求助已指派${suffix}`;
+  if (input.eventType === "priority_changed") return `求助優先度已更新${suffix}`;
+  if (input.eventType === "comment") return `求助有新留言${suffix}`;
+  return `求助已更新${suffix}`;
 }

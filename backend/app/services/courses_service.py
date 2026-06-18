@@ -891,14 +891,13 @@ class CoursesService:
         await self.db.commit()
         await self.db.refresh(help_request)
         with contextlib.suppress(Exception):
-            await push_to_user(
-                help_request.user_id,
-                {
-                    "type": "course_help_update",
-                    "course_id": course_id,
-                    "help_request_id": help_request.id,
-                    "status": help_request.status,
-                },
+            await self._push_help_update_event(
+                help_request,
+                actor_id=user_id,
+                event_type=event_type,
+                message=body.comment or body.resolution_summary,
+                from_status=from_status if from_status != help_request.status else None,
+                to_status=help_request.status if from_status != help_request.status else None,
             )
         username = (
             await self.db.execute(select(User.username).where(User.id == help_request.user_id))
@@ -930,6 +929,14 @@ class CoursesService:
         help_request.updated_at = now_iso()
         self.db.add(event)
         await self.db.commit()
+        with contextlib.suppress(Exception):
+            await self._push_help_update_event(
+                help_request,
+                actor_id=user_id,
+                event_type="comment",
+                message=message,
+                internal=internal,
+            )
         username = (
             await self.db.execute(select(User.username).where(User.id == help_request.user_id))
         ).scalar_one_or_none()
@@ -1950,6 +1957,55 @@ class CoursesService:
         for manager_id in manager_ids:
             with contextlib.suppress(Exception):
                 await push_to_user(manager_id, message)
+
+    async def _push_help_update_event(
+        self,
+        help_request: CourseHelpRequest,
+        actor_id: str,
+        event_type: str,
+        message: str | None = None,
+        internal: bool = False,
+        from_status: str | None = None,
+        to_status: str | None = None,
+    ) -> None:
+        payload = {
+            "type": "course_help_update",
+            "course_id": help_request.course_id,
+            "help_request_id": help_request.id,
+            "title": help_request.title,
+            "status": help_request.status,
+            "event_type": event_type,
+            "message": message,
+            "internal": internal,
+            "from_status": from_status,
+            "to_status": to_status,
+        }
+        if actor_id != help_request.user_id:
+            await push_to_user(help_request.user_id, payload)
+            return
+        if internal:
+            return
+        course = await self._get_course(help_request.course_id)
+        rows = (
+            (
+                await self.db.execute(
+                    select(CourseMember.user_id).where(
+                        and_(
+                            CourseMember.course_id == help_request.course_id,
+                            CourseMember.role.in_(["instructor", "ta"]),
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        manager_ids = set(rows)
+        manager_ids.add(course.owner_id)
+        manager_ids.discard(actor_id)
+        for manager_id in manager_ids:
+            with contextlib.suppress(Exception):
+                await push_to_user(manager_id, payload)
 
 
 def _safe_json_list(value: str) -> list[dict[str, Any]]:
