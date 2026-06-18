@@ -141,10 +141,12 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="border-t border-zinc-200 p-4">
-          <div className="mb-3 min-w-0">
-            <div className="truncate text-sm font-medium">{user?.username}</div>
-            <div className="truncate text-xs text-zinc-500">{user?.email}</div>
-            <div className="mt-2 w-fit rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-600">
+          <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{user?.username}</div>
+              <div className="truncate text-xs text-zinc-500">{user?.email}</div>
+            </div>
+            <div className="shrink-0 rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-600">
               {roleLabel(user?.role)}
             </div>
           </div>

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   HelpCircle,
   Info,
+  Lightbulb,
   Loader2,
   MessageSquarePlus,
   Send,
@@ -37,6 +38,13 @@ const modeDescriptions: Record<string, { title: string; text: string }> = {
     text: "用反問與提示引導你自己推理答案，適合練習理解、口試或主動回想。",
   },
 };
+
+const starterPrompts = [
+  "請先用 5 個重點整理這份教材的核心概念。",
+  "請列出我最需要先理解的名詞與定義，並用簡短例子說明。",
+  "請根據教材幫我設計 3 題自我檢核問題，先不要直接給答案。",
+  "請指出這份教材容易混淆的地方，並用表格比較差異。",
+];
 
 export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -203,12 +211,11 @@ export function ChatPage() {
     }
   }
 
-  async function sendMessage(event: FormEvent) {
-    event.preventDefault();
-    if (!input.trim() || streaming || sending || aiDisabled) return;
+  async function sendQuestion(rawQuestion: string) {
+    const question = rawQuestion.trim();
+    if (!question || streaming || sending || aiDisabled) return;
     setSending(true);
     let sessionId = activeId;
-    const question = input;
     let assistant = "";
     let citations: Citation[] = [];
     try {
@@ -275,6 +282,11 @@ export function ChatPage() {
       setAborter(null);
       loadSessions().catch(() => undefined);
     }
+  }
+
+  async function sendMessage(event: FormEvent) {
+    event.preventDefault();
+    await sendQuestion(input);
   }
 
   async function createHelpRequest() {
@@ -496,6 +508,27 @@ export function ChatPage() {
           aria-live="polite"
           aria-busy={streaming}
         >
+          {messages.length === 0 && !streaming && (
+            <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-700">
+                <Lightbulb size={16} className="text-indigo-600" />
+                快速開始
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {starterPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left text-sm leading-6 text-zinc-700 hover:border-indigo-200 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+                    onClick={() => sendQuestion(prompt)}
+                    disabled={sending || aiDisabled}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {messages.map((message, index) => (
             <div
               key={index}

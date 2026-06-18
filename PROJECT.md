@@ -474,6 +474,8 @@ data: {"type":"chunk","content":"..."}
 
 前端的主要生成入口使用 `POST /quiz/jobs`，建立 `generation_tasks(kind="quiz")` 後由 Celery worker 執行同一套 LLM 生成與保存流程。頁面會透過 `/generation/tasks`、`/generation/tasks/{task_id}` 與 WebSocket `generation_task` 事件顯示 queued/running/failed/succeeded 狀態與三段式進度：整理教材與題目設定、AI 生成、解析並儲存。因此使用者離開測驗頁後，任務仍會在後端完成，完成後重新進入頁面即可從測驗列表看到結果。`POST /quiz/stream` 保留為相容的串流端點。
 
+教師/助教可在 Courses 的任務分頁編輯已發布課程測驗設定，包括標題、開放時間、截止時間、答案公開時間與作答次數。前端呼叫 `PUT /courses/{course_id}/quizzes/{course_quiz_id}`，後端只允許 instructor/ta 更新對應課程的 `CourseQuiz` row。
+
 作答流程：
 
 1. 取得 quiz。
@@ -1022,6 +1024,7 @@ DELETE /courses/{course_id}/members/{member_user_id}
 POST   /courses/{course_id}/leave
 GET    /courses/{course_id}/progress
 GET    /courses/{course_id}/quizzes
+PUT    /courses/{course_id}/quizzes/{course_quiz_id}
 GET    /courses/{course_id}/announcements
 POST   /courses/{course_id}/announcements
 PUT    /courses/{course_id}/announcements/{announcement_id}
@@ -1152,6 +1155,8 @@ WS /ws
 - `generation_task`：測驗、心智圖、閃卡背景生成任務狀態，包含 `task_id`、`kind`、`status`、`progress`、`output`、`error`
 
 WebSocket backend 使用 Redis pub/sub 讓不同 process 間可以推播給特定 user。
+
+Chat 頁在目前 session 沒有任何聊天歷史時會顯示快速開始 prompt 按鈕；使用者點選後會直接建立 session 並送出問題。只要 session 已有任一訊息，這些建議就會隱藏，避免干擾正常對話。
 
 ## 18. LLM 設定與成本控管
 

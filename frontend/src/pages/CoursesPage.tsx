@@ -4,6 +4,8 @@ import {
   BrainCircuit,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   FileText,
   Megaphone,
@@ -36,6 +38,14 @@ import {
 import { useAuthStore } from "../store/auth";
 
 type CopyStatus = "idle" | "copying" | "copied" | "failed";
+
+type CourseQuizSettingsForm = {
+  title: string;
+  available_from: string;
+  due_at: string;
+  answer_visible_at: string;
+  attempt_limit: string;
+};
 
 type CourseTab =
   | "overview"
@@ -95,6 +105,15 @@ export function CoursesPage() {
   const [progressError, setProgressError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
+  const [editingCourseQuizId, setEditingCourseQuizId] = useState("");
+  const [courseQuizSettings, setCourseQuizSettings] =
+    useState<CourseQuizSettingsForm>({
+      title: "",
+      available_from: "",
+      due_at: "",
+      answer_visible_at: "",
+      attempt_limit: "1",
+    });
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -265,6 +284,7 @@ export function CoursesPage() {
     setQuizSummary(nextProgress.quiz_summary);
     setSelectedMaterialIds([]);
     setAddDocumentIds([]);
+    setEditingCourseQuizId("");
     const visibleTab = normalizeCourseTab(
       nextTab ?? (id === selected?.id ? activeTab : "overview"),
       course,
@@ -662,6 +682,49 @@ export function CoursesPage() {
       }
       setSelectedQuestionIds([]);
       await openCourse(selected.id);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  function startEditingCourseQuiz(quiz: QuizItem) {
+    const publication = quiz.course_publication;
+    setEditingCourseQuizId(publication?.id ?? "");
+    setCourseQuizSettings({
+      title: publication?.title ?? quiz.title,
+      available_from: dateTimeInputValue(publication?.available_from),
+      due_at: dateTimeInputValue(publication?.due_at),
+      answer_visible_at: dateTimeInputValue(publication?.answer_visible_at),
+      attempt_limit: String(publication?.attempt_limit ?? 1),
+    });
+  }
+
+  async function saveCourseQuizSettings(quiz: QuizItem) {
+    if (!selected || !canManage || !quiz.course_publication) return;
+    const attemptLimit = Number(courseQuizSettings.attempt_limit);
+    if (!Number.isInteger(attemptLimit) || attemptLimit < 1 || attemptLimit > 20) return;
+    setBusyAction(`course-quiz-settings-${quiz.course_publication.id}`);
+    try {
+      await apiFetch(
+        `/courses/${selected.id}/quizzes/${quiz.course_publication.id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            title: courseQuizSettings.title.trim() || quiz.title,
+            available_from: normalizeDateTimeInput(
+              courseQuizSettings.available_from,
+            ),
+            due_at: normalizeDateTimeInput(courseQuizSettings.due_at),
+            answer_visible_at: normalizeDateTimeInput(
+              courseQuizSettings.answer_visible_at,
+            ),
+            attempt_limit: attemptLimit,
+            status: quiz.course_publication.status,
+          }),
+        },
+      );
+      setEditingCourseQuizId("");
+      await openCourse(selected.id, "tasks");
     } finally {
       setBusyAction("");
     }
@@ -1736,54 +1799,185 @@ export function CoursesPage() {
                     {courseQuizzes.map((quiz) => (
                       <div
                         key={quiz.id}
-                        className="flex flex-col gap-3 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                        className="px-3 py-3 text-sm"
                       >
-                        <div className="min-w-0">
-                          <div className="truncate font-medium">
-                            {quiz.course_publication?.title ?? quiz.title}
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {quiz.course_publication?.title ?? quiz.title}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                              <span>{quiz.questions.length} 題</span>
+                              {quiz.course_publication?.available_from && (
+                                <span>
+                                  開放{" "}
+                                  {formatDateTime(
+                                    quiz.course_publication.available_from,
+                                  )}
+                                </span>
+                              )}
+                              {quiz.course_publication?.due_at && (
+                                <span>
+                                  截止{" "}
+                                  {formatDateTime(
+                                    quiz.course_publication.due_at,
+                                  )}
+                                </span>
+                              )}
+                              {quiz.course_publication?.answer_visible_at && (
+                                <span>
+                                  答案{" "}
+                                  {formatDateTime(
+                                    quiz.course_publication.answer_visible_at,
+                                  )}
+                                </span>
+                              )}
+                              <span>
+                                最多 {quiz.course_publication?.attempt_limit ?? 1}{" "}
+                                次
+                              </span>
+                              {quiz.latest_attempt ? (
+                                <span className="text-emerald-700">
+                                  已完成 ·{" "}
+                                  {Math.round(
+                                    Number(
+                                      quiz.latest_attempt.total_score ?? 0,
+                                    ) * 100,
+                                  )}
+                                  %
+                                </span>
+                              ) : (
+                                <span className="text-amber-700">待完成</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                            <span>{quiz.questions.length} 題</span>
-                            {quiz.course_publication?.available_from && (
-                              <span>
-                                開放{" "}
-                                {formatDateTime(
-                                  quiz.course_publication.available_from,
+                          <div className="flex flex-wrap items-center gap-2">
+                            {canManage && quiz.course_publication && (
+                              <button
+                                type="button"
+                                className="inline-flex w-fit items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                                onClick={() =>
+                                  editingCourseQuizId ===
+                                  quiz.course_publication?.id
+                                    ? setEditingCourseQuizId("")
+                                    : startEditingCourseQuiz(quiz)
+                                }
+                              >
+                                {editingCourseQuizId ===
+                                quiz.course_publication.id ? (
+                                  <ChevronUp size={14} />
+                                ) : (
+                                  <ChevronDown size={14} />
                                 )}
-                              </span>
+                                設定
+                              </button>
                             )}
-                            {quiz.course_publication?.due_at && (
-                              <span>
-                                截止{" "}
-                                {formatDateTime(quiz.course_publication.due_at)}
-                              </span>
-                            )}
-                            {quiz.course_publication?.attempt_limit && (
-                              <span>
-                                最多 {quiz.course_publication.attempt_limit} 次
-                              </span>
-                            )}
-                            {quiz.latest_attempt ? (
-                              <span className="text-emerald-700">
-                                已完成 ·{" "}
-                                {Math.round(
-                                  Number(quiz.latest_attempt.total_score ?? 0) *
-                                    100,
-                                )}
-                                %
-                              </span>
-                            ) : (
-                              <span className="text-amber-700">待完成</span>
-                            )}
+                            <Link
+                              className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+                              to={`/quiz/${quiz.id}`}
+                            >
+                              <ListChecks size={14} />
+                              {quiz.latest_attempt ? "查看測驗" : "開始測驗"}
+                            </Link>
                           </div>
                         </div>
-                        <Link
-                          className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-                          to={`/quiz/${quiz.id}`}
-                        >
-                          <ListChecks size={14} />
-                          {quiz.latest_attempt ? "查看測驗" : "開始測驗"}
-                        </Link>
+                        {editingCourseQuizId === quiz.course_publication?.id && (
+                          <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                              <label className="text-xs font-medium text-zinc-500 xl:col-span-2">
+                                標題
+                                <input
+                                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                                  value={courseQuizSettings.title}
+                                  onChange={(event) =>
+                                    setCourseQuizSettings((current) => ({
+                                      ...current,
+                                      title: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-zinc-500">
+                                開放時間
+                                <input
+                                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                                  type="datetime-local"
+                                  value={courseQuizSettings.available_from}
+                                  onChange={(event) =>
+                                    setCourseQuizSettings((current) => ({
+                                      ...current,
+                                      available_from: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-zinc-500">
+                                截止時間
+                                <input
+                                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                                  type="datetime-local"
+                                  value={courseQuizSettings.due_at}
+                                  onChange={(event) =>
+                                    setCourseQuizSettings((current) => ({
+                                      ...current,
+                                      due_at: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-zinc-500">
+                                作答次數
+                                <input
+                                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                                  type="number"
+                                  min={1}
+                                  max={20}
+                                  value={courseQuizSettings.attempt_limit}
+                                  onChange={(event) =>
+                                    setCourseQuizSettings((current) => ({
+                                      ...current,
+                                      attempt_limit: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-zinc-500 md:col-span-2">
+                                答案公開時間
+                                <input
+                                  className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                                  type="datetime-local"
+                                  value={courseQuizSettings.answer_visible_at}
+                                  onChange={(event) =>
+                                    setCourseQuizSettings((current) => ({
+                                      ...current,
+                                      answer_visible_at: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <LoadingButton
+                                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                                onClick={() => saveCourseQuizSettings(quiz)}
+                                loading={
+                                  busyAction ===
+                                  `course-quiz-settings-${quiz.course_publication?.id}`
+                                }
+                                loadingText="儲存中"
+                              >
+                                儲存設定
+                              </LoadingButton>
+                              <button
+                                type="button"
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-50"
+                                onClick={() => setEditingCourseQuizId("")}
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {courseQuizzes.length === 0 && (
@@ -2398,6 +2592,14 @@ function deadlineClass(value: string) {
 function normalizeDateTimeInput(value: string) {
   if (!value) return null;
   return new Date(value).toISOString();
+}
+
+function dateTimeInputValue(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
 function assignmentKindLabel(kind: string) {

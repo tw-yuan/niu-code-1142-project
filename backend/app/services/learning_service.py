@@ -340,6 +340,43 @@ class LearningService:
         await self.db.commit()
         return self._course_quiz_out(course_quiz)
 
+    async def update_course_quiz(
+        self,
+        user_id: str,
+        course_id: str,
+        course_quiz_id: str,
+        title: str | None = None,
+        due_at: str | None = None,
+        available_from: str | None = None,
+        answer_visible_at: str | None = None,
+        attempt_limit: int | None = None,
+        status_value: str = "published",
+    ) -> dict[str, Any]:
+        from app.services.courses_service import CoursesService
+
+        await CoursesService(self.db).require_role(user_id, course_id, {"instructor", "ta"})
+        course_quiz = (
+            await self.db.execute(
+                select(CourseQuiz).where(
+                    and_(CourseQuiz.id == course_quiz_id, CourseQuiz.course_id == course_id)
+                )
+            )
+        ).scalar_one_or_none()
+        if course_quiz is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course quiz not found",
+            )
+        if title is not None:
+            course_quiz.title = title
+        course_quiz.due_at = due_at
+        course_quiz.available_from = available_from
+        course_quiz.answer_visible_at = answer_visible_at
+        course_quiz.attempt_limit = attempt_limit
+        course_quiz.status = status_value
+        await self.db.commit()
+        return self._course_quiz_out(course_quiz)
+
     async def course_quizzes(self, user_id: str, course_id: str) -> list[dict[str, Any]]:
         from app.services.courses_service import CoursesService
 

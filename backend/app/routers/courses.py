@@ -17,6 +17,7 @@ from app.schemas import (
     CourseJoinRequest,
     CourseMemberRoleUpdate,
     CourseQuestionReviewUpdate,
+    CourseQuizPublishRequest,
     CourseUpdate,
 )
 from app.services.audit_service import AuditService
@@ -243,6 +244,36 @@ async def course_quizzes(
     db: AsyncSession = Depends(get_db),
 ):
     return await LearningService(db).course_quizzes(current_user.id, course_id)
+
+
+@router.put("/{course_id}/quizzes/{course_quiz_id}")
+async def update_course_quiz(
+    course_id: str,
+    course_quiz_id: str,
+    body: CourseQuizPublishRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await LearningService(db).update_course_quiz(
+        current_user.id,
+        course_id,
+        course_quiz_id,
+        title=body.title,
+        due_at=body.due_at,
+        available_from=body.available_from,
+        answer_visible_at=body.answer_visible_at,
+        attempt_limit=body.attempt_limit,
+        status_value=body.status,
+    )
+    await AuditService(db).log(
+        "course.quiz_update",
+        user_id=current_user.id,
+        resource=f"course_quiz:{course_quiz_id}",
+        request=request,
+        detail=body.model_dump(),
+    )
+    return item
 
 
 @router.get("/{course_id}/question-bank")
