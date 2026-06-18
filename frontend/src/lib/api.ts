@@ -191,10 +191,14 @@ export interface QuizItem {
   latest_attempt?: {
     id: string;
     quiz_id: string;
+    answers?: Record<string, unknown> | unknown[];
     total_score: number | null;
     duration_sec: number | null;
     completed_at: string;
+    attempt_count?: number;
+    diagnostics?: QuizDiagnostic[];
   } | null;
+  attempt_count?: number;
 }
 
 export interface QuizDiagnostic {

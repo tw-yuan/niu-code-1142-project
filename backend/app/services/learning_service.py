@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import (
@@ -212,9 +212,19 @@ class LearningService:
                 include_answers=await self._answers_visible(user_id, course_quiz),
             )
             item["course_publication"] = self._course_quiz_out(course_quiz)
+            answers_visible = await self._answers_visible(user_id, course_quiz)
+            attempt_count = await self._attempt_count(user_id, quiz.id)
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
+            item["attempt_count"] = attempt_count
             item["latest_attempt"] = (
-                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+                self._attempt_summary_out(
+                    latest_attempt,
+                    questions=json.loads(quiz.questions),
+                    include_answers=answers_visible,
+                    attempt_count=attempt_count,
+                )
+                if latest_attempt
+                else None
             )
             by_id[quiz.id] = item
         return sorted(by_id.values(), key=lambda item: str(item["created_at"]), reverse=True)
@@ -229,9 +239,19 @@ class LearningService:
                 include_answers=await self._answers_visible(user_id, course_quiz),
             )
             data["course_publication"] = self._course_quiz_out(course_quiz)
+            answers_visible = await self._answers_visible(user_id, course_quiz)
+            attempt_count = await self._attempt_count(user_id, quiz.id)
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
+            data["attempt_count"] = attempt_count
             data["latest_attempt"] = (
-                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+                self._attempt_summary_out(
+                    latest_attempt,
+                    questions=json.loads(quiz.questions),
+                    include_answers=answers_visible,
+                    attempt_count=attempt_count,
+                )
+                if latest_attempt
+                else None
             )
         return data
 
@@ -319,9 +339,18 @@ class LearningService:
                 ),
                 "course_publication": self._course_quiz_out(course_quiz),
             }
+            attempt_count = await self._attempt_count(user_id, quiz.id)
+            item["attempt_count"] = attempt_count
             latest_attempt = await self._latest_attempt(user_id, quiz.id)
             item["latest_attempt"] = (
-                self._attempt_summary_out(latest_attempt) if latest_attempt else None
+                self._attempt_summary_out(
+                    latest_attempt,
+                    questions=json.loads(quiz.questions),
+                    include_answers=await self._answers_visible(user_id, course_quiz),
+                    attempt_count=attempt_count,
+                )
+                if latest_attempt
+                else None
             )
             items.append(item)
         return items
@@ -711,6 +740,18 @@ class LearningService:
             )
         ).scalar_one_or_none()
 
+    async def _attempt_count(self, user_id: str, quiz_id: str) -> int:
+        return int(
+            (
+                await self.db.execute(
+                    select(func.count())
+                    .select_from(QuizAttempt)
+                    .where(and_(QuizAttempt.user_id == user_id, QuizAttempt.quiz_id == quiz_id))
+                )
+            ).scalar_one()
+            or 0
+        )
+
     async def _get_flashcard(self, user_id: str, card_id: str) -> Flashcard:
         card = (
             await self.db.execute(
@@ -827,10 +868,8 @@ class LearningService:
             .scalars()
             .all()
         )
-        if (
-            course_quiz.attempt_limit is not None
-            and len(attempt_count) >= course_quiz.attempt_limit
-        ):
+        effective_attempt_limit = course_quiz.attempt_limit or 1
+        if len(attempt_count) >= effective_attempt_limit:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Attempt limit reached",
@@ -840,7 +879,7 @@ class LearningService:
             "is_course_quiz": True,
             "is_late": is_late,
             "attempt_number": len(attempt_count) + 1,
-            "attempt_limit": course_quiz.attempt_limit,
+            "attempt_limit": effective_attempt_limit,
             "due_at": course_quiz.due_at,
         }
 
@@ -869,14 +908,31 @@ class LearningService:
         course, member = row
         return course.owner_id == user_id or member.role in {"instructor", "ta"}
 
-    def _attempt_summary_out(self, attempt: QuizAttempt) -> dict[str, Any]:
-        return {
+    def _attempt_summary_out(
+        self,
+        attempt: QuizAttempt,
+        questions: list[dict[str, Any]] | None = None,
+        include_answers: bool = True,
+        attempt_count: int | None = None,
+    ) -> dict[str, Any]:
+        answers = json.loads(attempt.answers)
+        result = {
             "id": attempt.id,
             "quiz_id": attempt.quiz_id,
+            "answers": answers,
             "total_score": attempt.total_score,
             "duration_sec": attempt.duration_sec,
             "completed_at": attempt.completed_at,
         }
+        if attempt_count is not None:
+            result["attempt_count"] = attempt_count
+        if questions is not None:
+            result["diagnostics"] = _quiz_diagnostics(
+                questions,
+                answers,
+                include_answers=include_answers,
+            )
+        return result
 
     def _flashcard_out(self, card: Flashcard) -> dict[str, Any]:
         return {

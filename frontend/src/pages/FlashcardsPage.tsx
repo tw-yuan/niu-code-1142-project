@@ -402,10 +402,6 @@ export function FlashcardsPage() {
                 <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
                   {card.back}
                 </div>
-                <AIGeneratedBadge
-                  variant="inline"
-                  text="AI 或使用者建立內容，請自行驗證"
-                />
                 <div className="mt-3 flex flex-wrap gap-2">
                   {[1, 3, 5].map((quality) => (
                     <LoadingButton

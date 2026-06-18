@@ -50,6 +50,18 @@ export function QuizPage() {
     () => quizzes.find((quiz) => quiz.id === id),
     [id, quizzes],
   );
+  const latestAttempt = activeQuiz?.latest_attempt ?? null;
+  const visibleScore = score ?? latestAttempt?.total_score ?? null;
+  const visibleDiagnostics =
+    score !== null ? diagnostics : (latestAttempt?.diagnostics ?? []);
+  const courseAttemptLimit = activeQuiz?.course_publication
+    ? (activeQuiz.course_publication.attempt_limit ?? 1)
+    : null;
+  const attemptCount =
+    latestAttempt?.attempt_count ?? activeQuiz?.attempt_count ?? 0;
+  const hasReachedAttemptLimit =
+    courseAttemptLimit !== null && attemptCount >= courseAttemptLimit;
+  const shouldLockQuiz = Boolean(latestAttempt && hasReachedAttemptLimit);
   const activeDocIds = docIds.length > 0 ? docIds : docId ? [docId] : [];
   const documentIds = documents.map((doc) => doc.id);
   const allDocumentsSelected =
@@ -118,6 +130,13 @@ export function QuizPage() {
     setScore(null);
     setDiagnostics([]);
   }, [id]);
+
+  useEffect(() => {
+    if (!latestAttempt) return;
+    setAnswers(normalizeAttemptAnswers(latestAttempt.answers));
+    setScore(null);
+    setDiagnostics([]);
+  }, [latestAttempt?.id]);
 
   async function generate() {
     if (activeDocIds.length === 0 || user?.quota_status === "exceeded") return;
@@ -536,6 +555,17 @@ export function QuizPage() {
                   )}
                 </div>
               )}
+              {latestAttempt && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  已完成作答，分數：
+                  {Math.round(Number(latestAttempt.total_score ?? 0) * 100)}%
+                  {courseAttemptLimit !== null && (
+                    <span className="ml-2">
+                      作答次數 {attemptCount} / {courseAttemptLimit}
+                    </span>
+                  )}
+                </div>
+              )}
               {activeQuiz.questions.map((question, index) => (
                 <div
                   key={index}
@@ -556,6 +586,7 @@ export function QuizPage() {
                           name={`q-${index}`}
                           value={option}
                           checked={answers[String(index)] === option}
+                          disabled={shouldLockQuiz}
                           onChange={(event) =>
                             setAnswers((prev) => ({
                               ...prev,
@@ -567,9 +598,9 @@ export function QuizPage() {
                       </label>
                     ))}
                   </div>
-                  {score !== null && (
+                  {visibleScore !== null && (
                     <QuestionDiagnostic
-                      diagnostic={diagnostics.find(
+                      diagnostic={visibleDiagnostics.find(
                         (item) => item.question_index === index,
                       )}
                       question={question}
@@ -577,17 +608,19 @@ export function QuizPage() {
                   )}
                 </div>
               ))}
-              <LoadingButton
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                loading={submitting}
-                loadingText="提交中"
-                icon={<CheckCircle2 size={16} />}
-              >
-                提交
-              </LoadingButton>
-              {score !== null && (
+              {!shouldLockQuiz && (
+                <LoadingButton
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  loading={submitting}
+                  loadingText="提交中"
+                  icon={<CheckCircle2 size={16} />}
+                >
+                  提交
+                </LoadingButton>
+              )}
+              {visibleScore !== null && (
                 <span className="ml-3 text-sm font-medium text-indigo-700">
-                  分數：{Math.round(score * 100)}%
+                  分數：{Math.round(visibleScore * 100)}%
                 </span>
               )}
             </form>
@@ -618,6 +651,23 @@ function hasQuizDocumentScope(search: string) {
   return Boolean(params.get("doc") || params.get("docs"));
 }
 
+function normalizeAttemptAnswers(
+  source: Record<string, unknown> | unknown[] | undefined,
+) {
+  if (!source) return {};
+  if (Array.isArray(source)) {
+    return Object.fromEntries(
+      source.map((value, index) => [String(index), String(value ?? "")]),
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [
+      String(key),
+      String(value ?? ""),
+    ]),
+  );
+}
+
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 16);
@@ -638,6 +688,9 @@ function QuestionDiagnostic({
 }) {
   const isCorrect = diagnostic?.is_correct;
   const explanation = diagnostic?.explanation ?? question.explanation;
+  const answer = diagnostic?.answer ?? question.answer;
+  const hasAnswer =
+    answer !== undefined && answer !== null && String(answer).trim() !== "";
   return (
     <div
       className={[
@@ -646,9 +699,11 @@ function QuestionDiagnostic({
       ].join(" ")}
     >
       <div className="font-medium">{isCorrect ? "答對" : "需複習"}</div>
-      <div className="mt-1">
-        答案：{String(diagnostic?.answer ?? question.answer ?? "")}
-      </div>
+      {hasAnswer ? (
+        <div className="mt-1">答案：{String(answer)}</div>
+      ) : (
+        <div className="mt-1">答案尚未開放</div>
+      )}
       {diagnostic?.submitted_answer !== undefined && (
         <div className="mt-1">
           你的答案：{String(diagnostic.submitted_answer ?? "未作答")}

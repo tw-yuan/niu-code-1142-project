@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from app.services.learning_service import LearningService, _score_quiz
 
 
@@ -57,3 +59,31 @@ async def test_save_flashcards_defaults_single_doc_source():
     )
 
     assert cards[0].doc_id == "doc-1"
+
+
+def test_attempt_summary_includes_answers_count_and_hidden_diagnostics():
+    svc = LearningService(RecordingDB())
+    attempt = SimpleNamespace(
+        id="attempt-1",
+        quiz_id="quiz-1",
+        answers='{"0": "A", "1": "C"}',
+        total_score=0.5,
+        duration_sec=42,
+        completed_at="2026-06-18T00:00:00+00:00",
+    )
+
+    result = svc._attempt_summary_out(
+        attempt,
+        questions=[
+            {"question": "Q1", "answer": "A", "explanation": "E1"},
+            {"question": "Q2", "answer": "B", "explanation": "E2"},
+        ],
+        include_answers=False,
+        attempt_count=1,
+    )
+
+    assert result["answers"] == {"0": "A", "1": "C"}
+    assert result["attempt_count"] == 1
+    assert result["diagnostics"][0]["is_correct"] is True
+    assert result["diagnostics"][0]["answer"] is None
+    assert result["diagnostics"][1]["submitted_answer"] == "C"
