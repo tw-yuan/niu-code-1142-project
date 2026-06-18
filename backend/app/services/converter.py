@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from app.config import settings
@@ -31,24 +32,87 @@ def _office_to_pdf(file_path: Path, tmp_dir: Path) -> Path:
     libreoffice = shutil.which("libreoffice")
     if not libreoffice:
         raise RuntimeError("LibreOffice is not installed")
-    subprocess.run(
-        [
+    errors: list[str] = []
+    for attempt in range(1, 4):
+        attempt_dir = tmp_dir / f"attempt_{attempt}"
+        output_dir = attempt_dir / "out"
+        profile_dir = attempt_dir / "profile"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        command = [
             libreoffice,
+            f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
             "--headless",
+            "--nologo",
+            "--nofirststartwizard",
+            "--nolockcheck",
+            "--nodefault",
             "--convert-to",
             "pdf",
             "--outdir",
-            str(tmp_dir),
+            str(output_dir),
             str(file_path),
-        ],
-        check=True,
-        timeout=120,
-        capture_output=True,
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                timeout=120,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            errors.append(
+                _format_office_error(
+                    attempt,
+                    command,
+                    "timeout",
+                    _as_text(exc.stdout),
+                    _as_text(exc.stderr),
+                )
+            )
+        else:
+            pdfs = list(output_dir.glob("*.pdf"))
+            if result.returncode == 0 and pdfs:
+                return pdfs[0]
+            reason = f"exit code {result.returncode}"
+            if result.returncode == 0:
+                reason = "no PDF produced"
+            errors.append(
+                _format_office_error(
+                    attempt,
+                    command,
+                    reason,
+                    result.stdout,
+                    result.stderr,
+                )
+            )
+        if attempt < 3:
+            time.sleep(attempt)
+    raise RuntimeError("Office conversion failed after 3 attempts:\n" + "\n\n".join(errors))
+
+
+def _format_office_error(
+    attempt: int,
+    command: list[str],
+    reason: str,
+    stdout: str,
+    stderr: str,
+) -> str:
+    return (
+        f"attempt {attempt}: {reason}\n"
+        f"command: {' '.join(command)}\n"
+        f"stdout: {stdout.strip() or '<empty>'}\n"
+        f"stderr: {stderr.strip() or '<empty>'}"
     )
-    pdfs = list(tmp_dir.glob("*.pdf"))
-    if not pdfs:
-        raise RuntimeError("Office conversion did not produce a PDF")
-    return pdfs[0]
+
+
+def _as_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _pdf_to_images(pdf_path: Path, output_dir: Path, dpi: int) -> list[str]:
