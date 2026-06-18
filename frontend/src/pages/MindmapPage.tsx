@@ -265,146 +265,150 @@ export function MindmapPage() {
           {error}
         </div>
       )}
-      <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="space-y-4">
         <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="border-b border-zinc-200 px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
+          <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-zinc-900">
-                  文件清單
+                  選擇文件
                 </h2>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {documentStatuses.length} 個可用文件
-                </p>
+                {loadingList && (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-600" />
+                )}
               </div>
-              {loadingList && (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-600" />
+              <p className="mt-1 text-xs text-zinc-500">
+                {documentStatuses.length} 個可用文件，點選後在下方全寬畫布查看
+              </p>
+            </div>
+            {doc && (
+              <div className="min-w-0 text-sm xl:text-right">
+                <div className="truncate font-medium text-zinc-900">
+                  {doc.filename}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500 xl:justify-end">
+                  <span>
+                    {doc.page_count ?? 0} 頁 · {doc.chunk_count ?? 0} chunks
+                  </span>
+                  {activeStatus && (
+                    <span
+                      className={[
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                        activeStatus.has_mindmap
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-zinc-100 text-zinc-600",
+                      ].join(" ")}
+                    >
+                      {activeStatus.has_mindmap ? "已有心智圖" : "尚未生成"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="overflow-x-auto px-5 py-4">
+            <div className="flex min-w-full gap-3">
+              {documentStatuses.map((item) => {
+                const itemDoc = item.document;
+                const selected = itemDoc.id === activeDocId;
+                return (
+                  <div
+                    key={itemDoc.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectDocument(itemDoc.id)}
+                    onKeyDown={(event) =>
+                      handleDocumentRowKey(event, itemDoc.id)
+                    }
+                    className={[
+                      "grid w-[280px] shrink-0 cursor-pointer gap-3 rounded-lg border px-4 py-3 text-sm outline-none transition hover:border-indigo-200 hover:bg-indigo-50/40 focus-visible:ring-2 focus-visible:ring-indigo-500",
+                      selected
+                        ? "border-indigo-300 bg-indigo-50 shadow-sm"
+                        : "border-zinc-200 bg-white",
+                    ].join(" ")}
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <FileText
+                        size={18}
+                        className="mt-0.5 shrink-0 text-zinc-500"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-zinc-900">
+                          {itemDoc.filename}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {itemDoc.page_count ?? 0} 頁 ·{" "}
+                          {itemDoc.chunk_count ?? 0} chunks
+                          {itemDoc.user_id !== user?.id ? " · 課程共享" : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={documentStatusClass(itemDoc.status)}>
+                        {documentStatusLabel(itemDoc.status)}
+                      </span>
+                      {item.has_mindmap ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                          <CheckCircle2 size={13} />
+                          已有心智圖
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600">
+                          <GitBranch size={13} />
+                          尚未生成
+                        </span>
+                      )}
+                      {item.updated_at && (
+                        <span className="text-xs text-zinc-500">
+                          更新 {formatDateTime(item.updated_at)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {documentStatuses.length === 0 && (
+                <div className="flex min-h-28 min-w-full items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-5 text-center text-sm text-zinc-500">
+                  尚無可用文件
+                </div>
               )}
             </div>
           </div>
-          <div className="divide-y divide-zinc-100">
-            {documentStatuses.map((item) => {
-              const itemDoc = item.document;
-              const selected = itemDoc.id === activeDocId;
-              return (
-                <div
-                  key={itemDoc.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => selectDocument(itemDoc.id)}
-                  onKeyDown={(event) => handleDocumentRowKey(event, itemDoc.id)}
-                  className={[
-                    "grid cursor-pointer gap-3 px-5 py-4 text-sm outline-none hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500",
-                    selected ? "bg-indigo-50/70" : "",
-                  ].join(" ")}
-                >
-                  <div className="flex min-w-0 items-start gap-3">
-                    <FileText
-                      size={18}
-                      className="mt-0.5 shrink-0 text-zinc-500"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-zinc-900">
-                        {itemDoc.filename}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-500">
-                        {itemDoc.page_count ?? 0} 頁 ·{" "}
-                        {itemDoc.chunk_count ?? 0} chunks
-                        {itemDoc.user_id !== user?.id ? " · 課程共享" : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={documentStatusClass(itemDoc.status)}>
-                      {documentStatusLabel(itemDoc.status)}
-                    </span>
-                    {item.has_mindmap ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                        <CheckCircle2 size={13} />
-                        已有心智圖
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600">
-                        <GitBranch size={13} />
-                        尚未生成
-                      </span>
-                    )}
-                    {item.updated_at && (
-                      <span className="text-xs text-zinc-500">
-                        更新 {formatDateTime(item.updated_at)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {documentStatuses.length === 0 && (
-              <div className="px-5 py-12 text-center text-sm text-zinc-500">
-                尚無可用文件
-              </div>
-            )}
-          </div>
         </section>
-        <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-zinc-900">
-                {doc?.filename ?? "尚未選擇文件"}
-              </h2>
-              <p className="mt-1 text-xs text-zinc-500">
-                {doc
-                  ? `${doc.page_count ?? 0} 頁 · ${doc.chunk_count ?? 0} chunks`
-                  : "請先從左側選擇文件"}
-              </p>
-            </div>
-            {activeStatus && (
-              <span
-                className={[
-                  "inline-flex w-fit items-center rounded-full px-2 py-1 text-xs font-medium",
-                  activeStatus.has_mindmap
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "bg-zinc-100 text-zinc-600",
-                ].join(" ")}
-              >
-                {activeStatus.has_mindmap ? "已有心智圖" : "尚未生成"}
-              </span>
-            )}
-          </div>
-          <div className="p-5">
-            {content ? (
-              <div className="space-y-5">
-                <MindmapCanvas
-                  tree={tree}
-                  markdown={content}
-                  artifactId={artifactId ?? undefined}
-                  canAiExpand={
-                    format === "tree_json" && user?.quota_status !== "exceeded"
-                  }
-                  expandingNodeId={expandingNodeId ?? undefined}
-                  onAiExpand={expandNode}
-                />
-                <details className="rounded-lg border border-zinc-200 p-4">
-                  <summary className="cursor-pointer text-sm font-medium text-zinc-700">
-                    查看 Markdown 原文
-                  </summary>
-                  <div className="mt-4">
-                    <MarkdownContent>{content}</MarkdownContent>
-                  </div>
-                </details>
-              </div>
-            ) : (
-              <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 text-center text-sm text-zinc-500">
-                <div>
-                  <GitBranch size={22} className="mx-auto mb-2 text-zinc-400" />
-                  {activeDocId
-                    ? doc?.status === "ready"
-                      ? "這份文件尚無心智圖"
-                      : "文件處理完成後才能生成心智圖"
-                    : "請先從左側選擇文件"}
+        <section className="min-w-0">
+          {content ? (
+            <div className="space-y-5">
+              <MindmapCanvas
+                tree={tree}
+                markdown={content}
+                artifactId={artifactId ?? undefined}
+                canAiExpand={
+                  format === "tree_json" && user?.quota_status !== "exceeded"
+                }
+                expandingNodeId={expandingNodeId ?? undefined}
+                onAiExpand={expandNode}
+              />
+              <details className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+                <summary className="cursor-pointer text-sm font-medium text-zinc-700">
+                  查看 Markdown 原文
+                </summary>
+                <div className="mt-4">
+                  <MarkdownContent>{content}</MarkdownContent>
                 </div>
+              </details>
+            </div>
+          ) : (
+            <div className="flex min-h-[520px] items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-white px-4 text-center text-sm text-zinc-500 shadow-sm">
+              <div>
+                <GitBranch size={22} className="mx-auto mb-2 text-zinc-400" />
+                {activeDocId
+                  ? doc?.status === "ready"
+                    ? "這份文件尚無心智圖"
+                    : "文件處理完成後才能生成心智圖"
+                  : "請先選擇文件"}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
       </div>
     </div>

@@ -14,7 +14,9 @@ import {
   Plus,
   Search,
   Sparkles,
+  X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { MindmapNode, MindmapTree } from "../../lib/api";
 import { LoadingButton } from "./LoadingButton";
 import { MathText } from "./MathText";
@@ -149,7 +151,7 @@ export function MindmapCanvas({
     (selected?.depth ?? 0) < 5;
   const paneHeightClass = isFullscreen
     ? "h-full min-h-0"
-    : "h-[min(70vh,720px)] min-h-[420px]";
+    : "h-[min(74vh,820px)] min-h-[560px]";
 
   return (
     <div
@@ -161,7 +163,7 @@ export function MindmapCanvas({
           : "rounded-lg border border-zinc-200",
       ].join(" ")}
     >
-      <div className="flex flex-col gap-2 border-b border-zinc-200 bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-2 border-b border-zinc-200 bg-white p-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <GitBranch size={17} className="shrink-0 text-indigo-600" />
           <div className="min-w-0">
@@ -180,7 +182,7 @@ export function MindmapCanvas({
               className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400"
             />
             <input
-              className="h-9 w-44 rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              className="h-9 w-44 rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 sm:w-56"
               placeholder="搜尋節點"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -220,11 +222,11 @@ export function MindmapCanvas({
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </IconButton>
           <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm text-zinc-700 hover:bg-zinc-50 lg:hidden"
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm text-zinc-700 hover:bg-zinc-50 xl:hidden"
             onClick={() => setShowOutline((value) => !value)}
           >
             <LocateFixed size={16} />
-            大綱
+            {showOutline ? "關閉詳情" : "節點詳情"}
           </button>
         </div>
       </div>
@@ -235,13 +237,8 @@ export function MindmapCanvas({
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div
-          className={[
-            showOutline ? "hidden lg:block" : "block",
-            "min-w-0 bg-zinc-50",
-          ].join(" ")}
-        >
+      <div className="relative grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="block min-w-0 bg-zinc-50">
           <div className={`${paneHeightClass} overflow-auto p-4`}>
             <svg
               width={layout.width * zoom}
@@ -381,76 +378,50 @@ export function MindmapCanvas({
 
         <aside
           className={[
-            showOutline ? "block" : "hidden lg:block",
-            "border-l border-zinc-200 bg-white",
+            showOutline
+              ? "absolute inset-y-0 right-0 z-10 block w-full max-w-md xl:static xl:w-auto xl:max-w-none"
+              : "hidden xl:block",
+            "border-l border-zinc-200 bg-white shadow-xl xl:shadow-none",
           ].join(" ")}
         >
           <div className={`${paneHeightClass} overflow-auto`}>
-            <div className="border-b border-zinc-200 p-4">
-              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                目前節點
-              </div>
-              <h2 className="mt-1 text-base font-semibold leading-7 text-zinc-900">
-                <MathText>{selected?.title ?? ""}</MathText>
-              </h2>
-              {selected?.summary && (
-                <div className="mt-2 text-sm leading-6 text-zinc-600">
-                  <MathText>{selected.summary}</MathText>
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">
-                  第 {selected?.depth ?? 0} 層
-                </span>
-                <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">
-                  {typeLabel(selected?.type)}
-                </span>
-              </div>
-              {canExpandSelected && (
-                <LoadingButton
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                  disabled={expandingNodeId === selected?.id}
-                  loading={expandingNodeId === selected?.id}
-                  loadingText="展開中"
-                  icon={<Sparkles size={16} />}
-                  onClick={() => selected && onAiExpand?.(selected.id)}
-                >
-                  AI 往下展開
-                </LoadingButton>
-              )}
+            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 xl:hidden">
+              <div className="text-sm font-semibold text-zinc-800">節點詳情</div>
+              <button
+                className="rounded-md p-2 text-zinc-600 hover:bg-zinc-100"
+                onClick={() => setShowOutline(false)}
+                aria-label="關閉節點詳情"
+              >
+                <X size={16} />
+              </button>
             </div>
-            {selected?.source_refs && selected.source_refs.length > 0 && (
-              <div className="border-b border-zinc-200 p-4">
-                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  來源
-                </div>
-                <div className="space-y-2">
-                  {selected.source_refs.map((ref, index) => (
-                    <div
-                      key={`${ref.page_num}-${ref.chunk_index}-${index}`}
-                      className="rounded-md border border-zinc-200 px-3 py-2 text-xs text-zinc-600"
-                    >
-                      {ref.page_num ? `第 ${ref.page_num} 頁` : "來源頁未標示"}
-                      {ref.label ? ` · ${ref.label}` : ""}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="p-4">
-              <div className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
-                大綱
-              </div>
-              <OutlineTree
-                node={parsedTree.root}
-                selectedId={selectedId}
-                collapsed={collapsed}
-                onSelect={setSelectedId}
-                onToggle={toggleNode}
-              />
-            </div>
+            <NodeInfoPanel
+              node={selected}
+              root={parsedTree.root}
+              selectedId={selectedId}
+              collapsed={collapsed}
+              canExpandSelected={canExpandSelected}
+              expanding={expandingNodeId === selected?.id}
+              onAiExpand={() => selected && onAiExpand?.(selected.id)}
+              onSelect={setSelectedId}
+              onToggle={toggleNode}
+            />
           </div>
         </aside>
+      </div>
+      <div className="border-t border-zinc-200 bg-white xl:hidden">
+        <NodeInfoPanel
+          node={selected}
+          root={parsedTree.root}
+          selectedId={selectedId}
+          collapsed={collapsed}
+          canExpandSelected={canExpandSelected}
+          expanding={expandingNodeId === selected?.id}
+          onAiExpand={() => selected && onAiExpand?.(selected.id)}
+          onSelect={setSelectedId}
+          onToggle={toggleNode}
+          compact
+        />
       </div>
     </div>
   );
@@ -512,6 +483,119 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function NodeInfoPanel({
+  node,
+  root,
+  selectedId,
+  collapsed,
+  canExpandSelected,
+  expanding,
+  onAiExpand,
+  onSelect,
+  onToggle,
+  compact = false,
+}: {
+  node: MindmapNode | null;
+  root: MindmapNode;
+  selectedId: string;
+  collapsed: Set<string>;
+  canExpandSelected: boolean;
+  expanding: boolean;
+  onAiExpand: () => void;
+  onSelect: (id: string) => void;
+  onToggle: (node: MindmapNode) => void;
+  compact?: boolean;
+}) {
+  const sourceRefs = node?.source_refs ?? [];
+  return (
+    <div
+      className={
+        compact
+          ? "grid gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]"
+          : ""
+      }
+    >
+      <div className={compact ? "border-b border-zinc-200 p-4 lg:border-b-0 lg:border-r" : "border-b border-zinc-200 p-4"}>
+        <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+          目前節點
+        </div>
+        <h2 className="mt-1 text-base font-semibold leading-7 text-zinc-900">
+          <MathText>{node?.title ?? ""}</MathText>
+        </h2>
+        {node?.summary && (
+          <div className="mt-2 text-sm leading-6 text-zinc-600">
+            <MathText>{node.summary}</MathText>
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">
+            第 {node?.depth ?? 0} 層
+          </span>
+          <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-600">
+            {typeLabel(node?.type)}
+          </span>
+        </div>
+        {canExpandSelected && (
+          <LoadingButton
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-zinc-300 sm:w-auto"
+            disabled={expanding}
+            loading={expanding}
+            loadingText="展開中"
+            icon={<Sparkles size={16} />}
+            onClick={onAiExpand}
+          >
+            AI 往下展開
+          </LoadingButton>
+        )}
+      </div>
+      <div
+        className={
+          compact && sourceRefs.length > 0
+            ? "grid gap-0 md:grid-cols-2 lg:block"
+            : ""
+        }
+      >
+        {sourceRefs.length > 0 && (
+          <div className="border-b border-zinc-200 p-4 md:border-r lg:border-r-0">
+            <PanelTitle>來源</PanelTitle>
+            <div className="mt-2 space-y-2">
+              {sourceRefs.map((ref, index) => (
+                <div
+                  key={`${ref.page_num}-${ref.chunk_index}-${index}`}
+                  className="rounded-md border border-zinc-200 px-3 py-2 text-xs text-zinc-600"
+                >
+                  {ref.page_num ? `第 ${ref.page_num} 頁` : "來源頁未標示"}
+                  {ref.label ? ` · ${ref.label}` : ""}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="p-4">
+          <PanelTitle>大綱</PanelTitle>
+          <div className="mt-2 max-h-80 overflow-auto pr-1">
+            <OutlineTree
+              node={root}
+              selectedId={selectedId}
+              collapsed={collapsed}
+              onSelect={onSelect}
+              onToggle={onToggle}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PanelTitle({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+      {children}
+    </div>
   );
 }
 

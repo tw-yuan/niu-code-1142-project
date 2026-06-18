@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { wsManager } from "../../lib/ws";
 import { useAuthStore } from "../../store/auth";
 
@@ -104,8 +104,10 @@ const mobilePrimaryItems = [
 export function AppLayout() {
   const { user, logout, loadMe } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
+  const wideWorkspace = location.pathname.startsWith("/mindmap");
   const navSections = navSectionsForRole(user?.role);
   const mobileMoreSections = navSections
     .map((section) => ({
@@ -197,7 +199,12 @@ export function AppLayout() {
         </div>
       </aside>
       <main className="md:pl-64">
-        <div className="mx-auto min-h-screen max-w-7xl px-4 pb-24 pt-5 sm:px-6 md:pb-5 lg:px-8">
+        <div
+          className={[
+            "mx-auto min-h-screen px-4 pb-24 pt-5 sm:px-6 md:pb-5 lg:px-8",
+            wideWorkspace ? "max-w-none" : "max-w-7xl",
+          ].join(" ")}
+        >
           {user && user.quota_status !== "ok" && (
             <div
               className={[

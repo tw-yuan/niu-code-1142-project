@@ -519,7 +519,7 @@ data: {"type":"chunk","content":"..."}
 7. 使用者展開節點時，系統用節點 path 做 focused retrieval，再要求 LLM 只產生該節點子節點。
 8. 後端把新 children append 到原 tree，並用 `mindmap_patch` event 回傳。
 
-初始心智圖生成的主要入口是 `POST /mindmap/jobs`，同樣透過 `generation_tasks` 與 Celery 保存執行狀態與進度。worker 完成後會把 tree JSON 存為 `LearningArtifact(kind="mindmap_tree")`，並將 tree、markdown content 與 artifact id 寫入 task output。`GET /mindmap` 回傳目前使用者可存取文件與該使用者是否已為各文件生成心智圖，MindmapPage 以檔案瀏覽器式清單呈現文件、ready/處理狀態、個人或課程共享來源、心智圖存在狀態與更新時間；點選文件後右側顯示既有心智圖或生成入口。節點展開仍使用 SSE，因為它是開啟頁面後針對單一節點的即時互動操作。
+初始心智圖生成的主要入口是 `POST /mindmap/jobs`，同樣透過 `generation_tasks` 與 Celery 保存執行狀態與進度。worker 完成後會把 tree JSON 存為 `LearningArtifact(kind="mindmap_tree")`，並將 tree、markdown content 與 artifact id 寫入 task output。`GET /mindmap` 回傳目前使用者可存取文件與該使用者是否已為各文件生成心智圖，MindmapPage 以橫向檔案瀏覽器呈現文件、ready/處理狀態、個人或課程共享來源、心智圖存在狀態與更新時間；點選文件後下方以全寬心智圖畫布顯示既有心智圖或生成入口。心智圖頁使用 `AppLayout` 的 full-width workspace，避免被一般頁面的 `max-w-7xl` 壓縮。`MindmapCanvas` 在桌面顯示右側節點詳情、來源與階層大綱；因文件清單已移到上方，畫布不再被三欄同時擠壓。窄螢幕會把同一份節點資訊固定放在畫布下方，並保留「節點詳情」抽屜作為快速查看入口。節點展開仍使用 SSE，因為它是開啟頁面後針對單一節點的即時互動操作。
 
 ### 10.4 閃卡
 
